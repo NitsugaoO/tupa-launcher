@@ -33,15 +33,22 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
+    let cfg = config::Config::load()?;
+
     // 常驻守护进程：全局热键 + 面板窗口管理
     if args.iter().any(|a| a == "--daemon") {
         #[cfg(windows)]
-        return daemon::run(args.iter().any(|a| a == "--debug"));
+        {
+            let hotkey = daemon::parse_hotkey(&cfg.daemon.hotkey)?;
+            return daemon::run(
+                &hotkey,
+                cfg.daemon.copilot_key,
+                args.iter().any(|a| a == "--debug"),
+            );
+        }
         #[cfg(not(windows))]
         anyhow::bail!("--daemon 目前只在 Windows 上实现");
     }
-
-    let cfg = config::Config::load()?;
 
     // 自检：把配置里每个 app 能否解析出来列一遍
     if args.iter().any(|a| a == "--check") {
@@ -148,7 +155,8 @@ term-palette —— 命令式启动器
   term-palette                     启动 TUI
   term-palette --query \"ev 报告\"   不进界面，把结果打到 stdout
   term-palette --check             检查 config.toml 里每个 app 能否解析
-  term-palette --daemon            常驻：监听 Win+S，唤起/隐藏面板
+  term-palette --daemon            常驻：监听到热键就唤起/隐藏面板
+                                     （热键在 config.toml 的 [daemon] hotkey 里改）
   term-palette --help              显示本帮助
 
 输入语法:

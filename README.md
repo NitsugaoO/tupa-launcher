@@ -28,29 +28,39 @@ cargo build --release
 需要 `es.exe`（Everything 的命令行）—— 自动探测，探测不到就不注册 `ev`。
 Everything 本体没装的话，`ev` 会用不了，其余功能正常。
 
-## 全局热键（Win+S）
+## 全局热键
 
 ```bash
-./target/release/term-palette.exe --daemon    # 常驻，占用 Win+S
+./target/release/term-palette.exe --daemon    # 常驻
 ```
 
-按 `Win+S` 唤起面板（居中显示在工作区偏上位置），**再按一次隐藏**；
-选完应用后面板自己退出，下次按热键重新拉起。
+两个热键，任选（都可在 `config.toml` 的 `[daemon]` 里改）：
+
+| 热键 | 怎么来的 |
+|---|---|
+| **`Alt+`` `** | `RegisterHotKey` 注册（默认值） |
+| **`Copilot 键`** | 低级键盘钩子拦 `F23`（`copilot_key = true` 才启用） |
+
+按一下唤起、再按一下隐藏；选完应用后面板自己退出，下次热键重新拉起。
 
 已配置开机自启：启动文件夹里的 `term-palette-daemon.lnk`。
 想停掉就 `taskkill /IM term-palette.exe /F`，或删掉那个快捷方式。
 
-> 为什么不用 Windows Terminal 自带的 `globalSummon`？
-> 它用的是 `RegisterHotKey`，而**带 Win 键的快捷键被系统保留**，注册会静默失败；
-> 而且 WT 1.24 的 `globalSummon` 也不支持指定 `commandline` / `profile`，
-> 召唤出来的窗口只会跑默认 profile。所以 `--daemon` 用**低级键盘钩子**
-> （`WH_KEYBOARD_LL`）自己拦下 Win+S。
->
-> 拦下之后还要做一件事：只 `return 1` 只能阻止按键进入消息队列，
-> 但 `GetAsyncKeyState` 这类**异步按键状态依旧是“按下”**，而 shell 的 Win+S
-> 检测走的正是异步状态 —— 所以还会主动注入 LWIN/S 的抬起事件把它抹平。
-> （PowerToys Keyboard Manager 映射 Win 组合键时也是这个做法。）
->
+### 为什么不用裸 `Win+S`
+
+试过，是个死结（完整推理见 [`docs/02-design.md`](docs/02-design.md) §6）：
+`Win+S` 是系统保留键 → `RegisterHotKey` 注册不了 → 换低级键盘钩子能吞掉按键，
+但 shell 判断 Win+S 看的是**异步按键状态**（`GetAsyncKeyState`），吞按键拦不住 →
+注入假抬起把异步状态抹平，shell 又认为「只按了一下 Win 键」而弹出开始菜单 →
+要阻止开始菜单就得吞掉真实的 Win 抬起，而那样**系统的 Win 键会一直处于按下状态**：
+打字全大写（Shift 同理）、点任务栏变成 `Win+点击`、Win 键失去响应。
+
+而 `Alt+`` ` 这类组合不在系统保留范围内，`RegisterHotKey` 直接就能注册，
+于是完全不需要钩子，也就没有钩子超时、修饰键卡死这些坑。
+Copilot 键是个例外（它的原样组合被 shell 占着），但用钩子**只拦 F23 这一个键**、
+
+不碰任何修饰键，风险可控。
+
 > 面板窗口的位置和尺寸不在守护进程里算，而是交给窗口管理器：
 > GlazeWM 的 `window_rules` 里有一条 `set-floating` +
 > `size --width 62% --height 55%` + `position --centered`。

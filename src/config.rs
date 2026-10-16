@@ -9,13 +9,42 @@ use serde::Deserialize;
 
 use crate::theme::ThemeOverrides;
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Default)]
 #[serde(default)]
-#[derive(Default)]
 pub struct Config {
     pub general: General,
+    pub daemon: Daemon,
     pub theme: ThemeOverrides,
     pub apps: Vec<AppEntry>,
+}
+
+/// `[daemon]` —— 常驻守护进程的设置
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct Daemon {
+    /// 唤起/隐藏面板的全局热键，写法形如 `alt+``
+    ///
+    /// 支持 `ctrl` / `alt` / `shift` / `win` 四个修饰键，主键可以是字母、数字、
+    /// `f1`..`f24`、`space`、`tab`、`enter`、`esc`、`` ` ``。
+    ///
+    /// 注意：**不要用裸 `Win+单个字母`**（如 `win+s`）—— 那是系统保留键，
+    /// 注册不上（详细原因见 `daemon.rs` 开头的注释）。
+    pub hotkey: String,
+
+    /// 是否接管 **Copilot 键**（`Win+Shift+F23`）。
+    ///
+    /// 这个键的原样组合被 shell 占着，`RegisterHotKey` 注册不了，
+    /// 所以要走低级键盘钩子拦下 `F23`；不想要就设 `false`。
+    pub copilot_key: bool,
+}
+
+impl Default for Daemon {
+    fn default() -> Self {
+        Daemon {
+            hotkey: "alt+`".to_string(),
+            copilot_key: true,
+        }
+    }
 }
 
 

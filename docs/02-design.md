@@ -97,43 +97,61 @@ es.exe -n (max*8, 上限 400)   ← 多拉候选
 
 `ext:pdf`、`folder:` 这类 Everything 语法不参与打分（它们不是"词"）。
 
-## 6. 全局热键：为什么是自己写守护进程
+## 6. 全局热键：三次踩坑后的结论
 
-最初打算用 Windows Terminal 的 Quake 模式 / `globalSummon`，实测后放弃，两个原因：
+**结论：主热键用 `Alt+`` `（`RegisterHotKey`），Copilot 键（`Win+Shift+F23`）用低级钩子但只拦 `F23`。**
 
-1. **`RegisterHotKey` 抢不到 Win 键组合**。
-   [微软文档](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-registerhotkey)明确写着
-   “涉及 Windows 键的快捷键由操作系统保留”，而 shell 已经用同一个 API 注册了 Win+S。
-   PowerToys 能做到是因为它走的是**低级键盘钩子**，不是 `RegisterHotKey`。
+### 为什么不用 Windows Terminal 的 `globalSummon`
+
+1. **`RegisterHotKey` 注册不了裸 `Win+S`**：[微软文档](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-registerhotkey)写着
+   “涉及 Windows 键的快捷键由操作系统保留”，而 shell 已经用同一个 API 注册了它。
 2. **WT 1.24 的 `GlobalSummonAction` 只有 5 个参数**
    （`name` / `desktop` / `monitor` / `dropdownDuration` / `toggleVisibility`，见官方 schema），
-   **没有 `commandline` 也没有 `profile`** —— 召唤出来的窗口只会跑默认 profile（一个 PowerShell），
-   没法让它跑 term-palette。
+   **没有 `commandline` 也没有 `profile`** —— 召唤出来的窗口只会跑默认 profile，没法让它跑 term-palette。
 
-所以 `--daemon` 自己做两件事：
+### 为什么最后放弃了抟裸 `Win+S`
+
+试过，是个死结：
+
+| 步骤 | 目的 | 实际结果 |
+|---|---|---|
+| 1. `WH_KEYBOARD_LL` 吞掉 `S` | 不让系统打开搜索 | 搜索照开 —— shell 判定用的是**异步按键状态**（`GetAsyncKeyState`），不走钩子链 |
+| 2. 注入 `LWIN`/`S` 的假抬起 | 把异步状态抹平 | 搜索不弹了，但 shell 认为“只按了一下 Win 键” → **开始菜单弹出** |
+| 3. 吞掉真实的修饰键抬起 | 阻止开始菜单 | **系统认为 Win / Shift 一直按着** —— 打字全大写、点任务栏变成 `Win+点击`、Win 键失去响应 |
+
+第 3 步是灾难性的，已经回滚。**任何含修饰键的组合都不能用“吞修饰键抬起”这个手段**，
+因为修饰键的状态是全局的、跳进程共享的。
+
+所以：不抢系统保留键，改用 `Alt+`` ` 这类不被保留的组合；`RegisterHotKey` 直接就能注册，
+连钩子都不需要。Copilot 键是个例外（它的原样组合 `Win+Shift+F23` 被 shell 占着），
+但钩子里**只拦 `F23` 这一个非修饰键**，不碰任何修饰键，风险可控。
+
+### 另外几个坑（都真实发生过）
+
+- **钩子超时**：低级钩子有 300ms 超时 —— 钩子所在线程一忙（写日志、启动进程、
+  `SetForegroundWindow`），Windows 就直接跳过这个钩子，按键漏给 shell。
+  这正是“有时拦住、有时拦不住”的来源。修法：钩子回调**零 IO**
+  （日志走 channel 交给专用线程）+ 窗口操作丢给独立线程。
+- **`FreeConsole()` 之后 `Command::spawn` 报“句柄无效 (os error 6)”**：守护进程脱离控制台后
+  stdin/stdout/stderr 失效，子进程继承这些句柄会让 `CreateProcess` 直接失败
+  （表现为 spawn 返回 `Ok` 但窗口一个都没出现）。修法：改用 `ShellExecuteW`。
+- **hwnd 不能用 `AtomicU32` 存**：64 位下 `HWND` 是指针，会截断。
+- **枚举窗口而非精确匹配标题**：WT 的窗口标题可能是 `term-palette`、
+  `term-palette - PowerShell` 等多种形式。
+
+### 现在的流程
 
 ```
-低级键盘钩子（WH_KEYBOARD_LL）              主线程消息循环
-  Win+S 按下                                  │
-  ├─ PostThreadMessageW ────────────────────►├─ 找面板窗口（类名 + 标题）
-  └─ return 1（吞掉按键，系统搜索不会弹出）   │   ├─ 找到 → 可见且前台？隐藏 : 显示+置前
-                                              │   └─ 没有 → wt -p term-palette 启动，
-                                              │            等窗口出现后用 SetWindowPos 摆到工作区中央
+RegisterHotKey("alt+`")                     主线程消息循环（只做转发）
+  ├─ WM_HOTKEY ────────────────────────────►├─ 找面板窗口（类名 + 标题）
+  └─ Copilot 键：低级钩子只拦 F23            │   ├─ 找到 → 可见且前台？隐藏 : 显示+置前
+      └─ WM_PALETTE_TOGGLE ─────────────────┤   └─ 没有 → wt -p term-palette 启动
+                                             └─ 窗口操作在独立线程里做
 ```
 
 窗口靠 **类名 + 标题** 识别：`CASCADIA_HOSTING_WINDOW_CLASS` +
 标题包含 `term-palette`（由 WT profile 的 `tabTitle` 固定）。
 面板退出 → 窗口消失 → 下次热键重新拉起，正好是“呼之即来、用完即走”。
-
-### 踩过的坑
-
-- **`FreeConsole()` 之后 `Command::spawn` 报 “句柄无效 (os error 6)”**：
-  守护进程脱离控制台后 stdin/stdout/stderr 失效，子进程继承这些句柄会让
-  `CreateProcess` 直接失败。修法：`util::detached_command()` 统一给子进程
-  指定 `Stdio::null()`。
-- **hwnd 不能用 `AtomicU32` 存**：64 位下 `HWND` 是指针，会截断。
-- **枚举窗口而非精确匹配标题**：WT 的窗口标题可能是 `term-palette`、
-  `term-palette - PowerShell` 等多种形式。
 
 ## 7. 编码坑（已解决）
 
