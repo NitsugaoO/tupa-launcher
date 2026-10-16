@@ -23,25 +23,26 @@
 //! "呼之即来、用完即走"的效果。
 
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
 
-use windows_sys::Win32::Foundation::{GetLastError, HWND, LPARAM, LRESULT, RECT, WPARAM};
+use windows_sys::Win32::Foundation::{GetLastError, HWND, LPARAM, LRESULT, WPARAM};
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::System::Threading::GetCurrentThreadId;
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
-    GetAsyncKeyState, VK_LWIN, VK_RWIN, VK_S,
+    GetAsyncKeyState, INPUT, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, SendInput, VK_LWIN,
+    VK_RWIN, VK_S,
 };
+use windows_sys::Win32::UI::Shell::ShellExecuteW;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     CallNextHookEx, EnumWindows, GetClassNameW, GetForegroundWindow, GetWindowTextW,
-    IsWindowVisible, KBDLLHOOKSTRUCT, MSG, PostThreadMessageW, SW_HIDE, SW_SHOW, SWP_NOACTIVATE,
-    SWP_NOZORDER, SetForegroundWindow, SetWindowPos, SetWindowsHookExW, ShowWindow,
-    SystemParametersInfoW, WH_KEYBOARD_LL, WM_APP, WM_KEYDOWN, WM_SYSKEYDOWN,
+    IsWindowVisible, KBDLLHOOKSTRUCT, MSG, PostThreadMessageW, SW_HIDE, SW_SHOW, SW_SHOWNORMAL,
+    SetForegroundWindow, SetWindowsHookExW, ShowWindow, WH_KEYBOARD_LL, WM_APP, WM_KEYDOWN,
+    WM_SYSKEYDOWN,
 };
 
-use crate::util;
 
 /// Windows Terminal 的窗口类名
 const WT_CLASS: &str = "CASCADIA_HOSTING_WINDOW_CLASS";
@@ -53,18 +54,17 @@ const PANEL_PROFILE: &str = "term-palette";
 /// 钩子回调只投递这个消息，真正的窗口操作放到主线程做
 const WM_PALETTE_TOGGLE: u32 = WM_APP + 1;
 
-/// 面板占工作区的比例
-const WIDTH_RATIO: f32 = 0.62;
-const HEIGHT_RATIO: f32 = 0.55;
-/// 垂直位置：偏上一些更像"从顶部呼出"的命令面板
-const TOP_RATIO: f32 = 3.0;
+/// 注入事件的自标识，用于区分“我们自己注入的”和“别的程序注入的”
+const SELF_INJECT_MARK: usize = 0x7465_726d; // "term"
+/// 事件的 LLKHF_INJECTED 标志位
+const LLKHF_INJECTED: u32 = 0x0000_0010;
 
 /// 安装钩子的线程 ID（钩子回调在这个线程上跑）
 static THREAD_ID: AtomicU32 = AtomicU32::new(0);
 /// 防抖：按住 Win+S 会连续产生 keydown
 static LAST_TRIGGER: Mutex<Option<Instant>> = Mutex::new(None);
-/// 诊断开关：设 `TERM_PALETTE_DEBUG_HOOK=1` 时记录钩子看到的事件
-static DEBUG_HOOK: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// 诊断开关：`--debug` 时记录钩子看到的事件
+static DEBUG_HOOK: AtomicBool = AtomicBool::new(false);
 
 pub fn run(debug: bool) -> Result<()> {
     if !is_single_instance() {
@@ -125,12 +125,17 @@ pub fn run(debug: bool) -> Result<()> {
 /// 低级键盘钩子。**必须尽快返回**，所以这里只做判断 + 投递消息。
 unsafe extern "system" fn hook_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     if code >= 0 {
+        // SAFETY: 对低级键盘钩子，lparam 一定指向 KBDLLHOOKSTRUCT
+        let kb = unsafe { &*(lparam as *const KBDLLHOOKSTRUCT) };
+
+        // 自己注入的事件直接放行，否则会把注入的“抬起”当成真实按键重复处理
+        if kb.dwExtraInfo == SELF_INJECT_MARK {
+            return unsafe { CallNextHookEx(std::ptr::null_mut(), code, wparam, lparam) };
+        }
+
         let wparam = wparam as u32;
         let is_keydown = wparam == WM_KEYDOWN || wparam == WM_SYSKEYDOWN;
         let debug = DEBUG_HOOK.load(Ordering::Relaxed);
-
-        // SAFETY: 对低级键盘钩子，lparam 一定指向 KBDLLHOOKSTRUCT
-        let kb = unsafe { &*(lparam as *const KBDLLHOOKSTRUCT) };
 
         // 诊断：Win 键的按下/抬起（不记录普通按键，避免日志爆掉）
         if debug && (kb.vkCode == VK_LWIN as u32 || kb.vkCode == VK_RWIN as u32) {
@@ -143,8 +148,19 @@ unsafe extern "system" fn hook_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -
 
         if is_keydown && kb.vkCode == VK_S as u32 && win_key_held() {
             if debug {
-                log("hook: 命中 Win+S，吞掉按键");
+                log(&format!(
+                    "hook: 命中 Win+S，吞掉按键（injected={}）",
+                    kb.flags & LLKHF_INJECTED != 0
+                ));
             }
+
+            // 光吞掉按键只能阻止它进入消息队列；`GetAsyncKeyState` 这类
+            // **异步按键状态**依旧是“按下”的，而 shell 的 Win+S 检测走的正是它，
+            // 所以还要主动注入抬起事件把异步状态抹平。
+            // （PowerToys Keyboard Manager 映射 Win 组合键时也是这么做的。）
+            inject_key_up(VK_LWIN as u16);
+            inject_key_up(VK_S as u16);
+
             // 不管是不是重复触发，都要吞掉，否则系统会弹出搜索面板
             if !recently_triggered() {
                 unsafe {
@@ -165,6 +181,22 @@ unsafe extern "system" fn hook_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -
 
 fn win_key_held() -> bool {
     unsafe { GetAsyncKeyState(VK_LWIN as i32) < 0 || GetAsyncKeyState(VK_RWIN as i32) < 0 }
+}
+
+/// 注入一个按键抬起事件（带自标识，避免自己的钩子重复处理）
+fn inject_key_up(vk: u16) {
+    let mut input: INPUT = unsafe { std::mem::zeroed() };
+    input.r#type = INPUT_KEYBOARD;
+    input.Anonymous.ki = KEYBDINPUT {
+        wVk: vk,
+        wScan: 0,
+        dwFlags: KEYEVENTF_KEYUP,
+        time: 0,
+        dwExtraInfo: SELF_INJECT_MARK,
+    };
+    unsafe {
+        SendInput(1, &mut input, std::mem::size_of::<INPUT>() as i32);
+    }
 }
 
 fn recently_triggered() -> bool {
@@ -247,75 +279,33 @@ unsafe extern "system" fn enum_panel_proc(hwnd: HWND, _lparam: LPARAM) -> i32 {
     1
 }
 
-/// 启动面板窗口。窗口是异步出现的，所以另起一个线程等它出现后把它摆到屏幕中央。
+/// 启动面板窗口。
+///
+/// 用 `ShellExecuteW` 而不是 `CreateProcess`：守护进程调用过 `FreeConsole()`，
+/// 自身已经没有控制台了，而 `wt.exe` 是控制台程序 —— 直接 spawn 会“启动成功”
+/// 但根本不创建窗口（实测日志里 spawn 返回 Ok，窗口却一个都没出现）。
+/// ShellExecute 走 shell 的启动路径，不依赖调用者的控制台。
 fn launch_panel() {
-    match util::detached_command("wt.exe")
-        .args(["-p", PANEL_PROFILE])
-        .spawn()
-    {
-        Ok(child) => log(&format!("已启动 wt.exe (pid {})", child.id())),
-        Err(e) => {
-            log(&format!("启动 wt.exe 失败: {e}"));
-            return;
-        }
-    }
+    let operation = wide("open");
+    let file = wide("wt.exe");
+    let parameters = wide(&format!("-p {PANEL_PROFILE}"));
 
-    std::thread::spawn(|| {
-        for _ in 0..80 {
-            std::thread::sleep(Duration::from_millis(50));
-            let hwnd = find_panel();
-            if hwnd.is_null() {
-                continue;
-            }
-            // 再等一拍，避开 WT 自己的初始定位/动画
-            std::thread::sleep(Duration::from_millis(200));
-            let hwnd = find_panel();
-            if hwnd.is_null() {
-                return;
-            }
-            center_on_work_area(hwnd);
-            unsafe { SetForegroundWindow(hwnd) };
-            return;
-        }
-    });
-}
-
-/// 把窗口摆到工作区中央（排除任务栏 / 状态栏占用的区域）
-fn center_on_work_area(hwnd: HWND) {
-    let mut work = RECT::default();
-    let ok = unsafe {
-        SystemParametersInfoW(
-            0x0030, // SPI_GETWORKAREA
-            0,
-            &mut work as *mut RECT as *mut core::ffi::c_void,
-            0,
-        )
-    };
-    if ok == 0 {
-        return;
-    }
-
-    let area_w = work.right - work.left;
-    let area_h = work.bottom - work.top;
-    if area_w <= 0 || area_h <= 0 {
-        return;
-    }
-
-    let w = (area_w as f32 * WIDTH_RATIO) as i32;
-    let h = (area_h as f32 * HEIGHT_RATIO) as i32;
-    let x = work.left + (area_w - w) / 2;
-    let y = work.top + (area_h - h) / TOP_RATIO as i32;
-
-    unsafe {
-        SetWindowPos(
-            hwnd,
+    let result = unsafe {
+        ShellExecuteW(
             std::ptr::null_mut(),
-            x,
-            y,
-            w,
-            h,
-            SWP_NOZORDER | SWP_NOACTIVATE,
-        );
+            operation.as_ptr(),
+            file.as_ptr(),
+            parameters.as_ptr(),
+            std::ptr::null(),
+            SW_SHOWNORMAL,
+        )
+    } as isize;
+
+    // ShellExecute 的返回码 <= 32 表示失败
+    if result <= 32 {
+        log(&format!("启动面板失败（ShellExecute 返回 {result}）"));
+    } else {
+        log("已启动面板窗口");
     }
 }
 
@@ -341,6 +331,10 @@ fn is_single_instance() -> bool {
     } else {
         false
     }
+}
+
+fn wide(s: &str) -> Vec<u16> {
+    s.encode_utf16().chain(std::iter::once(0)).collect()
 }
 
 /// 守护进程没有控制台，所以把排查信息写到临时文件

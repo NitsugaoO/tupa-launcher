@@ -44,7 +44,17 @@ Everything 本体没装的话，`ev` 会用不了，其余功能正常。
 > 它用的是 `RegisterHotKey`，而**带 Win 键的快捷键被系统保留**，注册会静默失败；
 > 而且 WT 1.24 的 `globalSummon` 也不支持指定 `commandline` / `profile`，
 > 召唤出来的窗口只会跑默认 profile。所以 `--daemon` 用**低级键盘钩子**
-> （`WH_KEYBOARD_LL`）自己拦下 Win+S，顺带管理面板窗口的定位。
+> （`WH_KEYBOARD_LL`）自己拦下 Win+S。
+>
+> 拦下之后还要做一件事：只 `return 1` 只能阻止按键进入消息队列，
+> 但 `GetAsyncKeyState` 这类**异步按键状态依旧是“按下”**，而 shell 的 Win+S
+> 检测走的正是异步状态 —— 所以还会主动注入 LWIN/S 的抬起事件把它抹平。
+> （PowerToys Keyboard Manager 映射 Win 组合键时也是这个做法。）
+>
+> 面板窗口的位置和尺寸不在守护进程里算，而是交给窗口管理器：
+> GlazeWM 的 `window_rules` 里有一条 `set-floating` +
+> `size --width 62% --height 55%` + `position --centered`。
+> 没跑 GlazeWM 时窗口就用 Windows Terminal 自己的默认位置。
 
 ## 用法
 
@@ -63,7 +73,7 @@ Everything 本体没装的话，`ev` 会用不了，其余功能正常。
 | `Ctrl+R` / `Alt+Enter` | 在文件资源管理器里定位 |
 | `Tab` | 补全关键字（`ev` → `ev `） |
 | `Ctrl+W` / `Ctrl+U` | 删词 / 清空输入 |
-| `Esc` | 清空输入；输入为空时退出 |
+| `Esc` | **直接关闭面板** |
 
 ## 配置
 
@@ -121,6 +131,7 @@ src/
 
 - [x] **v0.1** `app` + `ev` 两个 provider、主题可覆盖、自定义 app 列表、异步查询
 - [x] **v0.2** 守护进程 + `Win+S` 全局热键 + 居中面板窗口
+- [x] 集成 GlazeWM `window_rules`（浮动/居中/尺寸交给 WM）
 - [ ] 主题并入 `~/Themes/generator/generate.py` 流水线（在 `~/.config/term-palette/theme.toml` 里生成）
 - [ ] `go <目录>`（zoxide）、`run <命令>`、`hist`（历史记录搜索）
 - [ ] 智能识别并打开文件夹（`PathPal` 的 "字面 → 祖先回退 → Everything 兜底" 三级策略）
