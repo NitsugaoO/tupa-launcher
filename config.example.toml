@@ -1,0 +1,72 @@
+# term-palette 配置示例
+# 实际路径：~/.config/term-palette/config.toml
+#     即 C:\Users\<你>\.config\term-palette\config.toml
+
+[general]
+# 输入不带关键字时，交给哪个 provider（app / ev）
+default_provider = "app"
+# 单个 provider 最多返回多少条
+max_results = 30
+# es.exe 路径；留空自动探测（PATH → %LOCALAPPDATA%\Everything → Program Files）
+# everything_path = 'C:\Users\Agustin\AppData\Local\Everything\es.exe'
+
+# ---------------------------------------------------------------------------
+# 应用列表（需求 R4：最常用的功能，列表自己说了算）
+#
+# 顺序 = 空输入时的显示顺序，把最常用的放前面即可。
+#   name      列表里显示的名字
+#   command   要执行的命令：绝对路径 / PATH 里的命令名 / URL 都行
+#   args      额外参数（可选）
+#   keywords  额外别名，参与模糊匹配（可选）
+# ---------------------------------------------------------------------------
+
+[[apps]]
+name = "终端 (Windows Terminal)"
+command = "wt"
+
+[[apps]]
+name = "文件资源管理器"
+command = "explorer"
+
+[[apps]]
+name = "Visual Studio Code"
+command = "code"
+keywords = ["vsc", "vs"]
+
+[[apps]]
+name = "Firefox"
+command = "firefox"
+
+[[apps]]
+name = "Everything"
+command = "everything"
+
+[[apps]]
+name = "系统设置"
+command = "ms-settings:"
+
+[[apps]]
+name = "任务管理器"
+command = "taskmgr"
+
+# ---------------------------------------------------------------------------
+# 主题色（需求 R2）
+#
+# 不写则使用内置的 Everforest(hard) 默认色。
+# 想整体换色：在 ~/.config/term-palette/theme.toml 里写这些字段即可
+# （独立文件的优先级低于 config.toml 里的同名值）。
+# ---------------------------------------------------------------------------
+
+[theme]
+# background = "#272e33"   # 一级背景
+# panel      = "#2e383c"   # 输入行 / 状态栏底色
+# overlay    = "#374145"   # 选中行底色
+# border     = "#414b50"   # 分隔线
+# fg         = "#d3c6aa"   # 正文
+# muted      = "#9da9a0"   # 次要
+# dim        = "#859289"   # 更淡（徽标）
+# faint      = "#7a8478"   # 最淡（路径、提示）
+# accent     = "#a7c080"   # 强调色
+# good       = "#83c092"   # 成功
+# warn       = "#dbbc7f"   # 警告
+# bad        = "#e67e80"   # 错误

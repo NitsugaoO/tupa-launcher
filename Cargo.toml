@@ -1,0 +1,16 @@
+[package]
+name = "term-palette"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.104"
+crossterm = "0.29.0"
+dirs = "7.0.0"
+encoding_rs = "0.8.42"
+fuzzy-matcher = "0.3.7"
+open = { version = "5.4.4", features = ["shellexecute-on-windows"] }
+ratatui = "0.30.2"
+serde = { version = "1.0.229", features = ["derive"] }
+toml = "1.1.8"
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_UI_Input_KeyboardAndMouse", "Win32_System_LibraryLoader", "Win32_System_Threading", "Win32_System_Console"] }

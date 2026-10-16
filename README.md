@@ -1,0 +1,127 @@
+# term-palette
+
+> 一个**命令式**启动器：`功能 + 空格 + 参数`，跑在终端里。
+>
+> ```text
+> ❯ app vs          → 从列表里启动 Visual Studio Code
+> ❯ ev 报告 2026    → 用 Everything 找这个文件，回车直接打开
+> ```
+>
+> 状态：**v0.1 可用**（2026-10-16）· Rust + ratatui · 替代 PowerToys Command Palette
+> 调研与可行性论证见 [`docs/01-research.md`](docs/01-research.md)，设计决策见 [`docs/02-design.md`](docs/02-design.md)
+
+## 快速开始
+
+```bash
+cd ~/Projects/term-palette
+cargo build --release
+./target/release/term-palette.exe
+```
+
+调试用（不进界面，直接把结果打到 stdout）：
+
+```bash
+./target/release/term-palette.exe --query "ev curl"
+./target/release/term-palette.exe --query "app vsc"
+```
+
+需要 `es.exe`（Everything 的命令行）—— 自动探测，探测不到就不注册 `ev`。
+Everything 本体没装的话，`ev` 会用不了，其余功能正常。
+
+## 全局热键（Win+S）
+
+```bash
+./target/release/term-palette.exe --daemon    # 常驻，占用 Win+S
+```
+
+按 `Win+S` 唤起面板（居中显示在工作区偏上位置），**再按一次隐藏**；
+选完应用后面板自己退出，下次按热键重新拉起。
+
+已配置开机自启：启动文件夹里的 `term-palette-daemon.lnk`。
+想停掉就 `taskkill /IM term-palette.exe /F`，或删掉那个快捷方式。
+
+> 为什么不用 Windows Terminal 自带的 `globalSummon`？
+> 它用的是 `RegisterHotKey`，而**带 Win 键的快捷键被系统保留**，注册会静默失败；
+> 而且 WT 1.24 的 `globalSummon` 也不支持指定 `commandline` / `profile`，
+> 召唤出来的窗口只会跑默认 profile。所以 `--daemon` 用**低级键盘钩子**
+> （`WH_KEYBOARD_LL`）自己拦下 Win+S，顺带管理面板窗口的定位。
+
+## 用法
+
+| 输入 | 行为 |
+|---|---|
+| `app <名字>` | 从自定义列表里启动应用（模糊匹配） |
+| `ev <关键词>` | Everything 搜文件，**支持原生语法**：`ev ext:pdf 报告`、`ev folder:Projects` |
+| `<名字>` | 不带关键字时走默认 provider（当前是 `app`） |
+
+按键：
+
+| 键 | 作用 |
+|---|---|
+| `↑` `↓` / `Ctrl+P` `Ctrl+N` | 移动选择 |
+| `Enter` | 打开文件 / 启动程序（成功后自动退出，把屏幕让出去） |
+| `Ctrl+R` / `Alt+Enter` | 在文件资源管理器里定位 |
+| `Tab` | 补全关键字（`ev` → `ev `） |
+| `Ctrl+W` / `Ctrl+U` | 删词 / 清空输入 |
+| `Esc` | 清空输入；输入为空时退出 |
+
+## 配置
+
+配置文件：`~/.config/term-palette/config.toml`（即 `C:\Users\Agustin\.config\term-palette\config.toml`）
+—— 改完下次启动生效，**不需要重新编译**。
+
+主题色可以写在同一个文件的 `[theme]` 段，或者单独的 `~/.config/term-palette/theme.toml`。
+不写就用内置的 Everforest(hard)，色值与你 `~/Themes/themes/everforest/tokens.yaml` 的角色表对齐：
+
+```
+background panel overlay border fg muted dim faint accent good warn bad
+```
+
+模板见 [`config.example.toml`](config.example.toml)。
+
+## 架构
+
+```
+src/
+├── main.rs              入口 + 事件循环 + --query/--check 调试模式
+├── app.rs               状态机：输入解析、键位、选择、与 worker 通信
+├── ui.rs                纯渲染（无状态）
+├── exec.rs              执行动作：打开文件 / 启动程序 / 定位
+├── daemon.rs            常驻守护进程：低级键盘钩子 + 面板窗口管理（Windows）
+├── config.rs            config.toml 加载
+├── theme.rs             主题：内置默认 + 两层覆盖
+├── util.rs              子进程 / 编码 / PATH 查找
+└── providers/
+    ├── mod.rs           Provider trait、Item/Action、解析、**后台 worker**
+    ├── apps.rs          app —— 自定义应用列表 + 模糊匹配
+    └── everything.rs    ev  —— 调用 es.exe + 本地相关性重排
+```
+
+### 加一个新功能（比如 `go <目录>` 走 zoxide）
+
+1. 在 `src/providers/` 下新建 `zoxide.rs`，实现 `Provider`（`keyword` / `description` / `query` 三个方法）；
+2. 在 `providers/mod.rs` 的 `build()` 里 push 进去。
+
+就这样 —— 不用打包、不用重装、不用改 UI。`query()` 在后台线程里跑，可以放心阻塞。
+
+### 为什么不卡
+
+查询走一个单线程 worker：主线程只发"最新一次请求"，worker 会**丢弃排队中的旧请求**，
+所以快速打字不会堆积一堆 `es.exe` 进程，也不会让 UI 掉帧。
+结果带回一个自增序号，序号过期的直接扔掉。
+
+## 已知限制
+
+- 只在 Windows 上验证过（`exec.rs`、`daemon.rs` 和 `everything.rs` 有 Windows 专属逻辑，其余跨平台）。
+- `es.exe` 通过管道输出的是**系统 ANSI 代码页**（中文系统 = GBK），代码里有 UTF-8 → GBK 的回退解码。
+- 守护进程占用 `Win+S`：这会屏蔽掉系统自带的搜索面板。不想要就删掉启动文件夹里的快捷方式。
+- 面板窗口是 Windows Terminal 窗口，做不到无边框浮层；“居中”是守护进程用 `SetWindowPos` 摆出来的。
+
+## 路线图
+
+- [x] **v0.1** `app` + `ev` 两个 provider、主题可覆盖、自定义 app 列表、异步查询
+- [x] **v0.2** 守护进程 + `Win+S` 全局热键 + 居中面板窗口
+- [ ] 主题并入 `~/Themes/generator/generate.py` 流水线（在 `~/.config/term-palette/theme.toml` 里生成）
+- [ ] `go <目录>`（zoxide）、`run <命令>`、`hist`（历史记录搜索）
+- [ ] 智能识别并打开文件夹（`PathPal` 的 "字面 → 祖先回退 → Everything 兜底" 三级策略）
+- [ ] 使用频率统计，把常用项自动排前（frecency）
