@@ -18,10 +18,21 @@ pub fn run(action: &Action) -> Result<String> {
             Ok(format!("已打开 {}", short_name(path)))
         }
         Action::Reveal(path) => {
-            detached_command("explorer.exe")
-                .arg(format!("/select,{}", path.display()))
-                .spawn()
-                .context("无法启动文件资源管理器")?;
+            let mut cmd = detached_command("explorer.exe");
+
+            // explorer 的 /select 要求**引号只包住路径**：
+            //   explorer.exe /select,"C:\Program Files\Clash Party\Clash Party.exe"
+            // 用 `arg()` 会生成 "/select,C:\..."（引号包了整个参数），explorer 解析不了，
+            // 于是会随手打开一个默认文件夹（比如「文档」）。所以这里用 raw_arg 自己拼。
+            #[cfg(windows)]
+            {
+                use std::os::windows::process::CommandExt;
+                cmd.raw_arg(format!("/select,\"{}\"", path.display()));
+            }
+            #[cfg(not(windows))]
+            cmd.arg(format!("/select,{}", path.display()));
+
+            cmd.spawn().context("无法启动文件资源管理器")?;
             Ok(format!("已定位 {}", short_name(path)))
         }
         Action::Launch {

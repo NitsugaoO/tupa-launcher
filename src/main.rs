@@ -55,6 +55,27 @@ fn main() -> Result<()> {
         return check_config(&cfg);
     }
 
+    // 调试：看 .lnk / 命令会解析成什么（排查快捷键或路径问题）
+    if let Some(pos) = args.iter().position(|a| a == "--resolve") {
+        let target = args.get(pos + 1).cloned().unwrap_or_default();
+        println!("输入 : {target}");
+        println!("存在 : {}", std::path::Path::new(&target).is_file());
+        match util::resolve_executable(&target) {
+            Some(path) => println!("解析 : {}", path.display()),
+            None => println!("解析 : 失败"),
+        }
+        return Ok(());
+    }
+
+    // 调试：直接执行一次“在资源管理器里定位”
+    if let Some(pos) = args.iter().position(|a| a == "--reveal") {
+        let target = args.get(pos + 1).cloned().unwrap_or_default();
+        let path = std::path::PathBuf::from(&target);
+        let message = exec::run(&providers::Action::Reveal(path))?;
+        println!("{message}");
+        return Ok(());
+    }
+
     // 无界面模式：便于测试 provider，也方便以后被别的脚本调用
     if let Some(pos) = args.iter().position(|a| a == "--query") {
         let line = args.get(pos + 1).cloned().unwrap_or_default();
