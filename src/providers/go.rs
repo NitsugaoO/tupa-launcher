@@ -169,10 +169,10 @@ fn normalize(input: &str) -> String {
         if let Some(home) = dirs::home_dir() {
             s = home.display().to_string();
         }
-    } else if let Some(rest) = s.strip_prefix("~\\") {
-        if let Some(home) = dirs::home_dir() {
-            s = format!("{}\\{rest}", home.display());
-        }
+    } else if let Some(rest) = s.strip_prefix("~\\")
+        && let Some(home) = dirs::home_dir()
+    {
+        s = format!("{}\\{rest}", home.display());
     }
 
     // 去掉末尾多余的路径分隔符（`C:\` 这种根路径保留）

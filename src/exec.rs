@@ -170,11 +170,13 @@ fn elevate(file: &str, args: &[String]) -> Result<()> {
         if result <= 32 {
             bail!("提权失败（ShellExecute 返回 {result}）");
         }
-        return Ok(());
+        Ok(())
     }
 
     #[cfg(not(windows))]
-    bail!("提权目前只在 Windows 上支持")
+    {
+        bail!("提权目前只在 Windows 上支持")
+    }
 }
 
 fn short_name(path: &Path) -> String {
