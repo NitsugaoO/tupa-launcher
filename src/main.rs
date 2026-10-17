@@ -1,10 +1,10 @@
-//! term-palette —— 命令式启动器（TUI）
+//! tupa-launcher —— 命令式启动器（TUI）
 //!
 //! 用法：
 //! ```text
-//! term-palette                    启动 TUI
-//! term-palette --query "ev 报告"   不进界面，直接把结果打到 stdout（调试/脚本用）
-//! term-palette --help
+//! tupa-launcher                    启动 TUI
+//! tupa-launcher --query "ev 报告"   不进界面，直接把结果打到 stdout（调试/脚本用）
+//! tupa-launcher --help
 //! ```
 
 mod app;
@@ -190,15 +190,15 @@ fn cli_query(cfg: &config::Config, line: &str) -> Result<()> {
 fn print_help() {
     println!(
         "\
-term-palette —— 命令式启动器
+tupa-launcher —— 命令式启动器
 
 用法:
-  term-palette                     启动 TUI
-  term-palette --query \"ev 报告\"   不进界面，把结果打到 stdout
-  term-palette --check             检查 config.toml 里每个 app 能否解析
-  term-palette --daemon            常驻：监听到热键就唤起/隐藏面板
+  tupa-launcher                     启动 TUI
+  tupa-launcher --query \"ev 报告\"   不进界面，把结果打到 stdout
+  tupa-launcher --check             检查 config.toml 里每个 app 能否解析
+  tupa-launcher --daemon            常驻：监听到热键就唤起/隐藏面板
                                      （热键在 config.toml 的 [daemon] hotkey 里改）
-  term-palette --help              显示本帮助
+  tupa-launcher --help              显示本帮助
 
 输入语法:
   app <名字>      启动应用（列表在 config.toml 的 [[apps]] 里自定义）

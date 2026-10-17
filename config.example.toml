@@ -1,6 +1,6 @@
-# term-palette 配置示例
-# 实际路径：~/.config/term-palette/config.toml
-#     即 C:\Users\<你>\.config\term-palette\config.toml
+# tupa-launcher 配置示例
+# 实际路径：~/.config/tupa-launcher/config.toml
+#     即 C:\Users\<你>\.config\tupa-launcher\config.toml
 
 [general]
 # 输入不带关键字时，交给哪个 provider（app / ev）
@@ -53,7 +53,7 @@ command = "taskmgr"
 # 主题色（需求 R2）
 #
 # 不写则使用内置的 Everforest(hard) 默认色。
-# 想整体换色：在 ~/.config/term-palette/theme.toml 里写这些字段即可
+# 想整体换色：在 ~/.config/tupa-launcher/theme.toml 里写这些字段即可
 # （独立文件的优先级低于 config.toml 里的同名值）。
 # ---------------------------------------------------------------------------
 

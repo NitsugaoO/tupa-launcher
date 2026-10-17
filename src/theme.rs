@@ -2,7 +2,7 @@
 //!
 //! 覆盖顺序（后者优先）：
 //!   1. 内置默认
-//!   2. `~/.config/term-palette/theme.toml`
+//!   2. `~/.config/tupa-launcher/theme.toml`
 //!   3. `config.toml` 里的 `[theme]` 段
 //!
 //! 角色名刻意与 `~/Themes/themes/everforest/tokens.yaml` 对齐，
@@ -98,7 +98,7 @@ impl Theme {
             && let Ok(text) = std::fs::read_to_string(&path) {
                 match toml::from_str::<ThemeOverrides>(&text) {
                     Ok(ov) => theme.apply(&ov),
-                    Err(e) => eprintln!("[term-palette] theme.toml 解析失败：{e}"),
+                    Err(e) => eprintln!("[tupa-launcher] theme.toml 解析失败：{e}"),
                 }
             }
 

@@ -1,4 +1,4 @@
-//! 配置加载：`~/.config/term-palette/config.toml`
+//! 配置加载：`~/.config/tupa-launcher/config.toml`
 //!
 //! 配置不存在时全部走内置默认值（不会自动往用户目录写文件）。
 
@@ -107,9 +107,9 @@ impl Config {
     }
 }
 
-/// `~/.config/term-palette/`（刻意的 Linux 风格路径，便于和 dotfiles 一起管理）
+/// `~/.config/tupa-launcher/`（刻意的 Linux 风格路径，便于和 dotfiles 一起管理）
 pub fn config_dir() -> Option<PathBuf> {
-    Some(dirs::home_dir()?.join(".config").join("term-palette"))
+    Some(dirs::home_dir()?.join(".config").join("tupa-launcher"))
 }
 
 pub fn config_path() -> Option<PathBuf> {

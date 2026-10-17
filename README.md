@@ -1,4 +1,4 @@
-# term-palette
+# Tupa Launcher
 
 > 一个**命令式**启动器：`功能 + 空格 + 参数`，跑在终端里。
 >
@@ -7,22 +7,23 @@
 > ❯ ev 报告 2026    → 用 Everything 找这个文件，回车直接打开
 > ```
 >
-> 状态：**v0.1 可用**（2026-10-16）· Rust + ratatui · 替代 PowerToys Command Palette
+> 状态：**v0.2 可用** · Rust + ratatui · 替代 PowerToys Command Palette
 > 调研与可行性论证见 [`docs/01-research.md`](docs/01-research.md)，设计决策见 [`docs/02-design.md`](docs/02-design.md)
+> 待实现功能的交接设计见 [`docs/03-roadmap.md`](docs/03-roadmap.md)
 
 ## 快速开始
 
 ```bash
-cd ~/Projects/term-palette
+cd ~/Projects/tupa-launcher
 cargo build --release
-./target/release/term-palette.exe
+./target/release/tupa-launcher.exe
 ```
 
 调试用（不进界面，直接把结果打到 stdout）：
 
 ```bash
-./target/release/term-palette.exe --query "ev curl"
-./target/release/term-palette.exe --query "app vsc"
+./target/release/tupa-launcher.exe --query "ev curl"
+./target/release/tupa-launcher.exe --query "app vsc"
 ```
 
 需要 `es.exe`（Everything 的命令行）—— 自动探测，探测不到就不注册 `ev`。
@@ -31,7 +32,7 @@ Everything 本体没装的话，`ev` 会用不了，其余功能正常。
 ## 全局热键
 
 ```bash
-./target/release/term-palette.exe --daemon    # 常驻
+./target/release/tupa-launcher.exe --daemon    # 常驻
 ```
 
 两个热键，任选（都可在 `config.toml` 的 `[daemon]` 里改）：
@@ -45,8 +46,8 @@ Everything 本体没装的话，`ev` 会用不了，其余功能正常。
 有内容时先清空输入；
 `Enter` 启动应用后也是隐藏，把屏幕让出去。选完以后想彻底结束进程按 `Ctrl+C`。
 
-已配置开机自启：启动文件夹里的 `term-palette-daemon.lnk`。
-想停掉就 `taskkill /IM term-palette.exe /F`，或删掉那个快捷方式。
+已配置开机自启：启动文件夹里的 `tupa-launcher-daemon.lnk`。
+想停掉就 `taskkill /IM tupa-launcher.exe /F`，或删掉那个快捷方式。
 
 ### 为什么不用裸 `Win+S`
 
@@ -135,10 +136,10 @@ go D:\Legacy\report.pdf        → 文件：在资源管理器里定位
 
 ## 配置
 
-配置文件：`~/.config/term-palette/config.toml`（即 `C:\Users\<你的用户名>\.config\term-palette\config.toml`）
+配置文件：`~/.config/tupa-launcher/config.toml`（即 `C:\Users\<你的用户名>\.config\tupa-launcher\config.toml`）
 —— 改完下次启动生效，**不需要重新编译**。
 
-主题色可以写在同一个文件的 `[theme]` 段，或者单独的 `~/.config/term-palette/theme.toml`。
+主题色可以写在同一个文件的 `[theme]` 段，或者单独的 `~/.config/tupa-launcher/theme.toml`。
 不写就用内置的 Everforest(hard)。
 
 > 色值与 Everforest 官方色板的角色名对齐。作者本地用一套 `~/Themes` 脚本统一生成
@@ -194,7 +195,7 @@ src/
 - [x] **v0.1** `app` + `ev` 两个 provider、主题可覆盖、自定义 app 列表、异步查询
 - [x] **v0.2** 守护进程 + `Win+S` 全局热键 + 居中面板窗口
 - [x] 集成 GlazeWM `window_rules`（浮动/居中/尺寸交给 WM）
-- [ ] 主题并入 `~/Themes/generator/generate.py` 流水线（在 `~/.config/term-palette/theme.toml` 里生成）
+- [ ] 主题并入 `~/Themes/generator/generate.py` 流水线（在 `~/.config/tupa-launcher/theme.toml` 里生成）
 - [ ] `go <目录>`（zoxide）、`run <命令>`、`hist`（历史记录搜索）
 - [ ] 智能识别并打开文件夹（`PathPal` 的 "字面 → 祖先回退 → Everything 兜底" 三级策略）
 - [ ] 使用频率统计，把常用项自动排前（frecency）

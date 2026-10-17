@@ -181,7 +181,7 @@ pub fn resolve_executable(command: &str) -> Option<PathBuf> {
 pub const WT_CLASS: &str = "CASCADIA_HOSTING_WINDOW_CLASS";
 /// 面板窗口标题（对应 WT profile 的 `tabTitle`）
 #[cfg(windows)]
-pub const PANEL_TITLE: &str = "term-palette";
+pub const PANEL_TITLE: &str = "tupa-launcher";
 
 #[cfg(windows)]
 static FOUND_PANEL: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
@@ -189,8 +189,8 @@ static FOUND_PANEL: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUs
 /// 找面板窗口。
 ///
 /// 不直接用 `FindWindowW(类名, 标题)` 精确匹配：WT 的窗口标题可能是
-/// `term-palette`、`term-palette - PowerShell` 之类的形式，
-/// 所以枚举出所有 Windows Terminal 窗口，按标题是否**包含** `term-palette` 判定。
+/// `tupa-launcher`、`tupa-launcher - PowerShell` 之类的形式，
+/// 所以枚举出所有 Windows Terminal 窗口，按标题是否**包含** `tupa-launcher` 判定。
 #[cfg(windows)]
 pub fn find_panel() -> windows_sys::Win32::Foundation::HWND {
     use std::sync::atomic::Ordering;

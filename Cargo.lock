@@ -1467,23 +1467,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "term-palette"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "crossterm",
- "dirs",
- "encoding_rs",
- "fuzzy-matcher",
- "open",
- "ratatui",
- "serde",
- "toml",
- "windows",
- "windows-sys",
-]
-
-[[package]]
 name = "termina"
 version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1667,6 +1650,23 @@ name = "toml_writer"
 version = "1.1.3+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "06bdbd8cfc056b8d2e2e85f29b56a3bdbecb527cef81eb39e3e7b98af4652770"
+
+[[package]]
+name = "tupa-launcher"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "crossterm",
+ "dirs",
+ "encoding_rs",
+ "fuzzy-matcher",
+ "open",
+ "ratatui",
+ "serde",
+ "toml",
+ "windows",
+ "windows-sys",
+]
 
 [[package]]
 name = "typenum"

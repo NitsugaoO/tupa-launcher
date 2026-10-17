@@ -46,7 +46,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 };
 
 /// 面板使用的 WT profile 名
-const PANEL_PROFILE: &str = "term-palette";
+const PANEL_PROFILE: &str = "tupa-launcher";
 /// 热键 ID（同一个进程里唯一即可）
 const HOTKEY_ID: i32 = 1;
 
@@ -352,7 +352,7 @@ fn launch_panel(debug: bool) {
 /// 单实例：对一个锁文件加独占锁，拿到锁的才是唯一的守护进程。
 /// （文件句柄故意泄漏，锁会一直持有到进程退出。）
 fn is_single_instance() -> bool {
-    let path = std::env::temp_dir().join("term-palette-daemon.lock");
+    let path = std::env::temp_dir().join("tupa-launcher-daemon.lock");
     let Ok(file) = std::fs::OpenOptions::new()
         .write(true)
         .create(true)
@@ -379,7 +379,7 @@ fn spawn_logger() {
     }
 
     std::thread::spawn(move || {
-        let path = std::env::temp_dir().join("term-palette-daemon.log");
+        let path = std::env::temp_dir().join("tupa-launcher-daemon.log");
         let mut file = std::fs::OpenOptions::new()
             .create(true)
             .append(true)

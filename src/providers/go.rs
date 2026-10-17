@@ -3,7 +3,7 @@
 //! 输入可以是这些写法（都能识别）：
 //!
 //! ```text
-//! go ~/Projects/term-palette
+//! go ~/Projects/tupa-launcher
 //! go "C:\Users\<你的用户名>\Projects"
 //! go file:///C:/Users/<你的用户名>/Projects
 //! go projects\term          ← 不完整的路径片段

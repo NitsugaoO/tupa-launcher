@@ -107,7 +107,7 @@ es.exe -n (max*8, 上限 400)   ← 多拉候选
    “涉及 Windows 键的快捷键由操作系统保留”，而 shell 已经用同一个 API 注册了它。
 2. **WT 1.24 的 `GlobalSummonAction` 只有 5 个参数**
    （`name` / `desktop` / `monitor` / `dropdownDuration` / `toggleVisibility`，见官方 schema），
-   **没有 `commandline` 也没有 `profile`** —— 召唤出来的窗口只会跑默认 profile，没法让它跑 term-palette。
+   **没有 `commandline` 也没有 `profile`** —— 召唤出来的窗口只会跑默认 profile，没法让它跑 tupa-launcher。
 
 ### 为什么最后放弃了抟裸 `Win+S`
 
@@ -136,8 +136,8 @@ es.exe -n (max*8, 上限 400)   ← 多拉候选
   stdin/stdout/stderr 失效，子进程继承这些句柄会让 `CreateProcess` 直接失败
   （表现为 spawn 返回 `Ok` 但窗口一个都没出现）。修法：改用 `ShellExecuteW`。
 - **hwnd 不能用 `AtomicU32` 存**：64 位下 `HWND` 是指针，会截断。
-- **枚举窗口而非精确匹配标题**：WT 的窗口标题可能是 `term-palette`、
-  `term-palette - PowerShell` 等多种形式。
+- **枚举窗口而非精确匹配标题**：WT 的窗口标题可能是 `tupa-launcher`、
+  `tupa-launcher - PowerShell` 等多种形式。
 
 ### 现在的流程
 
@@ -145,12 +145,12 @@ es.exe -n (max*8, 上限 400)   ← 多拉候选
 RegisterHotKey("alt+`")                     主线程消息循环（只做转发）
   ├─ WM_HOTKEY ────────────────────────────►├─ 找面板窗口（类名 + 标题）
   └─ Copilot 键：低级钩子只拦 F23            │   ├─ 找到 → 可见且前台？隐藏 : 显示+置前
-      └─ WM_PALETTE_TOGGLE ─────────────────┤   └─ 没有 → wt -p term-palette 启动
+      └─ WM_PALETTE_TOGGLE ─────────────────┤   └─ 没有 → wt -p tupa-launcher 启动
                                              └─ 窗口操作在独立线程里做
 ```
 
 窗口靠 **类名 + 标题** 识别：`CASCADIA_HOSTING_WINDOW_CLASS` +
-标题包含 `term-palette`（由 WT profile 的 `tabTitle` 固定）。
+标题包含 `tupa-launcher`（由 WT profile 的 `tabTitle` 固定）。
 面板退出 → 窗口消失 → 下次热键重新拉起，正好是“呼之即来、用完即走”。
 
 ## 7. 编码坑（已解决）
@@ -166,7 +166,7 @@ RegisterHotKey("alt+`")                     主线程消息循环（只做转发
 现在程序的默认色是硬编码的 Everforest(hard)，与 `tokens.yaml` 一致但**不联动**。
 计划：在 `~/Themes/generator/` 里加一个 `gen_term_palette.py`，
 和生成 VSCode / yasb 主题一样，把 `tokens.yaml` 渲染成
-`~/.config/term-palette/theme.toml`，从而做到"改一次色板，这个面板也跟着变"。
+`~/.config/tupa-launcher/theme.toml`，从而做到"改一次色板，这个面板也跟着变"。
 
 需要的映射（角色名 → 我们的字段）：
 
