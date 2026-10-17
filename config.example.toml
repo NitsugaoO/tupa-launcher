@@ -8,7 +8,7 @@ default_provider = "app"
 # 单个 provider 最多返回多少条
 max_results = 30
 # es.exe 路径；留空自动探测（PATH → %LOCALAPPDATA%\Everything → Program Files）
-# everything_path = 'C:\Users\Agustin\AppData\Local\Everything\es.exe'
+# everything_path = 'C:\Users\<你的用户名>\AppData\Local\Everything\es.exe'
 
 # ---------------------------------------------------------------------------
 # 应用列表（需求 R4：最常用的功能，列表自己说了算）

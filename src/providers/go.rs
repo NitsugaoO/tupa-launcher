@@ -4,8 +4,8 @@
 //!
 //! ```text
 //! go ~/Projects/term-palette
-//! go "C:\Users\Agustin\Projects"
-//! go file:///C:/Users/Agustin/Projects
+//! go "C:\Users\<你的用户名>\Projects"
+//! go file:///C:/Users/<你的用户名>/Projects
 //! go projects\term          ← 不完整的路径片段
 //! go                        ← 空输入时自动读剪贴板
 //! ```

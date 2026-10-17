@@ -110,7 +110,7 @@ run:admin:verbose foo     → 多个修饰符（目前只认 admin / elevated / 
 
 ```text
 go ~/Projects                  → ~ 展开为用户目录
-go "C:\Users\Agustin\Projects"  → 引号（单/双）自动去掉
+go "C:\Users\<你的用户名>\Projects"  → 引号（单/双）自动去掉
 go file:///C:/Users/My%20Docs  → file:// 前缀 + %XX 解码
 go projects\term              → 半截路径，走 zoxide + Everything 补全
 go                            → 空输入，读剪贴板
@@ -135,11 +135,15 @@ go D:\Legacy\report.pdf        → 文件：在资源管理器里定位
 
 ## 配置
 
-配置文件：`~/.config/term-palette/config.toml`（即 `C:\Users\Agustin\.config\term-palette\config.toml`）
+配置文件：`~/.config/term-palette/config.toml`（即 `C:\Users\<你的用户名>\.config\term-palette\config.toml`）
 —— 改完下次启动生效，**不需要重新编译**。
 
 主题色可以写在同一个文件的 `[theme]` 段，或者单独的 `~/.config/term-palette/theme.toml`。
-不写就用内置的 Everforest(hard)，色值与你 `~/Themes/themes/everforest/tokens.yaml` 的角色表对齐：
+不写就用内置的 Everforest(hard)。
+
+> 色值与 Everforest 官方色板的角色名对齐。作者本地用一套 `~/Themes` 脚本统一生成
+> 各应用的配色（`tokens.yaml` → 各应用主题），所以这里的角色名和它保持一致；
+> 对其他人来说这一段可以忽略，直接改 `[theme]` 段就行。
 
 ```
 background panel overlay border fg muted dim faint accent good warn bad
