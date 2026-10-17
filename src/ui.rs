@@ -126,7 +126,7 @@ fn draw_status(frame: &mut Frame, app: &App, area: Rect, t: Theme) {
     );
 
     let right = Span::styled(
-        "Enter 打开 · ^R 定位 · ^U 清空 · Esc 关闭 ",
+        "Enter 打开 · ^E 定位 · Esc 清空/隐藏 ",
         Style::new().fg(t.faint),
     );
     frame.render_widget(

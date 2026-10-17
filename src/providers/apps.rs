@@ -1,5 +1,7 @@
 //! `app <名字>` —— 从手工维护的列表里启动应用（需求 R4）
 
+use std::path::Path;
+
 use fuzzy_matcher::skim::SkimMatcherV2;
 use fuzzy_matcher::FuzzyMatcher;
 
@@ -22,6 +24,21 @@ impl Apps {
             keys,
             max: cfg.general.max_results,
         }
+    }
+}
+
+/// 副标题只显示文件名（`msedge.exe`、`微信.lnk`、`ms-settings:`），
+/// 不把整条路径摊出来 —— 列表会太杂。
+fn short_command(command: &str, args: &[String]) -> String {
+    let name = Path::new(command)
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| command.to_string());
+
+    if args.is_empty() {
+        name
+    } else {
+        format!("{} {}", name, args.join(" "))
     }
 }
 
@@ -69,11 +86,7 @@ impl Provider for Apps {
                 Item {
                     kind: Kind::App,
                     title: e.name.clone(),
-                    subtitle: if e.args.is_empty() {
-                        e.command.clone()
-                    } else {
-                        format!("{} {}", e.command, e.args.join(" "))
-                    },
+                    subtitle: short_command(&e.command, &e.args),
                     action: Action::Launch {
                         command: e.command.clone(),
                         args: e.args.clone(),

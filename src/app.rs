@@ -157,15 +157,19 @@ impl App {
         let alt = key.modifiers.contains(KeyModifiers::ALT);
 
         match key.code {
-            KeyCode::Esc => self.should_hide = true,
-            KeyCode::Char('c') if ctrl => self.should_quit = true,
-            KeyCode::Char('u') if ctrl => {
-                self.input.clear();
-                self.cursor = 0;
-                self.refresh();
+            KeyCode::Esc => {
+                // 两段式：有输入先清空，没输入才隐藏
+                if self.input.is_empty() {
+                    self.should_hide = true;
+                } else {
+                    self.input.clear();
+                    self.cursor = 0;
+                    self.refresh();
+                }
             }
+            KeyCode::Char('c') if ctrl => self.should_quit = true,
             KeyCode::Char('w') if ctrl => self.delete_word(),
-            KeyCode::Char('r') if ctrl => self.reveal_selected(),
+            KeyCode::Char('e') if ctrl => self.reveal_selected(),
             KeyCode::Char('p') if ctrl => self.move_selection(-1),
             KeyCode::Char('n') if ctrl => self.move_selection(1),
             KeyCode::Char(c) if !ctrl && !alt => self.insert_char(c),
