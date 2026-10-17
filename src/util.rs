@@ -1,6 +1,6 @@
 //! 跨模块的小工具
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 /// 构造一个"完全独立"的子进程命令：
@@ -78,6 +78,98 @@ pub fn which(command: &str) -> Option<PathBuf> {
         .or_else(|| candidates.iter().find(|p| matches!(ext(p).as_str(), "cmd" | "bat")))
         .or_else(|| candidates.first())
         .cloned()
+}
+
+// ---------------------------------------------------------------------------
+// 快捷方式解析 / 可执行文件定位
+// ---------------------------------------------------------------------------
+
+/// 解析 `.lnk` 快捷方式的目标路径（递归，最多 5 层）。
+///
+/// 不是 `.lnk` 的话原样返回。用 COM 的 `IShellLinkW` —— 这是微软官方的解析方式，
+/// 比自己拆 `.lnk` 二进制格式可靠。
+#[cfg(windows)]
+pub fn resolve_shortcut(path: &Path) -> PathBuf {
+    use windows::core::{Interface, PCWSTR};
+    use windows::Win32::System::Com::{
+        CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx,
+        IPersistFile, STGM_READ,
+    };
+    use windows::Win32::UI::Shell::{IShellLinkW, ShellLink};
+
+    let mut current = path.to_path_buf();
+
+    for _ in 0..5 {
+        let is_lnk = current
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("lnk"));
+        if !is_lnk {
+            break;
+        }
+
+        let wide: Vec<u16> = current
+            .to_string_lossy()
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect();
+
+        // SAFETY: 只做 COM 调用；任何一步失败就保留当前路径
+        let next = unsafe {
+            // CoInitializeEx 是幂等的（已初始化会返回 S_FALSE），这里忽略返回值
+            let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+
+            let Ok(link) = CoCreateInstance::<_, IShellLinkW>(&ShellLink, None, CLSCTX_INPROC_SERVER)
+            else {
+                break;
+            };
+            let Ok(file) = link.cast::<IPersistFile>() else {
+                break;
+            };
+            if file.Load(PCWSTR(wide.as_ptr()), STGM_READ).is_err() {
+                break;
+            }
+
+            let mut buffer = [0u16; 1024];
+            if link
+                .GetPath(&mut buffer, std::ptr::null_mut(), 0)
+                .is_err()
+            {
+                break;
+            }
+
+            let len = buffer.iter().position(|&c| c == 0).unwrap_or(buffer.len());
+            if len == 0 {
+                break;
+            }
+            PathBuf::from(String::from_utf16_lossy(&buffer[..len]))
+        };
+
+        if next.as_os_str().is_empty() {
+            break;
+        }
+        current = next;
+    }
+
+    current
+}
+
+#[cfg(not(windows))]
+pub fn resolve_shortcut(path: &Path) -> PathBuf {
+    path.to_path_buf()
+}
+
+/// 把 `command`（裸命令 / 绝对路径 / `.lnk`）解析成真实的文件路径。
+/// 用于「在资源管理器里定位」—— app 条目也要能定位。
+pub fn resolve_executable(command: &str) -> Option<PathBuf> {
+    let path = Path::new(command);
+    let target = if path.is_file() {
+        path.to_path_buf()
+    } else {
+        which(command)?
+    };
+
+    Some(resolve_shortcut(&target))
 }
 
 // ---------------------------------------------------------------------------

@@ -12,6 +12,8 @@ pub struct Apps {
     entries: Vec<AppEntry>,
     /// 与 entries 一一对应：参与模糊匹配的字符串
     keys: Vec<Vec<String>>,
+    /// 与 entries 一一对应：副标题（`.lnk` 已解析成目标 exe 的文件名）
+    display: Vec<String>,
     max: usize,
 }
 
@@ -19,26 +21,38 @@ impl Apps {
     pub fn new(cfg: &Config) -> Self {
         let entries = cfg.apps.clone();
         let keys = entries.iter().map(|e| e.search_keys()).collect();
+        // 构造时解析一次 .lnk，免得每次按键查询都跑一遍 COM
+        let display = entries.iter().map(display_name).collect();
         Apps {
             entries,
             keys,
+            display,
             max: cfg.general.max_results,
         }
     }
 }
 
-/// 副标题只显示文件名（`msedge.exe`、`微信.lnk`、`ms-settings:`），
-/// 不把整条路径摊出来 —— 列表会太杂。
-fn short_command(command: &str, args: &[String]) -> String {
-    let name = Path::new(command)
-        .file_name()
-        .map(|name| name.to_string_lossy().into_owned())
-        .unwrap_or_else(|| command.to_string());
+/// 副标题只显示可执行文件名，不把整条路径摊出来。
+///
+/// 如果 `command` 是真实存在的文件（典型是 `.lnk` 快捷方式），会递归解析到目标，
+/// 所以 `微信.lnk` 后面显示的是 `WeChat.exe` 而不是 `.lnk`。
+fn display_name(entry: &AppEntry) -> String {
+    let path = Path::new(&entry.command);
 
-    if args.is_empty() {
+    let name = if path.is_file() {
+        crate::util::resolve_shortcut(path)
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| entry.command.clone())
+    } else {
+        // 裸命令（wt / code / ms-settings:）保持原样
+        entry.command.clone()
+    };
+
+    if entry.args.is_empty() {
         name
     } else {
-        format!("{} {}", name, args.join(" "))
+        format!("{} {}", name, entry.args.join(" "))
     }
 }
 
@@ -86,7 +100,7 @@ impl Provider for Apps {
                 Item {
                     kind: Kind::App,
                     title: e.name.clone(),
-                    subtitle: short_command(&e.command, &e.args),
+                    subtitle: self.display[i].clone(),
                     action: Action::Launch {
                         command: e.command.clone(),
                         args: e.args.clone(),

@@ -209,13 +209,24 @@ impl App {
     }
 
     fn reveal_selected(&mut self) {
-        let Some(path) = self.selected_item().and_then(|item| match item.action {
-            Action::Open(p) => Some(p),
-            _ => None,
-        }) else {
+        let Some(item) = self.selected_item() else {
             return;
         };
-        match exec::run(&Action::Reveal(path)) {
+
+        let target = match &item.action {
+            Action::Open(path) | Action::Reveal(path) => path.clone(),
+            // app 条目：解析出真实的 exe 位置（`.lnk` 会跟到目标）
+            Action::Launch { command, .. } => match crate::util::resolve_executable(command) {
+                Some(path) => path,
+                None => {
+                    self.status = Some((format!("找不到 {command} 的位置"), true));
+                    return;
+                }
+            },
+            Action::RunCommand { .. } | Action::OpenInEditor { .. } => return,
+        };
+
+        match exec::run(&Action::Reveal(target)) {
             Ok(msg) => self.status = Some((msg, false)),
             Err(e) => self.status = Some((format!("{e:#}"), true)),
         }
