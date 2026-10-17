@@ -23,7 +23,7 @@
 
 use std::sync::Mutex;
 use std::sync::OnceLock;
-use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::mpsc::{self, Sender};
 use std::time::{Duration, Instant};
 
@@ -39,16 +39,12 @@ use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
 };
 use windows_sys::Win32::UI::Shell::ShellExecuteW;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    CallNextHookEx, EnumWindows, GetClassNameW, GetForegroundWindow, GetMessageW, GetWindowTextW,
-    IsWindowVisible, KBDLLHOOKSTRUCT, MSG, PostThreadMessageW, SW_HIDE, SW_SHOW, SW_SHOWNORMAL,
-    SetForegroundWindow, SetWindowsHookExW, ShowWindow, WH_KEYBOARD_LL, WM_APP, WM_HOTKEY,
+    CallNextHookEx, GetForegroundWindow, GetMessageW,
+    IsWindowVisible, KBDLLHOOKSTRUCT, MSG, PostThreadMessageW, SW_SHOWNORMAL,
+    SetForegroundWindow, SetWindowsHookExW, WH_KEYBOARD_LL, WM_APP, WM_HOTKEY,
     WM_KEYDOWN, WM_SYSKEYDOWN,
 };
 
-/// Windows Terminal 的窗口类名
-const WT_CLASS: &str = "CASCADIA_HOSTING_WINDOW_CLASS";
-/// 面板窗口标题（对应 WT profile 的 tabTitle）
-const PANEL_TITLE: &str = "term-palette";
 /// 面板使用的 WT profile 名
 const PANEL_PROFILE: &str = "term-palette";
 /// 热键 ID（同一个进程里唯一即可）
@@ -68,9 +64,6 @@ static TOGGLE_LOCK: Mutex<()> = Mutex::new(());
 
 /// 日志通过 channel 交给专用线程写盘，热键处理线程不做 IO
 static LOG_TX: OnceLock<Sender<String>> = OnceLock::new();
-
-/// 窗口枚举结果（单线程调用，用 static 传递）
-static FOUND: AtomicUsize = AtomicUsize::new(0);
 
 /// 安装 Copilot 钩子的线程 ID（钩子回调在这个线程上跑）
 static HOOK_THREAD_ID: AtomicU32 = AtomicU32::new(0);
@@ -130,10 +123,10 @@ fn parse_key(name: &str) -> Result<u32> {
     }
 
     // F1..F24
-    if let Some(number) = name.strip_prefix('f').and_then(|n| n.parse::<u32>().ok()) {
-        if (1..=24).contains(&number) {
-            return Ok(VK_F1 as u32 + (number - 1));
-        }
+    if let Some(number) = name.strip_prefix('f').and_then(|n| n.parse::<u32>().ok())
+        && (1..=24).contains(&number)
+    {
+        return Ok(VK_F1 as u32 + (number - 1));
     }
 
     match name {
@@ -281,7 +274,7 @@ fn inject_key_up(vk: u16) {
         dwExtraInfo: SELF_INJECT_MARK,
     };
     unsafe {
-        SendInput(1, &mut input, std::mem::size_of::<INPUT>() as i32);
+        SendInput(1, &input, std::mem::size_of::<INPUT>() as i32);
     }
 }
 
@@ -309,47 +302,17 @@ fn toggle_panel(debug: bool) {
         }
 
         if visible && is_foreground {
-            ShowWindow(hwnd, SW_HIDE);
+            crate::util::hide_panel();
         } else {
-            ShowWindow(hwnd, SW_SHOW);
+            crate::util::show_panel();
             SetForegroundWindow(hwnd);
         }
     }
 }
 
-/// 找面板窗口。
-///
-/// 不直接用 `FindWindowW(类名, 标题)` 精确匹配：WT 的窗口标题可能是
-/// `term-palette`、`term-palette - PowerShell` 之类的形式，
-/// 所以枚举出所有 Windows Terminal 窗口，按标题是否**包含** `term-palette` 判定。
+/// 找面板窗口（实现见 `util::find_panel`）
 fn find_panel() -> HWND {
-    FOUND.store(0, Ordering::SeqCst);
-    unsafe { EnumWindows(Some(enum_panel_proc), 0) };
-    FOUND.load(Ordering::SeqCst) as HWND
-}
-
-unsafe extern "system" fn enum_panel_proc(hwnd: HWND, _lparam: LPARAM) -> i32 {
-    let mut class_buf = [0u16; 128];
-    let class_len = unsafe { GetClassNameW(hwnd, class_buf.as_mut_ptr(), class_buf.len() as i32) };
-    if class_len <= 0 {
-        return 1; // 继续枚举
-    }
-    let class = String::from_utf16_lossy(&class_buf[..class_len as usize]);
-    if class != WT_CLASS {
-        return 1;
-    }
-
-    let mut title_buf = [0u16; 512];
-    let title_len = unsafe { GetWindowTextW(hwnd, title_buf.as_mut_ptr(), title_buf.len() as i32) };
-    if title_len <= 0 {
-        return 1;
-    }
-    let title = String::from_utf16_lossy(&title_buf[..title_len as usize]);
-    if title.to_lowercase().contains(PANEL_TITLE) {
-        FOUND.store(hwnd as usize, Ordering::SeqCst);
-        return 0; // 找到就停
-    }
-    1
+    crate::util::find_panel()
 }
 
 /// 启动面板窗口。

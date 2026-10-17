@@ -76,7 +76,20 @@ fn run(
     let mut app = App::new(cfg, theme);
     app.refresh();
 
+    // 面板隐藏时进程继续跑（不销毁 WT 窗口），下次热键显示就是瞬时的
+    let mut hidden = false;
+
     while !app.should_quit {
+        // 隐藏期间：不渲染、不轮询输入，只定期看看窗口是否又被唤起
+        if hidden {
+            std::thread::sleep(Duration::from_millis(200));
+            if util::panel_visible() {
+                hidden = false;
+                terminal.clear()?;
+            }
+            continue;
+        }
+
         terminal.draw(|frame| ui::draw(frame, &mut app))?;
 
         // 最多等 30ms：输入跟手，后台结果也能及时刷出来
@@ -89,6 +102,13 @@ fn run(
             }
 
         app.drain_events();
+
+        if app.should_hide {
+            app.should_hide = false;
+            app.reset();
+            util::hide_panel();
+            hidden = true;
+        }
     }
 
     Ok(())

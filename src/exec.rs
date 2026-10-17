@@ -24,6 +24,10 @@ pub fn run(action: &Action) -> Result<String> {
             launch(command, args)?;
             Ok(format!("已启动 {command}"))
         }
+        Action::OpenInEditor { file, line } => {
+            open_in_editor(file, *line)?;
+            Ok(format!("已在编辑器打开 {}:{line}", short_name(file)))
+        }
     }
 }
 
@@ -83,6 +87,27 @@ fn spawn_executable(path: &Path, args: &[String]) -> Result<()> {
                 bail!("{} 是快捷方式，暂不支持附加参数", path.display());
             }
         }
+    }
+    Ok(())
+}
+
+/// 在编辑器里打开指定文件的某一行。
+///
+/// 优先用 VSCode 的 `code --goto file:line`；没有就退回系统默认程序。
+fn open_in_editor(file: &Path, line: usize) -> Result<()> {
+    let spec = format!("{}:{line}", file.display());
+
+    if let Some(code) = which("code") {
+        detached_command("cmd.exe")
+            .arg("/C")
+            .arg(&code)
+            .arg("--goto")
+            .arg(&spec)
+            .spawn()
+            .context("无法启动 VSCode")?;
+    } else {
+        open::that_detached(file)
+            .with_context(|| format!("无法打开 {}", file.display()))?;
     }
     Ok(())
 }

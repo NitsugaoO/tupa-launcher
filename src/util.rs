@@ -79,3 +79,110 @@ pub fn which(command: &str) -> Option<PathBuf> {
         .or_else(|| candidates.first())
         .cloned()
 }
+
+// ---------------------------------------------------------------------------
+// 面板窗口（Windows Terminal）
+// ---------------------------------------------------------------------------
+
+/// Windows Terminal 的窗口类名
+#[cfg(windows)]
+pub const WT_CLASS: &str = "CASCADIA_HOSTING_WINDOW_CLASS";
+/// 面板窗口标题（对应 WT profile 的 `tabTitle`）
+#[cfg(windows)]
+pub const PANEL_TITLE: &str = "term-palette";
+
+#[cfg(windows)]
+static FOUND_PANEL: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// 找面板窗口。
+///
+/// 不直接用 `FindWindowW(类名, 标题)` 精确匹配：WT 的窗口标题可能是
+/// `term-palette`、`term-palette - PowerShell` 之类的形式，
+/// 所以枚举出所有 Windows Terminal 窗口，按标题是否**包含** `term-palette` 判定。
+#[cfg(windows)]
+pub fn find_panel() -> windows_sys::Win32::Foundation::HWND {
+    use std::sync::atomic::Ordering;
+    use windows_sys::Win32::UI::WindowsAndMessaging::EnumWindows;
+
+    FOUND_PANEL.store(0, Ordering::SeqCst);
+    unsafe { EnumWindows(Some(enum_panel_proc), 0) };
+    FOUND_PANEL.load(Ordering::SeqCst) as windows_sys::Win32::Foundation::HWND
+}
+
+#[cfg(windows)]
+unsafe extern "system" fn enum_panel_proc(
+    hwnd: windows_sys::Win32::Foundation::HWND,
+    _lparam: windows_sys::Win32::Foundation::LPARAM,
+) -> i32 {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{GetClassNameW, GetWindowTextW};
+
+    let mut class_buf = [0u16; 128];
+    let class_len = unsafe { GetClassNameW(hwnd, class_buf.as_mut_ptr(), class_buf.len() as i32) };
+    if class_len <= 0 {
+        return 1; // 继续枚举
+    }
+    let class = String::from_utf16_lossy(&class_buf[..class_len as usize]);
+    if class != WT_CLASS {
+        return 1;
+    }
+
+    let mut title_buf = [0u16; 512];
+    let title_len = unsafe { GetWindowTextW(hwnd, title_buf.as_mut_ptr(), title_buf.len() as i32) };
+    if title_len <= 0 {
+        return 1;
+    }
+    let title = String::from_utf16_lossy(&title_buf[..title_len as usize]);
+    if title.to_lowercase().contains(PANEL_TITLE) {
+        FOUND_PANEL.store(hwnd as usize, std::sync::atomic::Ordering::SeqCst);
+        return 0; // 找到就停
+    }
+    1
+}
+
+/// 面板窗口当前是否可见
+#[cfg(windows)]
+pub fn panel_visible() -> bool {
+    use windows_sys::Win32::UI::WindowsAndMessaging::IsWindowVisible;
+
+    let hwnd = find_panel();
+    !hwnd.is_null() && unsafe { IsWindowVisible(hwnd) } != 0
+}
+
+/// 隐藏面板窗口（面板进程继续在后台运行）
+#[cfg(windows)]
+pub fn hide_panel() {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{SW_HIDE, ShowWindow};
+
+    let hwnd = find_panel();
+    if !hwnd.is_null() {
+        unsafe { ShowWindow(hwnd, SW_HIDE) };
+    }
+}
+
+/// 显示面板窗口（隐藏太久时 WM 会把它标记成 minimized，用 SW_RESTORE 处理）
+#[cfg(windows)]
+pub fn show_panel() {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        IsIconic, SW_RESTORE, SW_SHOW, ShowWindow,
+    };
+
+    let hwnd = find_panel();
+    if hwnd.is_null() {
+        return;
+    }
+    unsafe {
+        if IsIconic(hwnd) != 0 {
+            ShowWindow(hwnd, SW_RESTORE);
+        } else {
+            ShowWindow(hwnd, SW_SHOW);
+        }
+    }
+}
+
+// 非 Windows 平台：这些函数不存在，给个空实现让调用方不用到处写 cfg
+#[cfg(not(windows))]
+pub fn panel_visible() -> bool {
+    true
+}
+#[cfg(not(windows))]
+pub fn hide_panel() {}

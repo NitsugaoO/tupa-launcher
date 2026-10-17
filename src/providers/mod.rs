@@ -4,6 +4,7 @@
 //! （需求 N2）。实现 [`Provider`] trait 后在 [`build`] 里注册即可。
 
 pub mod apps;
+pub mod config_items;
 pub mod everything;
 
 use std::path::PathBuf;
@@ -18,6 +19,7 @@ pub enum Kind {
     App,
     File,
     Dir,
+    Setting,
 }
 
 impl Kind {
@@ -26,6 +28,7 @@ impl Kind {
             Kind::App => "app",
             Kind::File => "file",
             Kind::Dir => "dir",
+            Kind::Setting => "cfg",
         }
     }
 }
@@ -39,6 +42,8 @@ pub enum Action {
     Launch { command: String, args: Vec<String> },
     /// 在文件资源管理器里定位
     Reveal(PathBuf),
+    /// 在编辑器里打开某个文件的指定行
+    OpenInEditor { file: PathBuf, line: usize },
 }
 
 #[derive(Debug, Clone)]
@@ -101,6 +106,7 @@ pub fn build(cfg: &Config) -> Vec<Box<dyn Provider>> {
     if let Some(ev) = everything::Everything::new(cfg) {
         list.push(Box::new(ev));
     }
+    list.push(Box::new(config_items::ConfigItems));
     list
 }
 

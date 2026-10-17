@@ -32,6 +32,8 @@ pub struct App {
     /// 状态栏消息：`(文本, 是否错误)`
     pub status: Option<(String, bool)>,
     pub should_quit: bool,
+    /// 请求隐藏面板（不是退出）—— 进程继续跑，下次热键瞬时唤起
+    pub should_hide: bool,
     /// 是否已经收到过第一批结果（用于避免启动瞬间闪出"列表为空"的提示）
     pub loaded: bool,
     /// 请求序号：只接受最新一次请求的结果，丢弃过期结果
@@ -66,6 +68,7 @@ impl App {
             theme,
             status: None,
             should_quit: false,
+            should_hide: false,
             loaded: false,
             generation: 0,
             cmd_tx,
@@ -146,7 +149,7 @@ impl App {
         let alt = key.modifiers.contains(KeyModifiers::ALT);
 
         match key.code {
-            KeyCode::Esc => self.should_quit = true,
+            KeyCode::Esc => self.should_hide = true,
             KeyCode::Char('c') if ctrl => self.should_quit = true,
             KeyCode::Char('u') if ctrl => {
                 self.input.clear();
@@ -187,8 +190,8 @@ impl App {
             return;
         };
         match exec::run(&item.action) {
-            // 成功就退出，把屏幕让给刚打开的程序
-            Ok(_) => self.should_quit = true,
+            // 成功就隐藏面板，把屏幕让给刚打开的程序（进程留着，下次唤起更快）
+            Ok(_) => self.should_hide = true,
             Err(e) => self.status = Some((format!("{e:#}"), true)),
         }
     }
@@ -209,6 +212,17 @@ impl App {
     fn selected_item(&self) -> Option<Item> {
         let idx = self.list_state.selected()?;
         self.items.get(idx).cloned()
+    }
+
+    /// 隐藏前把状态清干净，下次唤起时是初始界面
+    pub fn reset(&mut self) {
+        self.input.clear();
+        self.cursor = 0;
+        self.items.clear();
+        self.list_state = ListState::default();
+        self.status = None;
+        self.loaded = false;
+        self.refresh();
     }
 
     fn move_selection(&mut self, delta: isize) {
