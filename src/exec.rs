@@ -10,6 +10,10 @@ use crate::util::{detached_command, which};
 pub fn run(action: &Action) -> Result<String> {
     match action {
         Action::Open(path) => {
+            // 目录：顺手记进 zoxide，这样终端的 `z` 命令也能用得上（共用同一份数据）
+            if path.is_dir() {
+                record_zoxide(path);
+            }
             open::that_detached(path).with_context(|| format!("无法打开 {}", path.display()))?;
             Ok(format!("已打开 {}", short_name(path)))
         }
@@ -20,9 +24,29 @@ pub fn run(action: &Action) -> Result<String> {
                 .context("无法启动文件资源管理器")?;
             Ok(format!("已定位 {}", short_name(path)))
         }
-        Action::Launch { command, args } => {
-            launch(command, args)?;
+        Action::Launch {
+            command,
+            args,
+            elevated,
+        } => {
+            if *elevated {
+                elevate(command, args)?;
+            } else {
+                launch(command, args)?;
+            }
             Ok(format!("已启动 {command}"))
+        }
+        Action::RunCommand { command, elevated } => {
+            if *elevated {
+                elevate("cmd.exe", &["/C".to_string(), command.clone()])?;
+            } else {
+                detached_command("cmd.exe")
+                    .arg("/C")
+                    .arg(command)
+                    .spawn()
+                    .with_context(|| format!("无法执行 {command}"))?;
+            }
+            Ok(format!("已执行 {command}"))
         }
         Action::OpenInEditor { file, line } => {
             open_in_editor(file, *line)?;
@@ -110,6 +134,47 @@ fn open_in_editor(file: &Path, line: usize) -> Result<()> {
             .with_context(|| format!("无法打开 {}", file.display()))?;
     }
     Ok(())
+}
+
+/// 把目录记进 zoxide 的数据库（失败就算了，不影响打开）
+fn record_zoxide(path: &Path) {
+    let _ = detached_command("zoxide")
+        .args(["add", &path.to_string_lossy()])
+        .spawn();
+}
+
+/// 以管理员身份运行（ShellExecute 的 `runas`，会弹 UAC）
+fn elevate(file: &str, args: &[String]) -> Result<()> {
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::UI::Shell::ShellExecuteW;
+        use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+
+        let wide = |s: &str| -> Vec<u16> { s.encode_utf16().chain(std::iter::once(0)).collect() };
+
+        let verb = wide("runas");
+        let file_w = wide(file);
+        let params = wide(&args.join(" "));
+
+        let result = unsafe {
+            ShellExecuteW(
+                std::ptr::null_mut(),
+                verb.as_ptr(),
+                file_w.as_ptr(),
+                params.as_ptr(),
+                std::ptr::null(),
+                SW_SHOWNORMAL,
+            )
+        } as isize;
+
+        if result <= 32 {
+            bail!("提权失败（ShellExecute 返回 {result}）");
+        }
+        return Ok(());
+    }
+
+    #[cfg(not(windows))]
+    bail!("提权目前只在 Windows 上支持")
 }
 
 fn short_name(path: &Path) -> String {

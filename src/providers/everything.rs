@@ -47,7 +47,7 @@ impl Everything {
 }
 
 /// 依次尝试：PATH → `%LOCALAPPDATA%\Everything` → Program Files
-fn find_es() -> Option<PathBuf> {
+pub(crate) fn find_es() -> Option<PathBuf> {
     if let Ok(out) = Command::new("where.exe").arg("es.exe").output()
         && out.status.success()
             && let Some(line) = String::from_utf8_lossy(&out.stdout).lines().next() {
@@ -158,7 +158,7 @@ impl Provider for Everything {
         "Everything 文件搜索"
     }
 
-    fn query(&self, args: &str) -> Vec<Item> {
+    fn query(&self, args: &str, _flags: &[String]) -> Vec<Item> {
         let args = args.trim();
         if args.is_empty() {
             return Vec::new();

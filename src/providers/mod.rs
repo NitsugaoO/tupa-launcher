@@ -6,6 +6,8 @@
 pub mod apps;
 pub mod config_items;
 pub mod everything;
+pub mod go;
+pub mod run;
 
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -20,6 +22,7 @@ pub enum Kind {
     File,
     Dir,
     Setting,
+    Command,
 }
 
 impl Kind {
@@ -29,6 +32,7 @@ impl Kind {
             Kind::File => "file",
             Kind::Dir => "dir",
             Kind::Setting => "cfg",
+            Kind::Command => "run",
         }
     }
 }
@@ -39,7 +43,17 @@ pub enum Action {
     /// 用系统默认程序打开（文件 / 文件夹）
     Open(PathBuf),
     /// 启动一个程序
-    Launch { command: String, args: Vec<String> },
+    Launch {
+        command: String,
+        args: Vec<String>,
+        /// `true` 时通过 ShellExecute 的 `runas` 提权（会弹 UAC）
+        elevated: bool,
+    },
+    /// 执行一条命令
+    RunCommand {
+        command: String,
+        elevated: bool,
+    },
     /// 在文件资源管理器里定位
     Reveal(PathBuf),
     /// 在编辑器里打开某个文件的指定行
@@ -82,8 +96,10 @@ pub trait Provider: Send {
     /// 一句话描述，显示在界面上
     fn description(&self) -> &str;
     /// 查询。**在后台线程里调用**，可以放心做阻塞 IO。
-    /// `args` 是关键字之后的内容（可能为空）。
-    fn query(&self, args: &str) -> Vec<Item>;
+    ///
+    /// - `args`：关键字后面（空格之后）的内容
+    /// - `flags`：写在关键字上的修饰符，如 `run:admin ipconfig` 里的 `admin`
+    fn query(&self, args: &str, flags: &[String]) -> Vec<Item>;
 }
 
 /// 主线程只需要知道 provider 的元信息（真正的 provider 在 worker 线程里）
@@ -106,6 +122,8 @@ pub fn build(cfg: &Config) -> Vec<Box<dyn Provider>> {
     if let Some(ev) = everything::Everything::new(cfg) {
         list.push(Box::new(ev));
     }
+    list.push(Box::new(run::Run));
+    list.push(Box::new(go::Go::new(cfg)));
     list.push(Box::new(config_items::ConfigItems));
     list
 }
@@ -120,22 +138,38 @@ pub fn infos(providers: &[Box<dyn Provider>]) -> Vec<ProviderInfo> {
         .collect()
 }
 
-/// 把输入行解析成 `(provider 下标, 参数)`
+/// 把输入行解析成 `(provider 下标, flags, 参数)`
 ///
 /// 规则：
-/// - `ev 报告.pdf`  → （ev 的下标, "报告.pdf"）
-/// - `报告.pdf`     → （默认 provider, "报告.pdf"）
-pub fn resolve(infos: &[ProviderInfo], default_idx: usize, line: &str) -> (usize, String) {
+/// - `ev 报告.pdf`       → （ev, [], "报告.pdf"）
+/// - `run:admin ipconfig` → （run, ["admin"], "ipconfig"）
+/// - `报告.pdf`          → （默认 provider, [], "报告.pdf"）
+///
+/// 关键字部分用 `:` 切分：第一段是关键字，其余是修饰符。
+pub fn resolve(
+    infos: &[ProviderInfo],
+    default_idx: usize,
+    line: &str,
+) -> (usize, Vec<String>, String) {
     let (head, rest) = match line.split_once(' ') {
         Some((h, r)) => (h, r),
         None => (line, ""),
     };
     if head.is_empty() {
-        return (default_idx, String::new());
+        return (default_idx, Vec::new(), String::new());
     }
-    match infos.iter().position(|i| i.matches(head)) {
-        Some(i) => (i, rest.to_string()),
-        None => (default_idx, line.to_string()),
+
+    let mut pieces = head.split(':');
+    let keyword = pieces.next().unwrap_or("");
+    let flags: Vec<String> = pieces
+        .filter(|piece| !piece.is_empty())
+        .map(|piece| piece.to_ascii_lowercase())
+        .collect();
+
+    match infos.iter().position(|info| info.matches(keyword)) {
+        Some(index) => (index, flags, rest.to_string()),
+        // 没命中关键字：整行当参数交给默认 provider（修饰符不生效）
+        None => (default_idx, Vec::new(), line.to_string()),
     }
 }
 
@@ -148,6 +182,7 @@ pub enum Cmd {
         generation: u64,
         provider: usize,
         args: String,
+        flags: Vec<String>,
     },
 }
 
@@ -176,10 +211,11 @@ pub fn spawn_worker(providers: Vec<Box<dyn Provider>>) -> (Sender<Cmd>, Receiver
                 generation,
                 provider,
                 args,
+                flags,
             } = latest;
 
             let items = match providers.get(provider) {
-                Some(p) => p.query(&args),
+                Some(p) => p.query(&args, &flags),
                 None => Vec::new(),
             };
 

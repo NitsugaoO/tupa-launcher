@@ -30,7 +30,7 @@ impl Provider for ConfigItems {
         "查看配置（Enter 在编辑器里跳到对应行）"
     }
 
-    fn query(&self, args: &str) -> Vec<Item> {
+    fn query(&self, args: &str, _flags: &[String]) -> Vec<Item> {
         let cfg = Config::load().unwrap_or_default();
         let lines = locate_fields();
         let file = config::config_path().unwrap_or_default();

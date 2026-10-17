@@ -156,8 +156,8 @@ fn cli_query(cfg: &config::Config, line: &str) -> Result<()> {
         .position(|i| i.keyword == cfg.general.default_provider)
         .unwrap_or(0);
 
-    let (idx, args) = providers::resolve(&infos, default_idx, line);
-    let items = providers[idx].query(&args);
+    let (idx, flags, args) = providers::resolve(&infos, default_idx, line);
+    let items = providers[idx].query(&args, &flags);
 
     println!("provider={} args={:?} hits={}", infos[idx].keyword, args, items.len());
     for item in items {

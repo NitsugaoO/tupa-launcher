@@ -28,6 +28,8 @@ pub struct App {
     matched: Option<usize>,
     /// 传给当前 provider 的参数
     args: String,
+    /// 关键字上的修饰符（`run:admin` → `["admin"]`）
+    flags: Vec<String>,
     pub theme: Theme,
     /// 状态栏消息：`(文本, 是否错误)`
     pub status: Option<(String, bool)>,
@@ -65,6 +67,7 @@ impl App {
             active: default_idx,
             matched: None,
             args: String::new(),
+            flags: Vec::new(),
             theme,
             status: None,
             should_quit: false,
@@ -83,15 +86,18 @@ impl App {
             Some((h, _)) => h,
             None => line.as_str(),
         };
-        self.matched = if head.is_empty() {
+        // 关键字可能带修饰符：`run:admin` 里的关键字是 run
+        let keyword = head.split(':').next().unwrap_or("");
+        self.matched = if keyword.is_empty() {
             None
         } else {
-            self.infos.iter().position(|i| i.matches(head))
+            self.infos.iter().position(|i| i.matches(keyword))
         };
 
-        let (idx, args) = providers::resolve(&self.infos, self.default_idx, &line);
+        let (idx, flags, args) = providers::resolve(&self.infos, self.default_idx, &line);
         self.active = idx;
         self.args = args;
+        self.flags = flags;
         self.queue_query();
     }
 
@@ -101,6 +107,7 @@ impl App {
             generation: self.generation,
             provider: self.active,
             args: self.args.clone(),
+            flags: self.flags.clone(),
         });
         self.status = None;
     }

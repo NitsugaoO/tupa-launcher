@@ -34,8 +34,11 @@ impl Provider for Apps {
         "启动应用（列表在 config.toml 里自定义）"
     }
 
-    fn query(&self, args: &str) -> Vec<Item> {
+    fn query(&self, args: &str, flags: &[String]) -> Vec<Item> {
         let q = args.trim();
+        let elevated = flags
+            .iter()
+            .any(|flag| matches!(flag.as_str(), "admin" | "elevated" | "sudo"));
         let matcher = SkimMatcherV2::default();
 
         let mut hits: Vec<(i64, usize)> = if q.is_empty() {
@@ -74,6 +77,7 @@ impl Provider for Apps {
                     action: Action::Launch {
                         command: e.command.clone(),
                         args: e.args.clone(),
+                        elevated,
                     },
                 }
             })

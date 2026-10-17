@@ -73,8 +73,37 @@ Copilot 键是个例外（它的原样组合被 shell 占着），但用钩子**
 |---|---|
 | `app <名字>` | 从自定义列表里启动应用（模糊匹配） |
 | `ev <关键词>` | Everything 搜文件，**支持原生语法**：`ev ext:pdf 报告`、`ev folder:Projects` |
+| `run <命令>` | 执行命令（后台，不弹窗） |
+| `go <路径>` | 跳到目录 / 定位文件；**空输入时自动读剪贴板** |
 | `cfg [关键词]` | 列出配置项（行号 / 当前值 / 说明），**回车在 VSCode 里跳到对应行** |
 | `<名字>` | 不带关键字时走默认 provider（当前是 `app`） |
+
+### 修饰符语法（`:flag`）
+
+关键字后面可以用 `:` 加修饰符，多个用 `:` 继续接：
+
+```text
+run:admin ipconfig        → 提权执行（弹 UAC）
+app:admin cmd             → 以管理员身份启动
+run:admin:verbose foo     → 多个修饰符（目前只认 admin / elevated / sudo）
+```
+
+没命中关键字的 `:` 修饰符不生效（整行当参数交给默认 provider）。
+
+### `go` 的路径写法
+
+```text
+go ~/Projects                  → ~ 展开为用户目录
+go "C:\Users\Agustin\Projects"  → 引号（单/双）自动去掉
+go file:///C:/Users/My%20Docs  → file:// 前缀 + %XX 解码
+go projects\term              → 半截路径，走 zoxide + Everything 补全
+go                            → 空输入，读剪贴板
+go D:\Legacy\report.pdf        → 文件：在资源管理器里定位
+```
+
+匹配顺序：**存在的完整路径 → zoxide 历史 → Everything 路径匹配**。
+这里和终端的 `z` 命令**共用同一份 zoxide 数据库**：终端里跳过的目录这里能搜到，
+这里打开过的目录也会写回去（`zoxide add`）。
 
 按键：
 
