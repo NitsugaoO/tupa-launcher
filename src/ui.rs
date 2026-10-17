@@ -34,12 +34,23 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
 }
 
 fn draw_input(frame: &mut Frame, app: &App, area: Rect, t: Theme) {
-    let line = Line::from(vec![
-        Span::styled(" ❯ ", Style::new().fg(t.accent)),
-        Span::styled(app.input.as_str(), Style::new().fg(t.fg)),
-    ]);
+    let mut spans = vec![Span::styled(" ❯ ", Style::new().fg(t.accent))];
+
+    // 命中了 provider 时，把命令前缀（ev / run:admin）高亮成黄色，其余保持正文色
+    match app.matched {
+        Some(_) => {
+            let end = app.input.find(' ').unwrap_or(app.input.len());
+            spans.push(Span::styled(
+                &app.input[..end],
+                Style::new().fg(t.warn).add_modifier(Modifier::BOLD),
+            ));
+            spans.push(Span::styled(&app.input[end..], Style::new().fg(t.fg)));
+        }
+        None => spans.push(Span::styled(app.input.as_str(), Style::new().fg(t.fg))),
+    }
+
     frame.render_widget(
-        Paragraph::new(line).style(Style::new().bg(t.panel)),
+        Paragraph::new(Line::from(spans)).style(Style::new().bg(t.panel)),
         area,
     );
 

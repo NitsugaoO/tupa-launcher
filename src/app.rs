@@ -25,7 +25,7 @@ pub struct App {
     /// 当前生效的 provider
     pub active: usize,
     /// 输入的第一个词是否命中了某个 provider（用于 Tab 补全）
-    matched: Option<usize>,
+    pub matched: Option<usize>,
     /// 传给当前 provider 的参数
     args: String,
     /// 关键字上的修饰符（`run:admin` → `["admin"]`）
@@ -86,12 +86,13 @@ impl App {
             Some((h, _)) => h,
             None => line.as_str(),
         };
-        // 关键字可能带修饰符：`run:admin` 里的关键字是 run
+        // 只有「带空格」或「带冒号」时才算命令（单独的 ev 是普通搜索词）
+        let triggered = providers::command_prefix_end(&self.infos, &line).is_some();
         let keyword = head.split(':').next().unwrap_or("");
-        self.matched = if keyword.is_empty() {
-            None
-        } else {
+        self.matched = if triggered {
             self.infos.iter().position(|i| i.matches(keyword))
+        } else {
+            None
         };
 
         let (idx, flags, args) = providers::resolve(&self.infos, self.default_idx, &line);

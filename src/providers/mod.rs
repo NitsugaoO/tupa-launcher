@@ -138,12 +138,18 @@ pub fn infos(providers: &[Box<dyn Provider>]) -> Vec<ProviderInfo> {
         .collect()
 }
 
+/// 认得的修饰符。不在这个列表里的 `:` 后面的内容会被当成**参数**，
+/// 所以 `ev:123` 也能正常工作（而不是静默把 123 丢掉）。
+const KNOWN_FLAGS: &[&str] = &["admin", "elevated", "sudo"];
+
 /// 把输入行解析成 `(provider 下标, flags, 参数)`
 ///
-/// 规则：
-/// - `ev 报告.pdf`       → （ev, [], "报告.pdf"）
-/// - `run:admin ipconfig` → （run, ["admin"], "ipconfig"）
-/// - `报告.pdf`          → （默认 provider, [], "报告.pdf"）
+/// **命令只有在“后面跟了空格”或“带冒号”时才生效**：
+///
+/// - `ev 123` / `ev: 123` / `ev:` → 走 ev provider
+/// - `ev`（单独一个词）         → 不触发，当普通搜索词交给默认 provider
+///   （所以打 `ev` 能搜到 Everything 这个应用）
+/// - `run:admin ipconfig`       → （run, ["admin"], "ipconfig"）
 ///
 /// 关键字部分用 `:` 切分：第一段是关键字，其余是修饰符。
 pub fn resolve(
@@ -159,17 +165,65 @@ pub fn resolve(
         return (default_idx, Vec::new(), String::new());
     }
 
+    let has_space = line.contains(' ');
+    let has_colon = head.contains(':');
+
     let mut pieces = head.split(':');
     let keyword = pieces.next().unwrap_or("");
-    let flags: Vec<String> = pieces
-        .filter(|piece| !piece.is_empty())
-        .map(|piece| piece.to_ascii_lowercase())
-        .collect();
+
+    let mut flags: Vec<String> = Vec::new();
+    let mut inline_args: Vec<String> = Vec::new();
+    for piece in pieces.filter(|piece| !piece.is_empty()) {
+        let lowered = piece.to_ascii_lowercase();
+        if KNOWN_FLAGS.contains(&lowered.as_str()) {
+            flags.push(lowered);
+        } else {
+            inline_args.push(piece.to_string());
+        }
+    }
+
+    // 单独一个词：当普通搜索词，而不是命令
+    if !has_space && !has_colon {
+        return (default_idx, Vec::new(), line.to_string());
+    }
 
     match infos.iter().position(|info| info.matches(keyword)) {
-        Some(index) => (index, flags, rest.to_string()),
-        // 没命中关键字：整行当参数交给默认 provider（修饰符不生效）
+        Some(index) => {
+            let mut args = inline_args.join(" ");
+            if !rest.is_empty() {
+                if !args.is_empty() {
+                    args.push(' ');
+                }
+                args.push_str(rest);
+            }
+            (index, flags, args)
+        }
+        // 没命中关键字：整行当参数交给默认 provider
         None => (default_idx, Vec::new(), line.to_string()),
+    }
+}
+
+/// 输入的“命令前缀”在哪个位置结束（用于高亮）。
+///
+/// 只有真正触发了某个 provider 时才返回 —— 与 [`resolve`] 的判定保持一致。
+pub fn command_prefix_end(infos: &[ProviderInfo], line: &str) -> Option<usize> {
+    let head_end = line.find(' ').unwrap_or(line.len());
+    let head = &line[..head_end];
+    if head.is_empty() {
+        return None;
+    }
+
+    let has_space = line.contains(' ');
+    let has_colon = head.contains(':');
+    if !has_space && !has_colon {
+        return None;
+    }
+
+    let keyword = head.split(':').next().unwrap_or("");
+    if infos.iter().any(|info| info.matches(keyword)) {
+        Some(head_end)
+    } else {
+        None
     }
 }
 
