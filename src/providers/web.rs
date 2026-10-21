@@ -93,7 +93,7 @@ impl Provider for Web {
     }
 
     fn flags(&self) -> &'static [&'static str] {
-        &["url", "week", "month", "all"]
+        &["url", "title", "week", "month", "all"]
     }
 
     fn columns(&self) -> &'static [Column] {
@@ -103,13 +103,8 @@ impl Provider for Web {
     fn query(&self, args: &str, flags: &[String]) -> Vec<Item> {
         let input = args.trim();
         let scope = Scope::from_flags(flags);
+        let field = Field::from_flags(flags);
         let direct = as_url(input);
-
-        // `:web:url xxx` → 不管历史，直接打开
-        if flags.iter().any(|flag| flag == "url") {
-            let url = direct.or_else(|| (!input.is_empty()).then(|| input.to_string()));
-            return url.map(open_item).into_iter().collect();
-        }
 
         let cutoff = scope.cutoff();
         let rows = self.load_recent();
@@ -123,7 +118,7 @@ impl Provider for Web {
             return visible.into_iter().take(self.max).map(to_item).collect();
         }
 
-        let items = search_rows(&visible, input, self.max);
+        let items = search_rows(&visible, input, self.max, field);
 
         // 历史里搜不到、但输入本身像个网址 → 直接打开
         if items.is_empty()
@@ -132,6 +127,26 @@ impl Provider for Web {
             return vec![open_item(url)];
         }
         items
+    }
+}
+
+/// 搜索哪一栏：`:web:url` 只搜网址，`:web:title` 只搜标题，默认两边都搜
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Field {
+    Both,
+    Title,
+    Url,
+}
+
+impl Field {
+    fn from_flags(flags: &[String]) -> Field {
+        let title = flags.iter().any(|flag| flag == "title");
+        let url = flags.iter().any(|flag| flag == "url");
+        match (title, url) {
+            (true, false) => Field::Title,
+            (false, true) => Field::Url,
+            _ => Field::Both,
+        }
     }
 }
 
@@ -166,12 +181,12 @@ impl Scope {
     }
 }
 
-fn search_rows(rows: &[&Row], input: &str, max: usize) -> Vec<Item> {
+fn search_rows(rows: &[&Row], input: &str, max: usize, field: Field) -> Vec<Item> {
     let matcher = SkimMatcherV2::default();
     let mut hits: Vec<(i64, usize)> = rows
         .iter()
         .enumerate()
-        .filter_map(|(i, row)| Some((score_row(&matcher, row, input)?, i)))
+        .filter_map(|(i, row)| Some((score_row(&matcher, row, input, field)?, i)))
         .collect();
 
     hits.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
@@ -248,11 +263,13 @@ fn to_item(row: &Row) -> Item {
 
 /// 给一条历史打分：标题用模糊匹配（短文本，靠谱），URL 只做**子串**匹配
 /// （去掉 `?` / `#` 后面的参数 —— 那里的 base64 随机串会让模糊匹配乱命中）。
-fn score_row(matcher: &SkimMatcherV2, row: &Row, pattern: &str) -> Option<i64> {
+fn score_row(matcher: &SkimMatcherV2, row: &Row, pattern: &str, field: Field) -> Option<i64> {
     let needle = pattern.to_lowercase();
     let mut score: Option<i64> = None;
 
-    if let Some(base) = matcher.fuzzy_match(&row.title, pattern) {
+    if field != Field::Url
+        && let Some(base) = matcher.fuzzy_match(&row.title, pattern)
+    {
         // 标题里完整出现关键词的排最前
         let bonus = if row.title.to_lowercase().contains(&needle) {
             EXACT_BONUS
@@ -262,7 +279,7 @@ fn score_row(matcher: &SkimMatcherV2, row: &Row, pattern: &str) -> Option<i64> {
         score = Some(base + bonus);
     }
 
-    if url_key(&row.url).to_lowercase().contains(&needle) {
+    if field != Field::Title && url_key(&row.url).to_lowercase().contains(&needle) {
         score = Some(score.unwrap_or(0).max(URL_BONUS));
     }
 
@@ -436,7 +453,32 @@ mod tests {
             visit_count: 1,
             last_visit: 0,
         };
-        assert_eq!(score_row(&m, &row, "rust"), None);
+        assert_eq!(score_row(&m, &row, "rust", Field::Both), None);
+    }
+
+    /// `:web:url` 只搜网址，`:web:title` 只搜标题
+    #[test]
+    fn fields_limit_which_column_matches() {
+        let m = SkimMatcherV2::default();
+        let row = Row {
+            url: "https://github.com/rust-lang/rust".to_string(),
+            title: "The Rust Programming Language".to_string(),
+            visit_count: 1,
+            last_visit: 0,
+        };
+
+        assert!(score_row(&m, &row, "rust-lang", Field::Url).is_some());
+        assert!(score_row(&m, &row, "rust-lang", Field::Title).is_none());
+        assert!(score_row(&m, &row, "Programming", Field::Title).is_some());
+        assert!(score_row(&m, &row, "Programming", Field::Url).is_none());
+        assert!(score_row(&m, &row, "Programming", Field::Both).is_some());
+
+        let flags = |items: &[&str]| items.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(Field::from_flags(&flags(&["url"])), Field::Url);
+        assert_eq!(Field::from_flags(&flags(&["title"])), Field::Title);
+        assert_eq!(Field::from_flags(&flags(&[])), Field::Both);
+        // 两个都给：退回两边都搜
+        assert_eq!(Field::from_flags(&flags(&["url", "title"])), Field::Both);
     }
 
     #[test]

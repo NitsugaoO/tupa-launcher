@@ -269,7 +269,8 @@ pub fn flag_description(flag: &str) -> &'static str {
             "不限时间 / 显示不可用项",
             "No time limit / show unavailable",
         ),
-        "url" => t("直接打开这个网址", "Open the URL directly"),
+        "url" => t("只在网址里搜索", "Search in URLs only"),
+        "title" => t("只在标题里搜索", "Search in titles only"),
         "yazi" => t("用 yazi 打开所在目录", "Open the folder with yazi"),
         "pi" => t("在目标目录启动 pi", "Start pi in that folder"),
         "code" => t("用 VSCode 打开", "Open with VSCode"),
@@ -599,7 +600,7 @@ pub fn help() -> String {
   admin   提权
   bg      后台执行
   week / month / all   浏览历史的时间范围
-  url     直接打开网址
+  url / title          :web 只在网址 / 标题里搜索
   yazi / pi / code     用指定程序打开目录
 
 按键
@@ -641,7 +642,7 @@ Flags
   admin   elevate
   bg      run in background
   week / month / all   history time range
-  url     open the URL directly
+  url / title          :web searches URLs / titles only
   yazi / pi / code     open the folder with that program
 
 Keys

@@ -1088,7 +1088,7 @@ mod tests {
 
         app.set_input(":web:".to_string());
         let web = app.completion.clone().expect(":web: 应该有候选");
-        assert_eq!(web.candidates, vec!["url", "week", "month", "all"]);
+        assert_eq!(web.candidates, vec!["url", "title", "week", "month", "all"]);
         assert!(!web.candidates.iter().any(|flag| flag == "admin"));
 
         app.set_input(":go:".to_string());

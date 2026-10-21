@@ -410,7 +410,7 @@ pub fn commands_index(infos: &[ProviderInfo]) -> Option<usize> {
 /// 各 provider 只解释自己关心的那几个（`admin` 提权、`bg` 后台、
 /// `week`/`month`/`all` 时间范围、`url` 直接打开网址）。
 pub const KNOWN_FLAGS: &[&str] = &[
-    "admin", "bg", "week", "month", "all", "url", "yazi", "pi", "code",
+    "admin", "bg", "week", "month", "all", "url", "title", "yazi", "pi", "code",
 ];
 
 /// 输入行的解析结果
