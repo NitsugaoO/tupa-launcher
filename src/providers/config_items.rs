@@ -123,6 +123,11 @@ fn build_fields(cfg: &Config) -> Vec<Field> {
             hint: crate::i18n::hint_cfg_hotkey(),
         },
         Field {
+            path: "daemon.panel",
+            value: cfg.daemon.panel.clone(),
+            hint: crate::i18n::hint_cfg_panel(),
+        },
+        Field {
             path: "daemon.copilot_key",
             value: cfg.daemon.copilot_key.to_string(),
             hint: crate::i18n::hint_cfg_copilot_key(),

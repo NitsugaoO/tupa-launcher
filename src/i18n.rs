@@ -531,6 +531,13 @@ pub fn hint_cfg_hotkey() -> &'static str {
     )
 }
 
+pub fn hint_cfg_panel() -> &'static str {
+    t(
+        "热键唤起哪种面板 tui（终端）或 gui（自绘窗口）",
+        "Panel on hotkey: tui (terminal) or gui (native window)",
+    )
+}
+
 pub fn hint_cfg_copilot_key() -> &'static str {
     t(
         "是否接管 Copilot 键 true 或 false",
