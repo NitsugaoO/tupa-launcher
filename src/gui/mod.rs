@@ -42,6 +42,10 @@ const WINDOW_CLASS: &str = "TupaLauncherWindow";
 const WIDTH_RATIO: f64 = 0.62;
 const HEIGHT_RATIO: f64 = 0.55;
 
+/// 内容四周留的空白（逻辑像素）：给窗口圆角让位，
+/// 否则左上角的输入行会被圆角切掉一块，右/下也会紧贴边框
+const PADDING: f32 = 7.0;
+
 pub fn run(cfg: Config, theme: Theme) -> Result<()> {
     // 已经开着就把它叫到前面，别开第二个
     #[cfg(windows)]
@@ -292,9 +296,12 @@ impl Gui {
             return;
         }
 
-        // 1) 按新的 cell 尺寸重算终端网格
-        let cols = ((state.width as f32 / state.text.cell_w).floor() as u16).max(1);
-        let rows = ((state.height as f32 / state.text.cell_h).floor() as u16).max(1);
+        // 1) 按新的 cell 尺寸重算终端网格（扣掉四周留白）
+        let padding = (PADDING * state.window.scale_factor() as f32).round() as i32;
+        let usable_w = (state.width as f32 - 2.0 * padding as f32).max(1.0);
+        let usable_h = (state.height as f32 - 2.0 * padding as f32).max(1.0);
+        let cols = ((usable_w / state.text.cell_w).floor() as u16).max(1);
+        let rows = ((usable_h / state.text.cell_h).floor() as u16).max(1);
         if cols != state.cols || rows != state.rows {
             state.cols = cols;
             state.rows = rows;
@@ -333,14 +340,22 @@ impl Gui {
                 height,
                 pixels: &mut surface,
             };
-            state.text.render(buffer, theme, &mut canvas);
+            // 先整块铺底色，网格铺不满的右/下边缘就是背景色而不是黑边
+            canvas.fill_all(text::to_pixel(theme.background));
+            state.text.render(buffer, theme, &mut canvas, (padding, padding));
 
             // 光标：一条竖线，比系统 IME 的组合框更贴合无边框窗口
             if cursor_visible {
                 let (x, y) = state.text.cell_origin(cursor.x, cursor.y);
                 let caret_w = (state.text.cell_w * 0.15).max(2.0) as u32;
                 let caret_h = (state.text.cell_h - 6.0).max(4.0) as u32;
-                canvas.fill_rect(x, y + 3, caret_w, caret_h, text::to_pixel(theme.accent));
+                canvas.fill_rect(
+                    x + padding,
+                    y + padding + 3,
+                    caret_w,
+                    caret_h,
+                    text::to_pixel(theme.accent),
+                );
             }
         }
         // 调试：把这一帧写成 BMP（`read` 工具能直接看）
@@ -363,7 +378,7 @@ impl Gui {
         if *composing {
             let (x, y) = state.text.cell_origin(cursor.x, cursor.y);
             state.window.set_ime_cursor_area(
-                PhysicalPosition::new(x, y),
+                PhysicalPosition::new(x + padding, y + padding),
                 PhysicalSize::new(
                     state.text.cell_w.round() as u32,
                     state.text.cell_h.round() as u32,

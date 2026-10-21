@@ -47,6 +47,11 @@ pub struct Canvas<'a> {
 }
 
 impl Canvas<'_> {
+    /// 整块铺底色：网格铺不满窗口时，右/下不会露出未绘制的黑边
+    pub fn fill_all(&mut self, color: u32) {
+        self.pixels.fill(color);
+    }
+
     pub fn fill_rect(&mut self, x: i32, y: i32, w: u32, h: u32, color: u32) {
         let (x0, y0) = (x.max(0), y.max(0));
         let x1 = (x + w as i32).min(self.width as i32);
@@ -184,7 +189,14 @@ impl TextRenderer {
     }
 
     /// 把一帧 ratatui 的 Buffer 画到画布上
-    pub fn render(&mut self, buffer: &Buffer, theme: Theme, canvas: &mut Canvas) {
+    /// `origin` 是网格左上角在窗口里的物理像素位置（给圆角留边距）
+    pub fn render(
+        &mut self,
+        buffer: &Buffer,
+        theme: Theme,
+        canvas: &mut Canvas,
+        origin: (i32, i32),
+    ) {
         let area = buffer.area;
         let (cw, ch) = (self.cell_w.ceil() as u32, self.cell_h.ceil() as u32);
 
@@ -207,7 +219,13 @@ impl TextRenderer {
                 }
                 .unwrap_or(cell.style().bg);
                 let (x, y) = self.cell_origin(col, row);
-                canvas.fill_rect(x, y, cw, ch, resolve(bg, theme.background));
+                canvas.fill_rect(
+                    x + origin.0,
+                    y + origin.1,
+                    cw,
+                    ch,
+                    resolve(bg, theme.background),
+                );
             }
         }
 
@@ -252,6 +270,7 @@ impl TextRenderer {
                 };
                 let fg = resolve(cell.style().fg, theme.fg);
                 let (x, y) = self.cell_origin(col, row);
+                let (x, y) = (x + origin.0, y + origin.1);
                 // 宽字符占两格，但字形只画一次
                 let _w = UnicodeWidthStr::width(symbol).max(1);
                 for glyph in run {
@@ -480,7 +499,7 @@ mod tests {
             height,
             pixels: &mut pixels,
         };
-        renderer.render(&buffer, Theme::default(), &mut canvas);
+        renderer.render(&buffer, Theme::default(), &mut canvas, (0, 0));
         (pixels, width, height)
     }
 
