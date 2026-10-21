@@ -99,7 +99,7 @@ impl Canvas<'_> {
                     Some((r, g, b)) => (r as u32, g as u32, b as u32),
                     None => (fr, fg_, fb),
                 };
-                let a = alpha as u32;
+                let a = u32::from(GAMMA[alpha as usize]);
                 let blend = |src: u32, dst: u32| (src * a + dst * (255 - a)) / 255;
                 let out = (blend(sr, dr) << 16) | (blend(sg, dg) << 8) | blend(sb, db);
                 self.pixels[base + px as usize] = out;
@@ -107,6 +107,19 @@ impl Canvas<'_> {
         }
     }
 }
+
+/// 抗锯齿的 gamma 校正表。
+///
+/// 直接按 alpha 线性混合时，细笔画会偏灰、发虚；终端（DirectWrite）合成前
+/// 会做 gamma 校正，我们要看起来一样就得补上。
+static GAMMA: std::sync::LazyLock<[u8; 256]> = std::sync::LazyLock::new(|| {
+    let mut table = [0u8; 256];
+    for (alpha, slot) in table.iter_mut().enumerate() {
+        let value = (alpha as f64 / 255.0).powf(1.0 / 1.2) * 255.0;
+        *slot = value.round().clamp(0.0, 255.0) as u8;
+    }
+    table
+});
 
 /// cell 网格 → 像素
 pub struct TextRenderer {
@@ -397,7 +410,9 @@ fn measure(font_system: &mut FontSystem, swash_cache: &mut SwashCache, scale: f3
     let line_height = text_height.max(font_size * LINE_HEIGHT_RATIO);
 
     CellMetrics {
-        advance: advance.ceil(),
+        // 保留字体真实的 advance（不取整）：ratatui 的列宽是按字符数算的，
+        // 这里一旦取整，列位置就会相对终端版本慢慢漂移
+        advance,
         baseline: ascent.ceil() + (line_height - text_height) / 2.0,
         cell_h: line_height.ceil() + 1.0,
     }
