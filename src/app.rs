@@ -42,6 +42,8 @@ pub struct App {
     default_idx: usize,
     /// 命令列表 provider 的下标
     commands_idx: Option<usize>,
+    /// 开屏内容 provider（收藏 + 最近命令）的下标
+    home_idx: usize,
     /// 当前生效的 provider
     pub active: usize,
     /// 命令前缀的结束位置（字节下标），用于高亮
@@ -109,6 +111,11 @@ impl App {
             .position(|i| i.keyword == default_keyword)
             .unwrap_or(0);
         let commands_idx = providers::commands_index(&infos);
+        // 开屏内容：输入为空时显示收藏 + 最近命令
+        let home_idx = infos
+            .iter()
+            .position(|info| info.keyword == providers::home::KEYWORD)
+            .unwrap_or(default_idx);
 
         let (cmd_tx, evt_rx) = providers::spawn_worker(providers);
 
@@ -130,6 +137,7 @@ impl App {
             infos,
             default_idx,
             commands_idx,
+            home_idx,
             active: default_idx,
             prefix_end: None,
             columns: DEFAULT_COLUMNS,
@@ -186,18 +194,22 @@ impl App {
         let commands_idx = self.commands_idx;
         let default_idx = self.default_idx;
 
-        let (idx, flags, args, is_command) = match providers::parse(&self.infos, &line, self.prefix)
-        {
-            Parsed::Default => (default_idx, Vec::new(), line.clone(), false),
-            Parsed::Command {
-                provider,
-                flags,
-                args,
-            } => (provider, flags, args, true),
-            Parsed::CommandList { query } => match commands_idx {
-                Some(idx) => (idx, Vec::new(), query, true),
-                None => (default_idx, Vec::new(), line.clone(), false),
-            },
+        // 开屏（输入为空）走 home：收藏 + 最近命令；一开始打字就回到正常解析
+        let (idx, flags, args, is_command) = if line.is_empty() {
+            (self.home_idx, Vec::new(), String::new(), false)
+        } else {
+            match providers::parse(&self.infos, &line, self.prefix) {
+                Parsed::Default => (default_idx, Vec::new(), line.clone(), false),
+                Parsed::Command {
+                    provider,
+                    flags,
+                    args,
+                } => (provider, flags, args, true),
+                Parsed::CommandList { query } => match commands_idx {
+                    Some(idx) => (idx, Vec::new(), query, true),
+                    None => (default_idx, Vec::new(), line.clone(), false),
+                },
+            }
         };
 
         self.active = idx;
@@ -965,14 +977,18 @@ mod tests {
     }
 
     #[test]
-    fn opens_with_empty_input_and_command_list() {
+    fn opens_with_home_provider() {
         let mut app = app();
         assert_eq!(app.input, "");
         assert_eq!(app.prefix_end, None);
 
         app.refresh();
-        // 空输入 → 命令列表（`:` provider）
-        assert_eq!(app.active_keyword(), ":");
+        // 空输入 → 开屏内容（收藏 + 最近命令）
+        assert_eq!(app.active_keyword(), "home");
+
+        // 一开始打字就回到正常解析
+        app.insert_char('c');
+        assert_ne!(app.active_keyword(), "home");
     }
 
     #[test]

@@ -12,6 +12,7 @@ pub mod config_items;
 pub mod everything;
 pub mod favorites;
 pub mod go;
+pub mod home;
 pub mod new;
 pub mod pi;
 pub mod run;
@@ -44,6 +45,8 @@ pub enum Kind {
     Switch,
     /// pi 会话
     Pi,
+    /// 最近执行过的命令（开屏列表用）
+    History,
 }
 
 impl Kind {
@@ -58,6 +61,7 @@ impl Kind {
             Kind::Help => "cmd",
             Kind::Switch => "sw",
             Kind::Pi => "pi",
+            Kind::History => "rec",
         }
     }
 
@@ -374,9 +378,13 @@ pub fn build(cfg: &Config) -> Vec<Box<dyn Provider>> {
     list.push(Box::new(config_items::ConfigItems));
     list.push(Box::new(switch::Switch));
 
+    // 开屏内容（收藏 + 最近命令）：没有关键字，所以不进命令列表
+    list.push(Box::new(home::Home::new(cfg)));
+
     // 命令列表放在最后：它要把前面所有 provider 的关键字列出来
     let metas = list
         .iter()
+        .filter(|p| p.keyword() != home::KEYWORD)
         .map(|p| commands::Meta {
             keyword: p.keyword().to_string(),
             description: p.description().to_string(),

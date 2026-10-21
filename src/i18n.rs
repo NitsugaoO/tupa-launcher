@@ -93,6 +93,10 @@ pub fn desc_switch() -> &'static str {
     t("开关 / 选项 / 数值", "Toggles & values")
 }
 
+pub fn desc_home() -> &'static str {
+    t("收藏与最近", "Favorites & recent")
+}
+
 pub fn desc_commands() -> &'static str {
     t("命令列表", "Commands")
 }
