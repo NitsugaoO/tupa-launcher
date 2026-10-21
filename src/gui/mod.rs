@@ -22,10 +22,10 @@ use ratatui::layout::Rect;
 use softbuffer::{Context as SoftContext, Surface};
 use winit::application::ApplicationHandler;
 use winit::dpi::{PhysicalPosition, PhysicalSize};
-use winit::event::{ElementState, Ime, WindowEvent};
+use winit::event::{ElementState, Ime, MouseButton, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::keyboard::{Key, ModifiersState, NamedKey};
-use winit::window::{Window, WindowLevel};
+use winit::window::{ResizeDirection, Window, WindowLevel};
 
 use crate::app::App;
 use crate::config::Config;
@@ -41,6 +41,9 @@ const WINDOW_CLASS: &str = "TupaLauncherWindow";
 /// 面板占主显示器的比例
 const WIDTH_RATIO: f64 = 0.62;
 const HEIGHT_RATIO: f64 = 0.55;
+
+/// 鼠标离窗口边缘多近算「拖拽缩放」（逻辑像素）
+const EDGE_MARGIN: f64 = 6.0;
 
 /// 内容四周留的空白（逻辑像素）：给窗口圆角让位，
 /// 否则左上角的输入行会被圆角切掉一块，右/下也会紧贴边框
@@ -65,6 +68,7 @@ pub fn run(cfg: Config, theme: Theme) -> Result<()> {
         modifiers: ModifiersState::empty(),
         composing: false,
         hidden: false,
+        cursor: PhysicalPosition::new(0.0, 0.0),
         dirty: true,
         // 调试用：`TUPA_GUI_SHOT=out.bmp` 渲一帧就存图退出（不需要看屏幕）
         shot: std::env::var_os("TUPA_GUI_SHOT").map(PathBuf::from),
@@ -96,6 +100,8 @@ struct Gui {
     /// 输入法正在组合（此时键盘事件交给输入法，不再当成普通按键）
     composing: bool,
     hidden: bool,
+    /// 鼠标位置（物理像素），拖拽窗口时要用
+    cursor: PhysicalPosition<f64>,
     /// 这一轮需要重绘
     dirty: bool,
     /// 渲一帧后存图退出（`TUPA_GUI_SHOT`，调试渲染用）
@@ -156,6 +162,17 @@ impl ApplicationHandler for Gui {
             }
 
             WindowEvent::Ime(ime) => self.ime(ime),
+
+            WindowEvent::CursorMoved { position, .. } => {
+                self.cursor = position;
+            }
+
+            // 无边框窗口没有标题栏：自己判断「拖边缘 = 缩放」「拖顶部 = 移动」
+            WindowEvent::MouseInput {
+                state: ElementState::Pressed,
+                button: MouseButton::Left,
+                ..
+            } => self.begin_window_drag(),
 
             WindowEvent::RedrawRequested => self.redraw(),
 
@@ -252,6 +269,41 @@ impl Gui {
             eprintln!("[tupa-launcher] surface resize 失败：{error}");
         }
         self.dirty = true;
+    }
+
+    /// 鼠标左键按下：靠近边缘就进入系统缩放，顶部一条则可以拖动窗口
+    fn begin_window_drag(&mut self) {
+        let Some(state) = &self.state else {
+            return;
+        };
+        let (width, height) = (state.width as f64, state.height as f64);
+        let (x, y) = (self.cursor.x, self.cursor.y);
+
+        // 缩放的"热区"宽度（物理像素，跟着 DPI 走）
+        let edge = (EDGE_MARGIN * state.window.scale_factor()).max(4.0);
+        let (west, east) = (x <= edge, x >= width - edge);
+        let (north, south) = (y <= edge, y >= height - edge);
+        let direction = match (west, east, north, south) {
+            (true, _, true, _) => Some(ResizeDirection::NorthWest),
+            (_, true, true, _) => Some(ResizeDirection::NorthEast),
+            (true, _, _, true) => Some(ResizeDirection::SouthWest),
+            (_, true, _, true) => Some(ResizeDirection::SouthEast),
+            (true, _, _, _) => Some(ResizeDirection::West),
+            (_, true, _, _) => Some(ResizeDirection::East),
+            (_, _, true, _) => Some(ResizeDirection::North),
+            (_, _, _, true) => Some(ResizeDirection::South),
+            _ => None,
+        };
+        if let Some(direction) = direction {
+            let _ = state.window.drag_resize_window(direction);
+            return;
+        }
+
+        // 顶部一条（内边距 + 输入行）当标题栏用
+        let band = f64::from(PADDING) * state.window.scale_factor() + f64::from(state.text.cell_h) / 2.0;
+        if y <= band {
+            let _ = state.window.drag_window();
+        }
     }
 
     fn ime(&mut self, ime: Ime) {
@@ -502,6 +554,17 @@ fn to_key(
 ) -> Option<crossterm::event::KeyEvent> {
     use crossterm::event::{KeyCode, KeyEvent};
 
+    let mut mods = KeyModifiers::NONE;
+    if modifiers.contains(ModifiersState::CONTROL) {
+        mods |= KeyModifiers::CONTROL;
+    }
+    if modifiers.contains(ModifiersState::ALT) {
+        mods |= KeyModifiers::ALT;
+    }
+    if modifiers.contains(ModifiersState::SHIFT) {
+        mods |= KeyModifiers::SHIFT;
+    }
+
     let code = match &event.logical_key {
         Key::Named(NamedKey::Enter) => KeyCode::Enter,
         Key::Named(NamedKey::Escape) => KeyCode::Esc,
@@ -525,21 +588,16 @@ fn to_key(
             if chars.next().is_some() {
                 return None; // 一次给多个字符的（输入法残留）不当按键处理
             }
+            // Alt / Ctrl 组合不产生文本（winit 的 `text` 为空）。
+            // 万一修饰键状态没同步过来，这里补一个 ALT，
+            // 免得 `alt+`` 热键把 ` 输进输入框
+            if event.text.is_none() && !mods.contains(KeyModifiers::ALT) {
+                mods |= KeyModifiers::ALT;
+            }
             KeyCode::Char(first)
         }
         _ => return None,
     };
-
-    let mut mods = KeyModifiers::NONE;
-    if modifiers.contains(ModifiersState::CONTROL) {
-        mods |= KeyModifiers::CONTROL;
-    }
-    if modifiers.contains(ModifiersState::ALT) {
-        mods |= KeyModifiers::ALT;
-    }
-    if modifiers.contains(ModifiersState::SHIFT) {
-        mods |= KeyModifiers::SHIFT;
-    }
 
     Some(KeyEvent::new(code, mods))
 }
