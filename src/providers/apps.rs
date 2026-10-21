@@ -2,8 +2,8 @@
 
 use std::path::Path;
 
-use fuzzy_matcher::skim::SkimMatcherV2;
 use fuzzy_matcher::FuzzyMatcher;
+use fuzzy_matcher::skim::SkimMatcherV2;
 
 use super::{Action, Item, Kind, Provider};
 use crate::config::{AppEntry, Config};
@@ -61,8 +61,8 @@ impl Provider for Apps {
         "app"
     }
 
-    fn description(&self) -> &str {
-        "启动应用（列表在 config.toml 里自定义）"
+    fn description(&self) -> &'static str {
+        crate::i18n::desc_app()
     }
 
     fn query(&self, args: &str, flags: &[String]) -> Vec<Item> {
@@ -74,9 +74,7 @@ impl Provider for Apps {
 
         let mut hits: Vec<(i64, usize)> = if q.is_empty() {
             // 空查询：按配置顺序原样列出（相当于"收藏"）
-            (0..self.entries.len())
-                .map(|i| (-(i as i64), i))
-                .collect()
+            (0..self.entries.len()).map(|i| (-(i as i64), i)).collect()
         } else {
             self.keys
                 .iter()
@@ -97,16 +95,15 @@ impl Provider for Apps {
             .take(self.max)
             .map(|(_, i)| {
                 let e = &self.entries[i];
-                Item {
-                    kind: Kind::App,
-                    title: e.name.clone(),
-                    subtitle: self.display[i].clone(),
-                    action: Action::Launch {
+                Item::new(
+                    Kind::App,
+                    vec![e.name.clone(), self.display[i].clone()],
+                    Action::Launch {
                         command: e.command.clone(),
                         args: e.args.clone(),
                         elevated,
                     },
-                }
+                )
             })
             .collect()
     }

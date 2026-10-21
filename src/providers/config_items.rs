@@ -7,13 +7,21 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use fuzzy_matcher::skim::SkimMatcherV2;
 use fuzzy_matcher::FuzzyMatcher;
+use fuzzy_matcher::skim::SkimMatcherV2;
 
-use super::{Action, Item, Kind, Provider};
+use super::{Action, Column, Item, Kind, Provider};
 use crate::config::{self, Config};
 
 pub struct ConfigItems;
+
+/// 配置项 · 当前值 · 位置 · 说明
+const COLUMNS: &[Column] = &[
+    Column::new(5, 14, 0),
+    Column::new(2, 0, 26),
+    Column::new(1, 0, 16),
+    Column::new(4, 0, 0),
+];
 
 struct Field {
     path: &'static str,
@@ -26,8 +34,12 @@ impl Provider for ConfigItems {
         "cfg"
     }
 
-    fn description(&self) -> &str {
-        "查看配置（Enter 在编辑器里跳到对应行）"
+    fn description(&self) -> &'static str {
+        crate::i18n::desc_cfg()
+    }
+
+    fn columns(&self) -> &'static [Column] {
+        COLUMNS
     }
 
     fn query(&self, args: &str, _flags: &[String]) -> Vec<Item> {
@@ -63,43 +75,72 @@ impl Provider for ConfigItems {
 
 fn build_fields(cfg: &Config) -> Vec<Field> {
     let opt = |value: &Option<String>| value.clone().unwrap_or_default();
-    let color_hint = |name: &'static str| -> &'static str { name };
 
     vec![
         Field {
             path: "general.default_provider",
             value: cfg.general.default_provider.clone(),
-            hint: "不带关键字时走哪个 provider：app / ev",
+            hint: crate::i18n::hint_cfg_default_provider(),
+        },
+        Field {
+            path: "general.everything_path",
+            value: opt(&cfg.general.everything_path),
+            hint: crate::i18n::hint_cfg_everything_path(),
         },
         Field {
             path: "general.max_results",
             value: cfg.general.max_results.to_string(),
-            hint: "每个 provider 最多返回多少条",
+            hint: crate::i18n::hint_cfg_max_results(),
+        },
+        Field {
+            path: "general.new_files_dir",
+            value: opt(&cfg.general.new_files_dir),
+            hint: crate::i18n::hint_cfg_new_files_dir(),
+        },
+        Field {
+            path: "general.command_prefix",
+            value: cfg.general.command_prefix.clone(),
+            hint: crate::i18n::hint_cfg_command_prefix(),
+        },
+        Field {
+            path: "general.show_hints",
+            value: cfg.general.show_hints.to_string(),
+            hint: crate::i18n::hint_cfg_show_hints(),
+        },
+        Field {
+            path: "general.language",
+            value: cfg.general.language.clone(),
+            hint: crate::i18n::hint_cfg_language(),
+        },
+        Field {
+            path: "general.prefill_colon",
+            value: cfg.general.prefill_colon.to_string(),
+            hint: crate::i18n::hint_cfg_prefill_colon(),
         },
         Field {
             path: "daemon.hotkey",
             value: cfg.daemon.hotkey.clone(),
-            hint: "唤起热键，如 alt+`（改完需重启守护进程）",
+            hint: crate::i18n::hint_cfg_hotkey(),
         },
         Field {
             path: "daemon.copilot_key",
             value: cfg.daemon.copilot_key.to_string(),
-            hint: "是否接管 Copilot 键：true / false",
+            hint: crate::i18n::hint_cfg_copilot_key(),
         },
         Field {
             path: "theme.background",
             value: opt(&cfg.theme.background),
-            hint: "背景色，如 #272e33（留空 = 内置默认）",
+            hint: crate::i18n::hint_cfg_theme_background(),
         },
         Field {
             path: "theme.accent",
             value: opt(&cfg.theme.accent),
-            hint: color_hint("强调色，如 #a7c080（留空 = 内置默认）"),
+            hint: crate::i18n::hint_cfg_theme_accent(),
         },
         Field {
             path: "theme.fg",
             value: opt(&cfg.theme.fg),
-            hint: "正文色，如 #d3c6aa（留空 = 内置默认）",
+            hint: crate::i18n::hint_cfg_theme_fg(),
         },
     ]
 }
@@ -142,23 +183,24 @@ fn locate_fields() -> HashMap<String, usize> {
 impl Field {
     fn into_item(self, file: &Path, line: Option<usize>) -> Item {
         let shown = if self.value.is_empty() {
-            "(默认)".to_string()
+            crate::i18n::config_default_value().to_string()
         } else {
             self.value.clone()
         };
-        let location = match line {
-            Some(number) => format!("第 {number} 行"),
-            None => "未写进配置文件".to_string(),
-        };
+        let location = crate::i18n::config_line(line);
 
-        Item {
-            kind: Kind::Setting,
-            title: self.path.to_string(),
-            subtitle: format!("{location}  ·  = {shown}  ·  {}", self.hint),
-            action: Action::OpenInEditor {
+        Item::new(
+            Kind::Setting,
+            vec![
+                self.path.to_string(),
+                format!("= {shown}"),
+                location,
+                self.hint.to_string(),
+            ],
+            Action::OpenInEditor {
                 file: file.to_path_buf(),
                 line: line.unwrap_or(1),
             },
-        }
+        )
     }
 }

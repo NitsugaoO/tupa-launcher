@@ -75,7 +75,11 @@ pub fn which(command: &str) -> Option<PathBuf> {
     candidates
         .iter()
         .find(|p| matches!(ext(p).as_str(), "exe" | "com"))
-        .or_else(|| candidates.iter().find(|p| matches!(ext(p).as_str(), "cmd" | "bat")))
+        .or_else(|| {
+            candidates
+                .iter()
+                .find(|p| matches!(ext(p).as_str(), "cmd" | "bat"))
+        })
         .or_else(|| candidates.first())
         .cloned()
 }
@@ -90,12 +94,12 @@ pub fn which(command: &str) -> Option<PathBuf> {
 /// 比自己拆 `.lnk` 二进制格式可靠。
 #[cfg(windows)]
 pub fn resolve_shortcut(path: &Path) -> PathBuf {
-    use windows::core::{Interface, PCWSTR};
     use windows::Win32::System::Com::{
         CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx,
         IPersistFile, STGM_READ,
     };
     use windows::Win32::UI::Shell::{IShellLinkW, ShellLink};
+    use windows::core::{Interface, PCWSTR};
 
     let mut current = path.to_path_buf();
 
@@ -119,7 +123,8 @@ pub fn resolve_shortcut(path: &Path) -> PathBuf {
             // CoInitializeEx 是幂等的（已初始化会返回 S_FALSE），这里忽略返回值
             let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
 
-            let Ok(link) = CoCreateInstance::<_, IShellLinkW>(&ShellLink, None, CLSCTX_INPROC_SERVER)
+            let Ok(link) =
+                CoCreateInstance::<_, IShellLinkW>(&ShellLink, None, CLSCTX_INPROC_SERVER)
             else {
                 break;
             };
@@ -131,10 +136,7 @@ pub fn resolve_shortcut(path: &Path) -> PathBuf {
             }
 
             let mut buffer = [0u16; 1024];
-            if link
-                .GetPath(&mut buffer, std::ptr::null_mut(), 0)
-                .is_err()
-            {
+            if link.GetPath(&mut buffer, std::ptr::null_mut(), 0).is_err() {
                 break;
             }
 
@@ -176,21 +178,37 @@ pub fn resolve_executable(command: &str) -> Option<PathBuf> {
 // 面板窗口（Windows Terminal）
 // ---------------------------------------------------------------------------
 
-/// Windows Terminal 的窗口类名
-#[cfg(windows)]
-pub const WT_CLASS: &str = "CASCADIA_HOSTING_WINDOW_CLASS";
-/// 面板窗口标题（对应 WT profile 的 `tabTitle`）
+/// 面板窗口标题
 #[cfg(windows)]
 pub const PANEL_TITLE: &str = "tupa-launcher";
+/// 面板进程的可执行文件名（自绘窗口，不是 Windows Terminal 里的一个标签页）
+#[cfg(windows)]
+pub const PANEL_EXE: &str = "tupa-launcher.exe";
 
 #[cfg(windows)]
 static FOUND_PANEL: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
-/// 找面板窗口。
+/// 找面板窗口：**进程名 + 标题**双保险。
 ///
-/// 不直接用 `FindWindowW(类名, 标题)` 精确匹配：WT 的窗口标题可能是
-/// `tupa-launcher`、`tupa-launcher - PowerShell` 之类的形式，
-/// 所以枚举出所有 Windows Terminal 窗口，按标题是否**包含** `tupa-launcher` 判定。
+/// 为什么不按窗口类名找：自绘窗口的类名是 winit 注册的，和 TUI 时代完全不同；
+/// 而 `tupa-launcher.exe` 这个进程名足够唯一 —— pi 里开着同名标签页时
+/// 窗口属于 `WindowsTerminal.exe`，自然就被排除了。
+///
+/// 面板窗口标题是否属于面板。
+///
+/// 只认 `tupa-launcher` 本身，或 `tupa-launcher - …` / `tupa-launcher: …` 这种后缀；
+/// **不能用 `contains`**：pi 在项目目录里工作时窗口标题是 `π - tupa-launcher`，
+/// 包含 `tupa-launcher` 但不是面板，按 contains 会把 pi 窗口当成面板。
+#[cfg(windows)]
+fn is_panel_title(title: &str) -> bool {
+    let title = title.to_lowercase();
+    let panel = PANEL_TITLE.to_lowercase();
+    let Some(rest) = title.strip_prefix(panel.as_str()) else {
+        return false;
+    };
+    rest.is_empty() || rest.starts_with(" - ") || rest.starts_with(": ")
+}
+
 #[cfg(windows)]
 pub fn find_panel() -> windows_sys::Win32::Foundation::HWND {
     use std::sync::atomic::Ordering;
@@ -213,10 +231,8 @@ unsafe extern "system" fn enum_panel_proc(
     if class_len <= 0 {
         return 1; // 继续枚举
     }
-    let class = String::from_utf16_lossy(&class_buf[..class_len as usize]);
-    if class != WT_CLASS {
-        return 1;
-    }
+    let _ = class_len;
+    let _ = class_buf;
 
     let mut title_buf = [0u16; 512];
     let title_len = unsafe { GetWindowTextW(hwnd, title_buf.as_mut_ptr(), title_buf.len() as i32) };
@@ -224,11 +240,47 @@ unsafe extern "system" fn enum_panel_proc(
         return 1;
     }
     let title = String::from_utf16_lossy(&title_buf[..title_len as usize]);
-    if title.to_lowercase().contains(PANEL_TITLE) {
-        FOUND_PANEL.store(hwnd as usize, std::sync::atomic::Ordering::SeqCst);
-        return 0; // 找到就停
+    if !is_panel_title(&title) {
+        return 1;
     }
-    1
+    // 标题对上了，再看是不是我们自己这个 exe 的窗口
+    if !window_process_is_panel(hwnd) {
+        return 1;
+    }
+    FOUND_PANEL.store(hwnd as usize, std::sync::atomic::Ordering::SeqCst);
+    0 // 找到就停
+}
+
+/// 这个窗口属于 `tupa-launcher.exe` 吗？
+#[cfg(windows)]
+fn window_process_is_panel(hwnd: windows_sys::Win32::Foundation::HWND) -> bool {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::Threading::{
+        OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, QueryFullProcessImageNameW,
+    };
+    use windows_sys::Win32::UI::WindowsAndMessaging::GetWindowThreadProcessId;
+
+    let mut pid = 0u32;
+    unsafe { GetWindowThreadProcessId(hwnd, &mut pid) };
+    if pid == 0 {
+        return false;
+    }
+    let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
+    if process.is_null() {
+        return false;
+    }
+    let mut buffer = [0u16; 1024];
+    let mut len = buffer.len() as u32;
+    let ok = unsafe { QueryFullProcessImageNameW(process, 0, buffer.as_mut_ptr(), &mut len) };
+    unsafe { CloseHandle(process) };
+    if ok == 0 || len == 0 {
+        return false;
+    }
+
+    let path = String::from_utf16_lossy(&buffer[..len as usize]);
+    path.rsplit(['\\', '/'])
+        .next()
+        .is_some_and(|name| name.eq_ignore_ascii_case(PANEL_EXE))
 }
 
 /// 面板窗口当前是否可见
@@ -254,9 +306,7 @@ pub fn hide_panel() {
 /// 显示面板窗口（隐藏太久时 WM 会把它标记成 minimized，用 SW_RESTORE 处理）
 #[cfg(windows)]
 pub fn show_panel() {
-    use windows_sys::Win32::UI::WindowsAndMessaging::{
-        IsIconic, SW_RESTORE, SW_SHOW, ShowWindow,
-    };
+    use windows_sys::Win32::UI::WindowsAndMessaging::{IsIconic, SW_RESTORE, SW_SHOW, ShowWindow};
 
     let hwnd = find_panel();
     if hwnd.is_null() {
@@ -278,3 +328,21 @@ pub fn panel_visible() -> bool {
 }
 #[cfg(not(windows))]
 pub fn hide_panel() {}
+
+#[cfg(all(test, windows))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn panel_title_does_not_match_pi_window() {
+        assert!(is_panel_title("tupa-launcher"));
+        assert!(is_panel_title("TUPA-LAUNCHER"));
+        assert!(is_panel_title("tupa-launcher - PowerShell"));
+        assert!(is_panel_title("tupa-launcher: pi"));
+
+        // pi 在项目目录里工作时是 `π - tupa-launcher`，不能误判
+        assert!(!is_panel_title("π - tupa-launcher"));
+        assert!(!is_panel_title("tupa-launcher-dev"));
+        assert!(!is_panel_title("foo tupa-launcher"));
+    }
+}

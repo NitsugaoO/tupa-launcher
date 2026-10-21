@@ -3,12 +3,36 @@
 #     即 C:\Users\<你>\.config\tupa-launcher\config.toml
 
 [general]
-# 输入不带关键字时，交给哪个 provider（app / ev）
+# 输入**不带 `:` 前缀**时，整行交给哪个 provider 当搜索词（app / ev）
 default_provider = "app"
 # 单个 provider 最多返回多少条
 max_results = 30
 # es.exe 路径；留空自动探测（PATH → %LOCALAPPDATA%\Everything → Program Files）
 # everything_path = 'C:\Users\<你的用户名>\AppData\Local\Everything\es.exe'
+# 开屏时输入框是否预填 `:`（true = 直接进命令模式；false = 空输入，但仍显示命令列表）
+prefill_colon = false
+# 命令前缀（默认 `:`）；修饰符分隔符也用它，例如 @run@admin
+# new（新建文件）放在哪个目录；留空 = ~/Projects/New Files
+# new_files_dir = 'C:\Users\<你>\Projects\New Files'
+# 界面语言：zh / en
+# 右下角是否显示快捷键提示
+show_hints = true
+language = "zh"
+command_prefix = ":"
+
+# ---------------------------------------------------------------------------
+# 常驻守护进程（--daemon）：全局热键 + 面板显隐
+# ---------------------------------------------------------------------------
+
+[daemon]
+# 唤起 / 隐藏面板的全局热键（ctrl / alt / shift / win + 主键）
+hotkey = "alt+`"
+# 是否接管 Copilot 键（Win+Shift+F23）
+copilot_key = true
+# 热键唤起哪种面板：
+#   tui = Windows Terminal 里的终端界面（默认）
+#   gui = 自绘无边框窗口（实验特性，相当于 tupa-launcher --gui）
+panel = "tui"
 
 # ---------------------------------------------------------------------------
 # 应用列表（需求 R4：最常用的功能，列表自己说了算）
@@ -70,3 +94,18 @@ command = "taskmgr"
 # good       = "#83c092"   # 成功
 # warn       = "#dbbc7f"   # 警告
 # bad        = "#e67e80"   # 错误
+
+# ---------------------------------------------------------------------------
+# 应用内开关（`:switch`）
+#
+# 不在这个文件里配置。开关 / 选项 / 数值写在独立文件
+# ~/.config/tupa-launcher/actions.toml 里（不写则该命令只用内置的
+# 深色模式 / 屏幕亮度 / 电池养护模式 / 节能模式 / 保持唤醒）。格式见 README 的「应用内开关」一节：
+#
+#   [[items]]
+#   kind = "toggle"            # toggle / choice / number
+#   title = "电池养护模式"
+#   get = '...'                # stdout 第一行是当前值
+#   on  = '...'
+#   off = '...'
+# ---------------------------------------------------------------------------

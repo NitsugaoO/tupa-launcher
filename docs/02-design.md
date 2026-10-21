@@ -150,7 +150,7 @@ RegisterHotKey("alt+`")                     主线程消息循环（只做转发
 ```
 
 窗口靠 **类名 + 标题** 识别：`CASCADIA_HOSTING_WINDOW_CLASS` +
-标题包含 `tupa-launcher`（由 WT profile 的 `tabTitle` 固定）。
+标题等于 `tupa-launcher`（或带 ` - ` / `: ` 后缀），由 WT profile 的 `tabTitle` 固定。
 面板退出 → 窗口消失 → 下次热键重新拉起，正好是“呼之即来、用完即走”。
 
 ## 7. 编码坑（已解决）

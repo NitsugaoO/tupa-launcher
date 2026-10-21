@@ -29,11 +29,7 @@ impl Everything {
     pub fn new(cfg: &Config) -> Option<Self> {
         let exe = if let Some(p) = cfg.general.everything_path.as_deref() {
             let path = PathBuf::from(p);
-            if path.is_file() {
-                path
-            } else {
-                find_es()?
-            }
+            if path.is_file() { path } else { find_es()? }
         } else {
             find_es()?
         };
@@ -50,12 +46,13 @@ impl Everything {
 pub(crate) fn find_es() -> Option<PathBuf> {
     if let Ok(out) = Command::new("where.exe").arg("es.exe").output()
         && out.status.success()
-            && let Some(line) = String::from_utf8_lossy(&out.stdout).lines().next() {
-                let p = PathBuf::from(line.trim());
-                if p.is_file() {
-                    return Some(p);
-                }
-            }
+        && let Some(line) = String::from_utf8_lossy(&out.stdout).lines().next()
+    {
+        let p = PathBuf::from(line.trim());
+        if p.is_file() {
+            return Some(p);
+        }
+    }
 
     let mut candidates: Vec<PathBuf> = Vec::new();
     if let Some(dir) = dirs::data_local_dir() {
@@ -108,9 +105,10 @@ fn score(path: &Path, terms: &[String], home: Option<&str>) -> i64 {
 
     // 自己目录下的文件最可能是想要的那个
     if let Some(home) = home
-        && full.starts_with(home) {
-            s += 120;
-        }
+        && full.starts_with(home)
+    {
+        s += 120;
+    }
 
     for (needle, penalty) in NOISE {
         if full.contains(needle) {
@@ -137,9 +135,10 @@ fn score(path: &Path, terms: &[String], home: Option<&str>) -> i64 {
 
     // 可执行文件优先于同名目录
     if let Some(ext) = path.extension().and_then(|e| e.to_str())
-        && BOOST_EXTS.contains(&ext.to_lowercase().as_str()) {
-            s += 60;
-        }
+        && BOOST_EXTS.contains(&ext.to_lowercase().as_str())
+    {
+        s += 60;
+    }
 
     // 整体路径短一点更好
     s -= (full.len() / 10) as i64;
@@ -154,8 +153,8 @@ impl Provider for Everything {
         "ev"
     }
 
-    fn description(&self) -> &str {
-        "Everything 文件搜索"
+    fn description(&self) -> &'static str {
+        crate::i18n::desc_ev()
     }
 
     fn query(&self, args: &str, _flags: &[String]) -> Vec<Item> {

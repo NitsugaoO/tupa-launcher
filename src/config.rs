@@ -36,6 +36,12 @@ pub struct Daemon {
     /// 这个键的原样组合被 shell 占着，`RegisterHotKey` 注册不了，
     /// 所以要走低级键盘钩子拦下 `F23`；不想要就设 `false`。
     pub copilot_key: bool,
+
+    /// 热键唤起的面板用哪一版：`tui`（Windows Terminal，默认）还是 `gui`（自绘窗口）。
+    ///
+    /// 两套界面共用同一份代码和状态机，只是外壳不同。
+    /// GUI 版还在打磨（字体/圆角/鼠标等），所以默认仍走终端版。
+    pub panel: String,
 }
 
 impl Default for Daemon {
@@ -43,10 +49,10 @@ impl Default for Daemon {
         Daemon {
             hotkey: "alt+`".to_string(),
             copilot_key: true,
+            panel: "tui".to_string(),
         }
     }
 }
-
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
@@ -57,6 +63,20 @@ pub struct General {
     pub max_results: usize,
     /// `es.exe` 路径；留空则自动探测
     pub everything_path: Option<String>,
+    /// 开屏时输入框是否预填命令前缀（直接进入命令模式）。
+    ///
+    /// `false` 时开屏是空输入，但仍然显示命令列表。
+    pub prefill_colon: bool,
+    /// `:new` 新建文件放在哪个目录；留空 = `~/Projects/New Files`
+    pub new_files_dir: Option<String>,
+    /// 命令前缀，默认 `:`，也可以改成 `@` 之类不常用的符号。
+    ///
+    /// 修饰符分隔符也用这个字符：`@run@admin`。
+    pub command_prefix: String,
+    /// 界面语言：`zh` 或 `en`（未知值按 `zh` 处理）
+    pub language: String,
+    /// 是否在右下角显示快捷键提示
+    pub show_hints: bool,
 }
 
 impl Default for General {
@@ -65,6 +85,11 @@ impl Default for General {
             default_provider: "app".to_string(),
             max_results: 30,
             everything_path: None,
+            prefill_colon: false,
+            new_files_dir: None,
+            command_prefix: ":".to_string(),
+            language: "zh".to_string(),
+            show_hints: true,
         }
     }
 }

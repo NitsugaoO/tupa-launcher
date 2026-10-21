@@ -95,12 +95,13 @@ impl Theme {
 
         // 2) 独立的 theme.toml
         if let Some(path) = config::config_dir().map(|d| d.join("theme.toml"))
-            && let Ok(text) = std::fs::read_to_string(&path) {
-                match toml::from_str::<ThemeOverrides>(&text) {
-                    Ok(ov) => theme.apply(&ov),
-                    Err(e) => eprintln!("[tupa-launcher] theme.toml 解析失败：{e}"),
-                }
+            && let Ok(text) = std::fs::read_to_string(&path)
+        {
+            match toml::from_str::<ThemeOverrides>(&text) {
+                Ok(ov) => theme.apply(&ov),
+                Err(e) => eprintln!("[tupa-launcher] theme.toml 解析失败：{e}"),
             }
+        }
 
         // 3) config.toml 的 [theme] 段
         theme.apply(&cfg.theme);
@@ -110,9 +111,10 @@ impl Theme {
     fn apply(&mut self, ov: &ThemeOverrides) {
         fn set(target: &mut Color, src: &Option<String>) {
             if let Some(v) = src.as_deref()
-                && let Some(rgb) = Rgb::parse(v) {
-                    *target = rgb.color();
-                }
+                && let Some(rgb) = Rgb::parse(v)
+            {
+                *target = rgb.color();
+            }
         }
         set(&mut self.background, &ov.background);
         set(&mut self.panel, &ov.panel);

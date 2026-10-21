@@ -37,16 +37,31 @@ use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
     MOD_SHIFT, MOD_WIN, RegisterHotKey, SendInput, UnregisterHotKey, VK_ESCAPE, VK_F1, VK_F23,
     VK_OEM_3, VK_RETURN, VK_SPACE, VK_TAB,
 };
-use windows_sys::Win32::UI::Shell::ShellExecuteW;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    CallNextHookEx, GetForegroundWindow, GetMessageW,
-    IsWindowVisible, KBDLLHOOKSTRUCT, MSG, PostThreadMessageW, SW_SHOWNORMAL,
-    SetForegroundWindow, SetWindowsHookExW, WH_KEYBOARD_LL, WM_APP, WM_HOTKEY,
-    WM_KEYDOWN, WM_SYSKEYDOWN,
+    CallNextHookEx, GetForegroundWindow, GetMessageW, IsWindowVisible, KBDLLHOOKSTRUCT, MSG,
+    PostThreadMessageW, SetForegroundWindow, SetWindowsHookExW, WH_KEYBOARD_LL,
+    WM_APP, WM_HOTKEY, WM_KEYDOWN, WM_SYSKEYDOWN,
 };
 
-/// 面板使用的 WT profile 名
-const PANEL_PROFILE: &str = "tupa-launcher";
+/// 终端面板使用的 WT profile 名
+const WT_PROFILE: &str = "tupa-launcher";
+
+/// 热键唤起哪种面板（配置里的 `[daemon] panel`）
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PanelKind {
+    Gui,
+    Tui,
+}
+
+impl PanelKind {
+    pub fn parse(value: &str) -> PanelKind {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "tui" | "term" | "terminal" => PanelKind::Tui,
+            _ => PanelKind::Gui,
+        }
+    }
+}
+
 /// 热键 ID（同一个进程里唯一即可）
 const HOTKEY_ID: i32 = 1;
 
@@ -143,7 +158,7 @@ fn parse_key(name: &str) -> Result<u32> {
 // 主流程
 // ---------------------------------------------------------------------------
 
-pub fn run(hotkey: &Hotkey, copilot_key: bool, debug: bool) -> Result<()> {
+pub fn run(hotkey: &Hotkey, copilot_key: bool, panel: PanelKind, debug: bool) -> Result<()> {
     if !is_single_instance() {
         log("已有守护进程在运行，本次退出");
         return Ok(());
@@ -156,7 +171,8 @@ pub fn run(hotkey: &Hotkey, copilot_key: bool, debug: bool) -> Result<()> {
 
     // MOD_NOREPEAT：按住热键不会连续触发
     let modifiers = hotkey.modifiers | MOD_NOREPEAT;
-    let registered = unsafe { RegisterHotKey(std::ptr::null_mut(), HOTKEY_ID, modifiers, hotkey.vk) };
+    let registered =
+        unsafe { RegisterHotKey(std::ptr::null_mut(), HOTKEY_ID, modifiers, hotkey.vk) };
     if registered == 0 {
         let error = unsafe { GetLastError() };
         log(&format!("注册热键 {} 失败，错误码 {error}", hotkey.spec));
@@ -181,7 +197,9 @@ pub fn run(hotkey: &Hotkey, copilot_key: bool, debug: bool) -> Result<()> {
         };
         if hook.is_null() {
             let error = unsafe { GetLastError() };
-            log(&format!("安装 Copilot 键钩子失败（错误码 {error}，不影响主热键）"));
+            log(&format!(
+                "安装 Copilot 键钩子失败（错误码 {error}，不影响主热键）"
+            ));
         } else {
             log("已接管 Copilot 键");
         }
@@ -201,7 +219,7 @@ pub fn run(hotkey: &Hotkey, copilot_key: bool, debug: bool) -> Result<()> {
             // 窗口操作丢给独立线程：消息循环要一直保持轻快
             std::thread::spawn(move || {
                 let _guard = TOGGLE_LOCK.lock();
-                toggle_panel(debug);
+                toggle_panel(panel, debug);
             });
         }
     }
@@ -282,13 +300,13 @@ fn inject_key_up(vk: u16) {
 // 窗口
 // ---------------------------------------------------------------------------
 
-fn toggle_panel(debug: bool) {
+fn toggle_panel(panel: PanelKind, debug: bool) {
     let hwnd = find_panel();
     if hwnd.is_null() {
         if debug {
             log("未找到面板窗口，尝试启动");
         }
-        launch_panel(debug);
+        launch_panel(panel, debug);
         return;
     }
 
@@ -315,16 +333,49 @@ fn find_panel() -> HWND {
     crate::util::find_panel()
 }
 
-/// 启动面板窗口。
+/// 启动面板窗口：拉起同目录的 `tupa-launcher.exe --gui`。
 ///
-/// 用 `ShellExecuteW` 而不是 `CreateProcess`：守护进程调用过 `FreeConsole()`，
+/// 面板现在是普通的 GUI 进程（不再依赖 Windows Terminal），
+/// 所以直接 `CreateProcess` 就行；`detached_command` 会把标准句柄换成 null，
+/// 守护进程 `FreeConsole()` 之后也不会把无效句柄继承过去。
+fn launch_panel(panel: PanelKind, debug: bool) {
+    match panel {
+        PanelKind::Gui => launch_gui(debug),
+        PanelKind::Tui => launch_tui(debug),
+    }
+}
+
+/// 自绘窗口：直接 spawn 同目录的 `tupa-launcher.exe --gui`
+fn launch_gui(debug: bool) {
+    let Ok(exe) = std::env::current_exe() else {
+        log("启动面板失败：拿不到自身路径");
+        return;
+    };
+
+    let mut command = crate::util::detached_command(&exe);
+    command.arg("--gui");
+    match command.spawn() {
+        Ok(_) => {
+            if debug {
+                log(&format!("已启动自绘面板 {}", exe.display()));
+            }
+        }
+        Err(error) => log(&format!("启动面板失败：{error}")),
+    }
+}
+
+/// 终端面板：`wt.exe -p tupa-launcher`。
+///
+/// 必须用 `ShellExecuteW` 而不是 `CreateProcess`：守护进程调用过 `FreeConsole()`，
 /// 自身已经没有控制台了，而 `wt.exe` 是控制台程序 —— 直接 spawn 会「启动成功」
 /// 但根本不创建窗口（实测 spawn 返回 Ok，窗口却一个都没出现）。
-/// ShellExecute 走 shell 的启动路径，不依赖调用者的控制台。
-fn launch_panel(debug: bool) {
+fn launch_tui(debug: bool) {
+    use windows_sys::Win32::UI::Shell::ShellExecuteW;
+    use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+
     let operation = wide("open");
     let file = wide("wt.exe");
-    let parameters = wide(&format!("-p {PANEL_PROFILE}"));
+    let parameters = wide(&format!("-p {WT_PROFILE}"));
 
     let result = unsafe {
         ShellExecuteW(
@@ -339,9 +390,9 @@ fn launch_panel(debug: bool) {
 
     // ShellExecute 的返回码 <= 32 表示失败
     if result <= 32 {
-        log(&format!("启动面板失败（ShellExecute 返回 {result}）"));
+        log(&format!("启动终端面板失败（ShellExecute 返回 {result}）"));
     } else if debug {
-        log("已启动面板窗口");
+        log("已启动终端面板");
     }
 }
 
@@ -394,12 +445,12 @@ fn spawn_logger() {
     });
 }
 
+fn wide(s: &str) -> Vec<u16> {
+    s.encode_utf16().chain(std::iter::once(0)).collect()
+}
+
 fn log(msg: &str) {
     if let Some(tx) = LOG_TX.get() {
         let _ = tx.send(msg.to_string());
     }
-}
-
-fn wide(s: &str) -> Vec<u16> {
-    s.encode_utf16().chain(std::iter::once(0)).collect()
 }

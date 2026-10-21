@@ -1,9 +1,11 @@
 //! 执行动作：打开文件、启动程序、定位路径
 
 use std::path::Path;
+use std::process::Command;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 
+use crate::i18n;
 use crate::providers::Action;
 use crate::util::{detached_command, which};
 
@@ -14,8 +16,14 @@ pub fn run(action: &Action) -> Result<String> {
             if path.is_dir() {
                 record_zoxide(path);
             }
-            open::that_detached(path).with_context(|| format!("无法打开 {}", path.display()))?;
-            Ok(format!("已打开 {}", short_name(path)))
+            open::that_detached(path)
+                .with_context(|| i18n::cannot("打开", "open", &path.display().to_string()))?;
+            Ok(i18n::opened(&short_name(path)))
+        }
+        Action::FillInput(text) => Ok(i18n::filled(text)),
+        Action::OpenUrl(url) => {
+            open::that_detached(url).with_context(|| i18n::cannot("打开", "open", url))?;
+            Ok(i18n::opened(url))
         }
         Action::Reveal(path) => {
             let mut cmd = detached_command("explorer.exe");
@@ -32,8 +40,8 @@ pub fn run(action: &Action) -> Result<String> {
             #[cfg(not(windows))]
             cmd.arg(format!("/select,{}", path.display()));
 
-            cmd.spawn().context("无法启动文件资源管理器")?;
-            Ok(format!("已定位 {}", short_name(path)))
+            cmd.spawn().context(i18n::explorer_failed())?;
+            Ok(i18n::revealed(&short_name(path)))
         }
         Action::Launch {
             command,
@@ -45,25 +53,142 @@ pub fn run(action: &Action) -> Result<String> {
             } else {
                 launch(command, args)?;
             }
-            Ok(format!("已启动 {command}"))
+            Ok(i18n::launched(command))
         }
-        Action::RunCommand { command, elevated } => {
+        Action::RunCommand {
+            command,
+            elevated,
+            background,
+        } => {
+            // 后台用 `/C`（跑完就走）；可见窗口用 `/K`（跑完留在窗口里）
+            let shell = shell();
+
             if *elevated {
-                elevate("cmd.exe", &["/C".to_string(), command.clone()])?;
+                elevate(shell, &shell_args(command, *background))?;
+            } else if *background {
+                detach_script(shell, command)?;
             } else {
-                detached_command("cmd.exe")
-                    .arg("/C")
-                    .arg(command)
-                    .spawn()
-                    .with_context(|| format!("无法执行 {command}"))?;
+                spawn_console(command, None)?;
             }
-            Ok(format!("已执行 {command}"))
+            Ok(i18n::ran(command))
+        }
+        Action::LaunchInTerminal { command, dir } => {
+            spawn_console(command, dir.as_deref())?;
+            Ok(i18n::launched(command))
+        }
+        Action::CreateFile(path) => {
+            create_file(path)?;
+            open::that_detached(path)
+                .with_context(|| i18n::created_but_cannot_open(&path.display().to_string()))?;
+            Ok(i18n::created(&short_name(path)))
         }
         Action::OpenInEditor { file, line } => {
             open_in_editor(file, *line)?;
-            Ok(format!("已在编辑器打开 {}:{line}", short_name(file)))
+            Ok(i18n::opened_in_editor(&short_name(file), *line))
         }
+        // 开关 / 选项 / 数值：交给 actions.toml 里的命令
+        Action::SetControl { id, value } => crate::actions::apply(id, value),
     }
+}
+
+/// 新建一个空文件（父目录不存在就建，已存在则报错、不覆盖）
+fn create_file(path: &Path) -> Result<()> {
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).with_context(|| {
+            i18n::cannot("创建目录", "create folder", &dir.display().to_string())
+        })?;
+    }
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+        .with_context(|| i18n::cannot("新建", "create", &path.display().to_string()))?;
+    Ok(())
+}
+
+/// 优先 PowerShell 7（pwsh），退回 Windows PowerShell，再退回 cmd
+fn shell() -> &'static str {
+    if which("pwsh").is_some() {
+        "pwsh"
+    } else if which("powershell").is_some() {
+        "powershell"
+    } else {
+        "cmd.exe"
+    }
+}
+
+/// 给 shell 的参数：后台用 `-Command` / `/C`，可见窗口用 `-NoExit -Command` / `/K`
+fn shell_args(command: &str, background: bool) -> Vec<String> {
+    if shell() == "cmd.exe" {
+        let switch = if background { "/C" } else { "/K" };
+        vec![switch.to_string(), command.to_string()]
+    } else if background {
+        vec![
+            "-NoProfile".to_string(),
+            "-Command".to_string(),
+            command.to_string(),
+        ]
+    } else {
+        vec![
+            "-NoExit".to_string(),
+            "-Command".to_string(),
+            command.to_string(),
+        ]
+    }
+}
+
+/// 后台执行一段命令（输出丢弃）
+fn detach_script(target_shell: &str, command: &str) -> Result<()> {
+    detached_command(target_shell)
+        .args(shell_args(command, true))
+        .spawn()
+        .with_context(|| i18n::cannot("执行", "run", command))?;
+    Ok(())
+}
+
+/// 开一个看得见的终端窗口执行命令（优先 Windows Terminal，没有就新开控制台）
+fn spawn_console(command: &str, dir: Option<&Path>) -> Result<()> {
+    let target_shell = shell();
+
+    // 要先切目录的话，把 cd 拼进命令里（两种 shell 语法不同）
+    let line = match dir {
+        Some(dir) if target_shell == "cmd.exe" => {
+            format!("cd /d \"{}\" && {command}", dir.display())
+        }
+        Some(dir) => format!("Set-Location -LiteralPath '{}'; {command}", dir.display()),
+        None => command.to_string(),
+    };
+
+    if let Some(wt) = which("wt") {
+        Command::new(wt)
+            .arg(target_shell)
+            .args(shell_args(&line, false))
+            .spawn()
+            .with_context(|| i18n::cannot("在新窗口执行", "run in a new window", command))?;
+        return Ok(());
+    }
+
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NEW_CONSOLE: u32 = 0x0000_0010;
+
+        Command::new(target_shell)
+            .args(shell_args(&line, false))
+            .creation_flags(CREATE_NEW_CONSOLE)
+            .spawn()
+            .with_context(|| i18n::cannot("在新窗口执行", "run in a new window", command))?;
+    }
+    #[cfg(not(windows))]
+    {
+        Command::new("sh")
+            .arg("-c")
+            .arg(&line)
+            .spawn()
+            .with_context(|| i18n::cannot("执行", "run", command))?;
+    }
+
+    Ok(())
 }
 
 /// 启动一个程序。分三种情况：
@@ -84,7 +209,7 @@ fn launch(command: &str, args: &[String]) -> Result<()> {
     }
 
     // 兜底：ShellExecute 能处理 URL 协议、ms-settings:、App Paths
-    open::that_detached(command).with_context(|| format!("找不到可执行的 {command}"))?;
+    open::that_detached(command).with_context(|| i18n::not_found(command))?;
     Ok(())
 }
 
@@ -102,7 +227,7 @@ fn spawn_executable(path: &Path, args: &[String]) -> Result<()> {
             detached_command(path)
                 .args(args)
                 .spawn()
-                .with_context(|| format!("无法启动 {}", path.display()))?;
+                .with_context(|| i18n::cannot("启动", "start", &path.display().to_string()))?;
         }
         // .cmd / .bat：必须由 cmd.exe 解释
         "cmd" | "bat" => {
@@ -111,15 +236,15 @@ fn spawn_executable(path: &Path, args: &[String]) -> Result<()> {
                 .arg(path)
                 .args(args)
                 .spawn()
-                .with_context(|| format!("无法启动 {}", path.display()))?;
+                .with_context(|| i18n::cannot("启动", "start", &path.display().to_string()))?;
         }
         // .lnk 快捷方式等：交给 shell 解析
         _ => {
             if args.is_empty() {
                 open::that_detached(path)
-                    .with_context(|| format!("无法打开 {}", path.display()))?;
+                    .with_context(|| i18n::cannot("打开", "open", &path.display().to_string()))?;
             } else {
-                bail!("{} 是快捷方式，暂不支持附加参数", path.display());
+                bail!("{}", i18n::shortcut_no_args(&path.display().to_string()));
             }
         }
     }
@@ -139,10 +264,10 @@ fn open_in_editor(file: &Path, line: usize) -> Result<()> {
             .arg("--goto")
             .arg(&spec)
             .spawn()
-            .context("无法启动 VSCode")?;
+            .context(i18n::vscode_failed())?;
     } else {
         open::that_detached(file)
-            .with_context(|| format!("无法打开 {}", file.display()))?;
+            .with_context(|| i18n::cannot("打开", "open", &file.display().to_string()))?;
     }
     Ok(())
 }
@@ -179,14 +304,14 @@ fn elevate(file: &str, args: &[String]) -> Result<()> {
         } as isize;
 
         if result <= 32 {
-            bail!("提权失败（ShellExecute 返回 {result}）");
+            bail!("{}", i18n::elevate_failed(result));
         }
         Ok(())
     }
 
     #[cfg(not(windows))]
     {
-        bail!("提权目前只在 Windows 上支持")
+        bail!("{}", i18n::elevate_windows_only())
     }
 }
 
@@ -194,4 +319,21 @@ fn short_name(path: &Path) -> String {
     path.file_name()
         .map(|s| s.to_string_lossy().into_owned())
         .unwrap_or_else(|| path.to_string_lossy().into_owned())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn create_file_does_not_overwrite() {
+        let dir = std::env::temp_dir().join(format!("tupa-new-test-{}", std::process::id()));
+        let path = dir.join("hello.md");
+
+        create_file(&path).expect("第一次应该能创建");
+        assert!(path.is_file());
+        assert!(create_file(&path).is_err(), "已存在时不应该覆盖");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

@@ -7,11 +7,16 @@
 //! tupa-launcher --help
 //! ```
 
+mod actions;
 mod app;
 mod config;
 #[cfg(windows)]
 mod daemon;
 mod exec;
+mod favorites;
+mod gui;
+mod history;
+mod i18n;
 mod providers;
 mod theme;
 mod ui;
@@ -28,12 +33,18 @@ use app::App;
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
 
+    // 语言要在任何输出之前确定（包括 --help）
+    let loaded = config::Config::load();
+    if let Ok(cfg) = &loaded {
+        apply_language(cfg);
+    }
+
     if args.iter().any(|a| a == "-h" || a == "--help") {
         print_help();
         return Ok(());
     }
 
-    let cfg = config::Config::load()?;
+    let cfg = loaded?;
 
     // 常驻守护进程：全局热键 + 面板窗口管理
     if args.iter().any(|a| a == "--daemon") {
@@ -43,6 +54,7 @@ fn main() -> Result<()> {
             return daemon::run(
                 &hotkey,
                 cfg.daemon.copilot_key,
+                daemon::PanelKind::parse(&cfg.daemon.panel),
                 args.iter().any(|a| a == "--debug"),
             );
         }
@@ -76,10 +88,25 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
+    // 调试：直接执行一次开关写入（不启动界面）
+    if let Some(pos) = args.iter().position(|a| a == "--apply") {
+        let id = args.get(pos + 1).cloned().unwrap_or_default();
+        let value = args.get(pos + 2).cloned().unwrap_or_default();
+        let message = actions::apply(&id, &value)?;
+        println!("{message}");
+        return Ok(());
+    }
+
     // 无界面模式：便于测试 provider，也方便以后被别的脚本调用
     if let Some(pos) = args.iter().position(|a| a == "--query") {
         let line = args.get(pos + 1).cloned().unwrap_or_default();
         return cli_query(&cfg, &line);
+    }
+
+    // 自绘无边框窗口（和 TUI 并存，先不影响默认行为）
+    if args.iter().any(|a| a == "--gui") {
+        let theme = theme::Theme::load(&cfg);
+        return gui::run(cfg, theme);
     }
 
     let theme = theme::Theme::load(&cfg);
@@ -111,16 +138,19 @@ fn run(
             continue;
         }
 
+        app.tick = app.tick.wrapping_add(1);
         terminal.draw(|frame| ui::draw(frame, &mut app))?;
 
-        // 最多等 30ms：输入跟手，后台结果也能及时刷出来
-        if event::poll(Duration::from_millis(30))?
-            && let Event::Key(key) = event::read()? {
-                // 忽略 key release 事件，否则 Windows 上会重复触发
-                if key.kind == KeyEventKind::Press {
-                    app.on_key(key);
-                }
+        // 需要滚动 / 还在等后台结果时 30ms 一帧；否则降到 150ms 省电
+        let frame = if app.animate || app.pending { 30 } else { 150 };
+        if event::poll(Duration::from_millis(frame))?
+            && let Event::Key(key) = event::read()?
+        {
+            // 忽略 key release 事件，否则 Windows 上会重复触发
+            if key.kind == KeyEventKind::Press {
+                app.on_key(key);
             }
+        }
 
         app.drain_events();
 
@@ -137,7 +167,7 @@ fn run(
 
 fn check_config(cfg: &config::Config) -> Result<()> {
     if let Some(path) = config::config_path() {
-        println!("配置文件：{}", path.display());
+        println!("{}", path.display());
     }
     println!();
 
@@ -149,12 +179,12 @@ fn check_config(cfg: &config::Config) -> Result<()> {
         let (mark, detail) = if let Some(found) = util::which(command) {
             ("✓", found.display().to_string())
         } else if path.is_file() {
-            ("✓", format!("文件 {}", path.display()))
+            ("✓", path.display().to_string())
         } else if command.contains(':') {
-            ("?", format!("交给 shell 处理（协议/URI）：{command}"))
+            ("?", format!("shell: {command}"))
         } else {
             missing += 1;
-            ("✗", format!("找不到：{command}"))
+            ("✗", command.to_string())
         };
 
         println!("  {mark} {:<28} {detail}", app.name);
@@ -162,9 +192,9 @@ fn check_config(cfg: &config::Config) -> Result<()> {
 
     println!();
     if missing == 0 {
-        println!("{} 项全部可解析。", cfg.apps.len());
+        println!("{}", i18n::check_ok(cfg.apps.len()));
     } else {
-        println!("{missing} 项无法解析，改一下 config.toml 里的 command。");
+        println!("{}", i18n::check_missing(missing));
     }
     Ok(())
 }
@@ -177,51 +207,52 @@ fn cli_query(cfg: &config::Config, line: &str) -> Result<()> {
         .position(|i| i.keyword == cfg.general.default_provider)
         .unwrap_or(0);
 
-    let (idx, flags, args) = providers::resolve(&infos, default_idx, line);
+    let prefix = cfg.general.command_prefix.chars().next().unwrap_or(':');
+    let (idx, flags, args) = match providers::parse(&infos, line, prefix) {
+        providers::Parsed::Default => (default_idx, Vec::new(), line.to_string()),
+        providers::Parsed::Command {
+            provider,
+            flags,
+            args,
+        } => (provider, flags, args),
+        providers::Parsed::CommandList { query } => (
+            providers::commands_index(&infos).unwrap_or(default_idx),
+            Vec::new(),
+            query,
+        ),
+    };
     let items = providers[idx].query(&args, &flags);
 
-    println!("provider={} args={:?} hits={}", infos[idx].keyword, args, items.len());
+    println!(
+        "provider={} args={:?} hits={}",
+        infos[idx].keyword,
+        args,
+        items.len()
+    );
     for item in items {
-        println!("{:<5} {}\t{}", item.kind.badge(), item.title, item.subtitle);
+        let state = item.control.label();
+        if state.is_empty() {
+            println!("{:<5} {}", item.kind.badge(), item.columns.join("  |  "));
+        } else {
+            println!(
+                "{:<5} {}  → {}",
+                item.kind.badge(),
+                item.columns.join("  |  "),
+                state
+            );
+        }
     }
     Ok(())
 }
 
+fn apply_language(cfg: &config::Config) {
+    i18n::set_lang(if cfg.general.language.eq_ignore_ascii_case("en") {
+        i18n::Lang::En
+    } else {
+        i18n::Lang::Zh
+    });
+}
+
 fn print_help() {
-    println!(
-        "\
-tupa-launcher —— 命令式启动器
-
-用法:
-  tupa-launcher                     启动 TUI
-  tupa-launcher --query \"ev 报告\"   不进界面，把结果打到 stdout
-  tupa-launcher --check             检查 config.toml 里每个 app 能否解析
-  tupa-launcher --daemon            常驻：监听到热键就唤起/隐藏面板
-                                     （热键在 config.toml 的 [daemon] hotkey 里改）
-  tupa-launcher --help              显示本帮助
-
-输入语法:
-  app <名字>      启动应用（列表在 config.toml 的 [[apps]] 里自定义）
-  ev <关键词>     用 Everything 搜文件，支持 ext:pdf 等原生语法
-  <名字>          不带关键字时走默认 provider（见 general.default_provider）
-
-按键:
-  ↑/↓ 或 ^P/^N    移动选择
-  Enter           打开 / 启动
-  ^E / Alt+Enter  在资源管理器里定位
-  Tab             补全关键字
-  ^W              删除一个词
-  Esc             有输入时清空，无输入时隐藏面板
-
-配置文件:
-  {cfg}
-  {theme}
-",
-        cfg = config::config_path()
-            .map(|p| p.display().to_string())
-            .unwrap_or_default(),
-        theme = config::config_dir()
-            .map(|d| d.join("theme.toml").display().to_string())
-            .unwrap_or_default(),
-    );
+    print!("{}", i18n::help());
 }
