@@ -29,6 +29,8 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 
+pub use crate::util::PanelKind;
+
 use windows_sys::Win32::Foundation::{GetLastError, HWND, LPARAM, LRESULT, WPARAM};
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::System::Threading::GetCurrentThreadId;
@@ -45,22 +47,6 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 
 /// 终端面板使用的 WT profile 名
 const WT_PROFILE: &str = "tupa-launcher";
-
-/// 热键唤起哪种面板（配置里的 `[daemon] panel`）
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PanelKind {
-    Gui,
-    Tui,
-}
-
-impl PanelKind {
-    pub fn parse(value: &str) -> PanelKind {
-        match value.trim().to_ascii_lowercase().as_str() {
-            "tui" | "term" | "terminal" => PanelKind::Tui,
-            _ => PanelKind::Gui,
-        }
-    }
-}
 
 /// 热键 ID（同一个进程里唯一即可）
 const HOTKEY_ID: i32 = 1;
@@ -301,7 +287,7 @@ fn inject_key_up(vk: u16) {
 // ---------------------------------------------------------------------------
 
 fn toggle_panel(panel: PanelKind, debug: bool) {
-    let hwnd = find_panel();
+    let hwnd = find_panel(panel);
     if hwnd.is_null() {
         if debug {
             log("未找到面板窗口，尝试启动");
@@ -320,17 +306,17 @@ fn toggle_panel(panel: PanelKind, debug: bool) {
         }
 
         if visible && is_foreground {
-            crate::util::hide_panel();
+            crate::util::hide_panel(panel);
         } else {
-            crate::util::show_panel();
+            crate::util::show_panel(panel);
             SetForegroundWindow(hwnd);
         }
     }
 }
 
 /// 找面板窗口（实现见 `util::find_panel`）
-fn find_panel() -> HWND {
-    crate::util::find_panel()
+fn find_panel(panel: PanelKind) -> HWND {
+    crate::util::find_panel(panel)
 }
 
 /// 启动面板窗口：拉起同目录的 `tupa-launcher.exe --gui`。

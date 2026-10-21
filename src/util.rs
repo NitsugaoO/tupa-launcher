@@ -178,22 +178,47 @@ pub fn resolve_executable(command: &str) -> Option<PathBuf> {
 // 面板窗口（Windows Terminal）
 // ---------------------------------------------------------------------------
 
+/// 面板窗口的外壳类型
+///
+/// - `Tui`：Windows Terminal 里的终端界面（窗口属于 `WindowsTerminal.exe`）
+/// - `Gui`：`tupa-launcher --gui` 的自绘窗口（窗口属于 `tupa-launcher.exe`）
+///
+/// 两者的窗口归属完全不同，所以找窗口的方式也必须分开。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PanelKind {
+    Tui,
+    Gui,
+}
+
+impl PanelKind {
+    /// 解析配置里的 `[daemon] panel`（无法识别时退回 TUI）
+    pub fn parse(value: &str) -> PanelKind {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "gui" | "window" => PanelKind::Gui,
+            _ => PanelKind::Tui,
+        }
+    }
+}
+
 /// 面板窗口标题
 #[cfg(windows)]
 pub const PANEL_TITLE: &str = "tupa-launcher";
-/// 面板进程的可执行文件名（自绘窗口，不是 Windows Terminal 里的一个标签页）
+/// 自绘面板的进程名
 #[cfg(windows)]
 pub const PANEL_EXE: &str = "tupa-launcher.exe";
+/// 自绘面板的窗口类名（winit 注册）
+#[cfg(windows)]
+pub const PANEL_CLASS: &str = "TupaLauncherWindow";
+/// Windows Terminal 的窗口类名（TUI 面板藏在它里面）
+#[cfg(windows)]
+pub const WT_CLASS: &str = "CASCADIA_HOSTING_WINDOW_CLASS";
 
 #[cfg(windows)]
 static FOUND_PANEL: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+/// 枚举窗口时用的是哪种面板（0 = Tui，1 = Gui）
+#[cfg(windows)]
+static PANEL_KIND: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
-/// 找面板窗口：**进程名 + 标题**双保险。
-///
-/// 为什么不按窗口类名找：自绘窗口的类名是 winit 注册的，和 TUI 时代完全不同；
-/// 而 `tupa-launcher.exe` 这个进程名足够唯一 —— pi 里开着同名标签页时
-/// 窗口属于 `WindowsTerminal.exe`，自然就被排除了。
-///
 /// 面板窗口标题是否属于面板。
 ///
 /// 只认 `tupa-launcher` 本身，或 `tupa-launcher - …` / `tupa-launcher: …` 这种后缀；
@@ -209,12 +234,22 @@ fn is_panel_title(title: &str) -> bool {
     rest.is_empty() || rest.starts_with(" - ") || rest.starts_with(": ")
 }
 
+/// 找指定类型的面板窗口。
+///
+/// - TUI：窗口类是 `CASCADIA_HOSTING_WINDOW_CLASS`，标题前缀 `tupa-launcher`
+/// - GUI：窗口类是 `TupaLauncherWindow`，进程是 `tupa-launcher.exe`
+///
+/// 两种都必须按标题锁定，否则 pi 的 `π - tupa-launcher` 会被误判。
 #[cfg(windows)]
-pub fn find_panel() -> windows_sys::Win32::Foundation::HWND {
+pub fn find_panel(kind: PanelKind) -> windows_sys::Win32::Foundation::HWND {
     use std::sync::atomic::Ordering;
     use windows_sys::Win32::UI::WindowsAndMessaging::EnumWindows;
 
     FOUND_PANEL.store(0, Ordering::SeqCst);
+    PANEL_KIND.store(
+        usize::from(matches!(kind, PanelKind::Gui)),
+        Ordering::SeqCst,
+    );
     unsafe { EnumWindows(Some(enum_panel_proc), 0) };
     FOUND_PANEL.load(Ordering::SeqCst) as windows_sys::Win32::Foundation::HWND
 }
@@ -224,15 +259,19 @@ unsafe extern "system" fn enum_panel_proc(
     hwnd: windows_sys::Win32::Foundation::HWND,
     _lparam: windows_sys::Win32::Foundation::LPARAM,
 ) -> i32 {
-    use windows_sys::Win32::UI::WindowsAndMessaging::{GetClassNameW, GetWindowTextW};
+    use std::sync::atomic::Ordering;
+    use windows_sys::Win32::UI::WindowsAndMessaging::GetWindowTextW;
 
-    let mut class_buf = [0u16; 128];
-    let class_len = unsafe { GetClassNameW(hwnd, class_buf.as_mut_ptr(), class_buf.len() as i32) };
-    if class_len <= 0 {
-        return 1; // 继续枚举
+    let class = window_class(hwnd);
+    let want_gui = PANEL_KIND.load(Ordering::SeqCst) == 1;
+    let class_ok = if want_gui {
+        class == PANEL_CLASS
+    } else {
+        class == WT_CLASS
+    };
+    if !class_ok {
+        return 1;
     }
-    let _ = class_len;
-    let _ = class_buf;
 
     let mut title_buf = [0u16; 512];
     let title_len = unsafe { GetWindowTextW(hwnd, title_buf.as_mut_ptr(), title_buf.len() as i32) };
@@ -243,12 +282,26 @@ unsafe extern "system" fn enum_panel_proc(
     if !is_panel_title(&title) {
         return 1;
     }
-    // 标题对上了，再看是不是我们自己这个 exe 的窗口
-    if !window_process_is_panel(hwnd) {
+
+    // 自绘窗口再核一次进程名：类名理论上已经够了，这里只防万一
+    if want_gui && !window_process_is_panel(hwnd) {
         return 1;
     }
-    FOUND_PANEL.store(hwnd as usize, std::sync::atomic::Ordering::SeqCst);
+
+    FOUND_PANEL.store(hwnd as usize, Ordering::SeqCst);
     0 // 找到就停
+}
+
+#[cfg(windows)]
+fn window_class(hwnd: windows_sys::Win32::Foundation::HWND) -> String {
+    use windows_sys::Win32::UI::WindowsAndMessaging::GetClassNameW;
+
+    let mut buffer = [0u16; 128];
+    let len = unsafe { GetClassNameW(hwnd, buffer.as_mut_ptr(), buffer.len() as i32) };
+    if len <= 0 {
+        return String::new();
+    }
+    String::from_utf16_lossy(&buffer[..len as usize])
 }
 
 /// 这个窗口属于 `tupa-launcher.exe` 吗？
@@ -285,19 +338,19 @@ fn window_process_is_panel(hwnd: windows_sys::Win32::Foundation::HWND) -> bool {
 
 /// 面板窗口当前是否可见
 #[cfg(windows)]
-pub fn panel_visible() -> bool {
+pub fn panel_visible(kind: PanelKind) -> bool {
     use windows_sys::Win32::UI::WindowsAndMessaging::IsWindowVisible;
 
-    let hwnd = find_panel();
+    let hwnd = find_panel(kind);
     !hwnd.is_null() && unsafe { IsWindowVisible(hwnd) } != 0
 }
 
 /// 隐藏面板窗口（面板进程继续在后台运行）
 #[cfg(windows)]
-pub fn hide_panel() {
+pub fn hide_panel(kind: PanelKind) {
     use windows_sys::Win32::UI::WindowsAndMessaging::{SW_HIDE, ShowWindow};
 
-    let hwnd = find_panel();
+    let hwnd = find_panel(kind);
     if !hwnd.is_null() {
         unsafe { ShowWindow(hwnd, SW_HIDE) };
     }
@@ -305,10 +358,10 @@ pub fn hide_panel() {
 
 /// 显示面板窗口（隐藏太久时 WM 会把它标记成 minimized，用 SW_RESTORE 处理）
 #[cfg(windows)]
-pub fn show_panel() {
+pub fn show_panel(kind: PanelKind) {
     use windows_sys::Win32::UI::WindowsAndMessaging::{IsIconic, SW_RESTORE, SW_SHOW, ShowWindow};
 
-    let hwnd = find_panel();
+    let hwnd = find_panel(kind);
     if hwnd.is_null() {
         return;
     }
@@ -323,11 +376,13 @@ pub fn show_panel() {
 
 // 非 Windows 平台：这些函数不存在，给个空实现让调用方不用到处写 cfg
 #[cfg(not(windows))]
-pub fn panel_visible() -> bool {
+pub fn panel_visible(_kind: PanelKind) -> bool {
     true
 }
 #[cfg(not(windows))]
-pub fn hide_panel() {}
+pub fn hide_panel(_kind: PanelKind) {}
+#[cfg(not(windows))]
+pub fn show_panel(_kind: PanelKind) {}
 
 #[cfg(all(test, windows))]
 mod tests {

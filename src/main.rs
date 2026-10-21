@@ -54,7 +54,7 @@ fn main() -> Result<()> {
             return daemon::run(
                 &hotkey,
                 cfg.daemon.copilot_key,
-                daemon::PanelKind::parse(&cfg.daemon.panel),
+                util::PanelKind::parse(&cfg.daemon.panel),
                 args.iter().any(|a| a == "--debug"),
             );
         }
@@ -131,7 +131,7 @@ fn run(
         // 隐藏期间：不渲染、不轮询输入，只定期看看窗口是否又被唤起
         if hidden {
             std::thread::sleep(Duration::from_millis(200));
-            if util::panel_visible() {
+            if util::panel_visible(util::PanelKind::Tui) {
                 hidden = false;
                 terminal.clear()?;
             }
@@ -157,7 +157,7 @@ fn run(
         if app.should_hide {
             app.should_hide = false;
             app.reset();
-            util::hide_panel();
+            util::hide_panel(util::PanelKind::Tui);
             hidden = true;
         }
     }
