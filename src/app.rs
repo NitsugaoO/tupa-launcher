@@ -631,7 +631,19 @@ impl App {
                 .collect();
             (candidates, descriptions)
         } else {
-            let candidates = providers::match_prefix(providers::KNOWN_FLAGS.iter().copied(), typed);
+            // 修饰符补全按 provider 来：`:web:` 只该出现 url/week/month/all，
+            // 不该把 `:run:` 的 admin/bg 也列出来
+            let head: String = token[..colon]
+                .chars()
+                .skip_while(|c| *c == self.prefix)
+                .collect();
+            let allowed = self
+                .infos
+                .iter()
+                .find(|info| info.matches(&head))
+                .map(|info| info.flags)
+                .unwrap_or(providers::KNOWN_FLAGS);
+            let candidates = providers::match_prefix(allowed.iter().copied(), typed);
             let descriptions = candidates
                 .iter()
                 .map(|candidate| i18n::flag_description(candidate).to_string())
@@ -1063,6 +1075,29 @@ mod tests {
         app.set_input(":run:ad".to_string());
         let comp = app.completion.clone().expect("应该补全修饰符");
         assert_eq!(comp.candidates.first().map(String::as_str), Some("admin"));
+    }
+
+    /// 补全候选要跟着 provider 走，不能所有命令都列同一套修饰符
+    #[test]
+    fn flag_candidates_depend_on_provider() {
+        let mut app = app();
+
+        app.set_input(":run:".to_string());
+        let run = app.completion.clone().expect(":run: 应该有候选");
+        assert_eq!(run.candidates, vec!["admin", "bg"]);
+
+        app.set_input(":web:".to_string());
+        let web = app.completion.clone().expect(":web: 应该有候选");
+        assert_eq!(web.candidates, vec!["url", "week", "month", "all"]);
+        assert!(!web.candidates.iter().any(|flag| flag == "admin"));
+
+        app.set_input(":go:".to_string());
+        let go = app.completion.clone().expect(":go: 应该有候选");
+        assert_eq!(go.candidates, vec!["yazi", "pi", "code"]);
+
+        // `:ev` 不认修饰符：不该冒出别的命令的候选
+        app.set_input(":ev:".to_string());
+        assert!(app.completion.is_none(), ":ev: 不该有修饰符候选");
     }
 
     /// 带控件的列表：id 故意不存在，测试里不会真的改系统设置

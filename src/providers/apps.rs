@@ -65,6 +65,10 @@ impl Provider for Apps {
         crate::i18n::desc_app()
     }
 
+    fn flags(&self) -> &'static [&'static str] {
+        &["admin"]
+    }
+
     fn query(&self, args: &str, flags: &[String]) -> Vec<Item> {
         let q = args.trim();
         let elevated = flags

@@ -334,12 +334,21 @@ pub trait Provider: Send {
     fn columns(&self) -> &'static [Column] {
         DEFAULT_COLUMNS
     }
+
+    /// 这个 provider 认识的 `:flag` 修饰符（只用于输入补全，解析仍走 [`KNOWN_FLAGS`]）。
+    ///
+    /// 给空表示它不认任何修饰符（例如 `:ev`）。
+    fn flags(&self) -> &'static [&'static str] {
+        &[]
+    }
 }
 
 /// 主线程只需要知道 provider 的元信息（真正的 provider 在 worker 线程里）
 pub struct ProviderInfo {
     pub keyword: String,
     pub description: String,
+    /// 该 provider 支持的 `:flag` 修饰符（补全用）
+    pub flags: &'static [&'static str],
 }
 
 impl ProviderInfo {
@@ -384,6 +393,7 @@ pub fn infos(providers: &[Box<dyn Provider>]) -> Vec<ProviderInfo> {
         .map(|p| ProviderInfo {
             keyword: p.keyword().to_string(),
             description: p.description().to_string(),
+            flags: p.flags(),
         })
         .collect()
 }
@@ -609,6 +619,7 @@ mod tests {
             .map(|keyword| ProviderInfo {
                 keyword: keyword.to_string(),
                 description: String::new(),
+                flags: &[],
             })
             .collect()
     }

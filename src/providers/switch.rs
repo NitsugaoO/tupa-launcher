@@ -25,6 +25,10 @@ impl Provider for Switch {
         i18n::desc_switch()
     }
 
+    fn flags(&self) -> &'static [&'static str] {
+        &["all"]
+    }
+
     fn columns(&self) -> &'static [Column] {
         COLUMNS
     }

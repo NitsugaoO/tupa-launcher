@@ -17,6 +17,10 @@ impl Provider for Run {
         crate::i18n::desc_run()
     }
 
+    fn flags(&self) -> &'static [&'static str] {
+        &["admin", "bg"]
+    }
+
     fn query(&self, args: &str, flags: &[String]) -> Vec<Item> {
         let command = args.trim();
         if command.is_empty() {

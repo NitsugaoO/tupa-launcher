@@ -62,6 +62,10 @@ impl Provider for Go {
         crate::i18n::desc_go()
     }
 
+    fn flags(&self) -> &'static [&'static str] {
+        &["yazi", "pi", "code"]
+    }
+
     fn query(&self, args: &str, flags: &[String]) -> Vec<Item> {
         let opener = Opener::from_flags(flags);
 

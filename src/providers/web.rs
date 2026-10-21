@@ -92,6 +92,10 @@ impl Provider for Web {
         crate::i18n::desc_web()
     }
 
+    fn flags(&self) -> &'static [&'static str] {
+        &["url", "week", "month", "all"]
+    }
+
     fn columns(&self) -> &'static [Column] {
         COLUMNS
     }

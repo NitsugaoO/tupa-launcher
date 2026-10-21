@@ -54,6 +54,10 @@ impl Provider for PiSessions {
         i18n::desc_pi()
     }
 
+    fn flags(&self) -> &'static [&'static str] {
+        &["all"]
+    }
+
     fn columns(&self) -> &'static [Column] {
         COLUMNS
     }
