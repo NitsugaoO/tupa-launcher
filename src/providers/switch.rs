@@ -1,7 +1,7 @@
-//! `switch [关键词]` —— 列出 `actions.toml` 里的开关 / 选项 / 数值。
+//! `set [关键词]` —— 列出 `actions.toml` 里的开关 / 选项 / 数值。
 //!
 //! 开屏时并行读取每一项的当前状态（脚本可能几百毫秒），读不到的条目标成
-//! 「不可用」（默认隐藏，`:switch:all` 才显示）。
+//! 「不可用」（默认隐藏，`:set:all` 才显示）。
 
 use fuzzy_matcher::FuzzyMatcher;
 use fuzzy_matcher::skim::SkimMatcherV2;
@@ -18,7 +18,7 @@ const COLUMNS: &[Column] = &[Column::new(5, 14, 0), Column::new(3, 0, 0)];
 
 impl Provider for Switch {
     fn keyword(&self) -> &str {
-        "switch"
+        "set"
     }
 
     fn description(&self) -> &'static str {

@@ -41,7 +41,7 @@ pub enum Kind {
     Web,
     /// 命令列表里的命令（回车只是把输入补成 `:<命令> `）
     Help,
-    /// 开关 / 选项 / 数值（`:switch`）
+    /// 开关 / 选项 / 数值（`:set`）
     Switch,
     /// pi 会话
     Pi,
@@ -247,7 +247,7 @@ impl Item {
         }
     }
 
-    /// 带交互类型的条目（`:switch` 用）
+    /// 带交互类型的条目（`:set` 用）
     pub fn with_control(
         kind: Kind,
         columns: Vec<String>,

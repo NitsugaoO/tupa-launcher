@@ -91,14 +91,14 @@ set = '...\brightness-set.ps1 -Value {value}'
 
 - `{value}` 会替换成实际值（选项是文本，数值是数字）
 - 所有命令都走 `cmd /C` 在 worker 线程里跑（可阻塞），**带超时**（比如 5s），失败就把 stderr 第一行显示在状态栏
-- `group` 用于 `:switch 电源` 过滤，也决定显示顺序
+- `group` 用于 `:set 电源` 过滤，也决定显示顺序
 
 ### 1.4 新增 provider
 
 ```
-:switch            列出所有开关 / 选项 / 数值
-:switch 电源       按 group 或标题过滤
-:switch:all        包含当前设备不支持的项（见 get 失败标记）
+:set            列出所有开关 / 选项 / 数值
+:set 电源       按 group 或标题过滤
+:set:all        包含当前设备不支持的项（见 get 失败标记）
 ```
 
 - 每个条目 `get` 一次拿当前值（并发地跑，或串行但限时）
@@ -186,15 +186,15 @@ IdeaNotebookAddin.BatteryAgent.GetInstance()
 
 ## 3. 实现顺序建议
 
-1. ✅ `Item.control` + `[:switch]` 的只读版本
+1. ✅ `Item.control` + `[:set]` 的只读版本
 2. ✅ 第一个真正可写的开关：免提权的**深色模式** + **屏幕亮度**
 3. ✅ `actions.toml` 驱动 + `Action::SetControl`
 4. ✅ 电池养护模式：改为**反射 Vantage Addin**（免提权，原计划的计划任务没用到）
 
 ## 4. 实现备注（v0.7）
 
-- **空格不绑定控件**：空格是搜索词 / 参数的分隔符（`web rust async`、`:switch 电源`），
-  绑到切换上会让「在 `:switch` 后面打过滤词」直接触发一次写操作。所以控件用 `Enter` 应用、
+- **空格不绑定控件**：空格是搜索词 / 参数的分隔符（`web rust async`、`:set 电源`），
+  绑到切换上会让「在 `:set` 后面打过滤词」直接触发一次写操作。所以控件用 `Enter` 应用、
   `←/→` 调整，状态栏右下角会切换成对应提示。
 - `Evt::Applied` 不再用 `Evt::Refresh`：worker 执行完写操作后把结果（成功文案 / 错误）
   一起带回来；`Apply` 请求**不会被 worker 丢弃**（查询才会）。
@@ -207,4 +207,4 @@ IdeaNotebookAddin.BatteryAgent.GetInstance()
   保持唤醒（Toggle，nosleep 进程）。用户 `actions.toml` 里同 `id` 的条目覆盖内置项。
 - 电池养护脚本会自己找 `C:\ProgramData\Lenovo\Vantage\Addins\IdeaNotebookAddin\*`
   里版本最高的目录，所以 Vantage 升级后不用改代码；Vantage 没装时 `get` 失败，条目自动隐藏。
-- 读不到状态的条目默认隐藏，`:switch:all` 才显示（显示「不可用」）。
+- 读不到状态的条目默认隐藏，`:set:all` 才显示（显示「不可用」）。

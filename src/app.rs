@@ -86,8 +86,8 @@ pub struct App {
     generation: u64,
     /// 收藏的内存快照（渲染时判断星标用）
     favorites: Vec<Item>,
-    /// 命令历史，最新的在前
-    history: Vec<String>,
+    /// 命令历史，最新的在前（每条带执行的条目快照）
+    history: Vec<history::Entry>,
     /// 历史浏览游标；`None` = 正在编辑新输入
     history_cursor: Option<usize>,
     /// 进入历史浏览前正在输入的内容，`Ctrl+↓` 回到它
@@ -323,7 +323,7 @@ impl App {
                 ":" => i18n::hint_commands().to_string(),
                 "ev" => i18n::hint_ev().to_string(),
                 "app" => i18n::hint_app().to_string(),
-                "switch" => i18n::hint_switch().to_string(),
+                "set" => i18n::hint_switch().to_string(),
                 "pi" => i18n::hint_pi().to_string(),
                 _ => info.description.clone(),
             },
@@ -460,7 +460,7 @@ impl App {
         match exec::run(&item.action) {
             // 成功就隐藏面板，把屏幕让给刚打开的程序（进程留着，下次唤起更快）
             Ok(_) => {
-                self.remember_input();
+                self.remember_input(Some(item));
                 self.should_hide = true;
             }
             Err(e) => self.status = Some((format!("{e:#}"), true)),
@@ -708,15 +708,16 @@ impl App {
     // 命令历史
     // -----------------------------------------------------------------
 
-    /// 动作执行成功后把当前输入记进历史（失败的不记，免得污染历史）
-    fn remember_input(&mut self) {
+    /// 动作执行成功后把当前输入（以及被执行的条目）记进历史。
+    /// 失败的不记，免得污染历史。
+    fn remember_input(&mut self, item: Option<Item>) {
         let line = self.input.trim().to_string();
         self.history_cursor = None;
         self.draft.clear();
         if line.is_empty() {
             return;
         }
-        history::push(&mut self.history, &line);
+        history::push(&mut self.history, &line, item);
         if let Err(e) = history::save(&self.history) {
             eprintln!("保存历史失败：{e:#}");
         }
@@ -736,7 +737,7 @@ impl App {
             Some(i) => (i + 1).min(self.history.len() - 1),
         };
         self.history_cursor = Some(next);
-        let line = self.history[next].clone();
+        let line = self.history[next].line.clone();
         self.set_input(line);
     }
 
@@ -751,7 +752,7 @@ impl App {
             }
             Some(i) => {
                 self.history_cursor = Some(i - 1);
-                let line = self.history[i - 1].clone();
+                let line = self.history[i - 1].line.clone();
                 self.set_input(line);
             }
         }
@@ -951,7 +952,16 @@ mod tests {
     /// 测试用的 App：不动真实配置文件（历史在内存里替换掉）
     fn app() -> App {
         let mut app = App::new(Config::default(), Theme::default());
-        app.history = vec!["app code".to_string(), "报告".to_string()];
+        app.history = vec![
+            history::Entry {
+                line: "app code".to_string(),
+                item: None,
+            },
+            history::Entry {
+                line: "报告".to_string(),
+                item: None,
+            },
+        ];
         app
     }
 

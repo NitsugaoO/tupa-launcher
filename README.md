@@ -27,7 +27,7 @@ cargo build --release
 ./target/release/tupa-launcher.exe --query ":ev curl"
 ./target/release/tupa-launcher.exe --query ":app vsc"
 ./target/release/tupa-launcher.exe --query ":"        # 命令列表
-./target/release/tupa-launcher.exe --query ":switch"  # 开关 / 选项 / 数值
+./target/release/tupa-launcher.exe --query ":set"  # 开关 / 选项 / 数值
 ./target/release/tupa-launcher.exe --apply brightness 50  # 直接执行一次开关写入
 ```
 
@@ -92,7 +92,7 @@ Copilot 键是个例外（它的原样组合被 shell 占着），但用钩子**
 | `:new <文件名>` | 在 `~/Projects/New Files` 里新建文件并打开（没写扩展名默认 `.md`，同名不覆盖） |
 | `:fav [类型] [关键词]` | 列出收藏（`:fav app` / `:fav web` 按类型过滤），`Ctrl+D` 收藏 / 取消收藏 |
 | `:cfg [关键词]` | 列出配置项（当前值 / 行号 / 说明），**回车在 VSCode 里跳到对应行** |
-| `:switch [关键词]` | 应用内开关 / 选项 / 数值（深色模式、亮度、电池养护……），回车应用、`←/→` 调整、**不隐藏面板** |
+| `:set [关键词]` | 应用内开关 / 选项 / 数值（深色模式、亮度、电池养护……），回车应用、`←/→` 调整、**不隐藏面板** |
 | `<名字>`（不带 `:`） | 整行交给默认 provider 当搜索词（当前是 `app`） |
 
 命令前缀（`:app` / `:run:admin`）在输入框里会**高亮成黄色**，一眼能看出当前在哪个命令。
@@ -172,14 +172,14 @@ Copilot 键是个例外（它的原样组合被 shell 占着），但用钩子**
 
 不追踪原条目变化（比如一个文件的路径后来失效了，收藏里也会失效）。
 
-### 应用内开关：`:switch`
+### 应用内开关：`:set`
 
 把「打开 Vantage / 设置面板改一下再关掉」变成面板里的一次回车。
 
 ```text
-:switch              列出所有开关（读不到状态的项默认隐藏）
-:switch 电源         按标题 / 分组过滤
-:switch:all          连「不可用」的项一起列出
+:set              列出所有开关（读不到状态的项默认隐藏）
+:set 电源         按标题 / 分组过滤
+:set:all          连「不可用」的项一起列出
 ```
 
 内置五项**不需要管理员权限**的开/关：
@@ -234,7 +234,7 @@ set = '... -Value {value}'
 
 - 命令统一走 `cmd /C`，在 worker 线程执行，**5 秒超时**；失败时状态栏显示 stderr 第一行。
 - `{value}` 会替换成实际值（选项是文本，数值是数字）；也可以直接读环境变量 `TUPA_VALUE`。
-- `get` 失败（脚本报错 / 设备不支持）→ 该行在 `:switch:all` 里显示「不可用」。
+- `get` 失败（脚本报错 / 设备不支持）→ 该行在 `:set:all` 里显示「不可用」。
 
 > **电池养护模式**已经内置（id = `battery-care`），原理是反射调用 Vantage 的
 > `IdeaBatteryAgent.dll`，不需要管理员。`LENOVO_GAMEZONE_DATA` 的 Win 键锁 / 风扇接口
@@ -373,7 +373,7 @@ src/
     ├── new.rs           new  —— 新建文件
     ├── go.rs            go   —— zoxide + Everything + 剪贴板
     ├── run.rs           run  —— 执行命令
-    ├── switch.rs        switch —— 开关 / 选项 / 数值（actions.toml）
+    ├── switch.rs        set —— 开关 / 选项 / 数值（actions.toml）
     └── config_items.rs  cfg  —— 列出配置项
 ```
 
@@ -412,5 +412,5 @@ src/
 - [x] **v0.4** 分列显示（份数/最短/最长、选中行滚动）+ 详细信息模式 + `:` 命令前缀 + Tab 补全 + 选择模式
 - [x] **v0.6** 中英文（`general.language`）+ 文案精简；`:go:code` / `:go:yazi` / `:go:pi`；`:run` 默认 PowerShell；状态栏显示位置与后台忙碌
 - [x] **v0.5** `:web` 时间范围（默认一周 / month / all）+ 搜不到才直接打开；`:run` 默认新窗口执行；命令前缀可配置 + 去掉同义修饰符；`:new` 新建文件
-- [x] **v0.7** `:switch` 应用内开关 / 选项 / 数值（`actions.toml` 驱动 + 内置深色模式 / 亮度 / 电池养护）
+- [x] **v0.7** `:set` 应用内开关 / 选项 / 数值（`actions.toml` 驱动 + 内置深色模式 / 亮度 / 电池养护）
 - [ ] **v0.8** 自建无边框窗口，脱离 Windows Terminal（设计见 [`docs/05-native-window.md`](docs/05-native-window.md)）

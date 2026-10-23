@@ -604,7 +604,7 @@ pub fn help() -> String {
   :new <文件名>    新建文件
   :fav [类型]      收藏
   :cfg [关键词]    查看配置
-  :switch [关键词] 开关 / 选项 / 数值
+  :set [关键词]    开关 / 选项 / 数值
   不带前缀         交给默认 provider
 
 修饰符
@@ -646,7 +646,7 @@ Commands (prefix defaults to :, configurable)
   :new <file>       create a file
   :fav [kind]       favorites
   :cfg [keyword]    inspect config
-  :switch [keyword] toggles & values
+  :set [keyword]   toggles & values
   no prefix         goes to the default provider
 
 Flags

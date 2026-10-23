@@ -62,14 +62,25 @@ impl Provider for Home {
             });
         }
 
-        // 2) 最近执行的命令：回车只是把输入补回去（再回车才执行，避免误触）
+        // 2) 最近执行的条目：有快照的（打开过的文件 / 网页）直接执行，
+        //    只有输入行的（老记录）就补回输入框
+        let mut seen: Vec<Action> = items.iter().map(|item| item.action.clone()).collect();
         let recent: Vec<Item> = history::load()
             .into_iter()
-            .filter(|line| {
-                keyword.is_empty() || matcher.fuzzy_match(line, keyword).is_some()
+            .filter(|entry| keyword.is_empty() || matcher.fuzzy_match(&entry.line, keyword).is_some())
+            .map(|entry| match entry.item {
+                Some(item) => item,
+                None => recent_item(&entry.line),
+            })
+            .filter(|item| {
+                // 收藏里已经有的就别在历史里再列一遍
+                if seen.contains(&item.action) {
+                    return false;
+                }
+                seen.push(item.action.clone());
+                true
             })
             .take(HISTORY_LIMIT)
-            .map(|line| recent_item(&line))
             .collect();
         items.extend(recent);
 
