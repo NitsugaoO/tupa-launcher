@@ -59,7 +59,7 @@ impl Kind {
             Kind::Command => "run",
             Kind::Web => "web",
             Kind::Help => "cmd",
-            Kind::Switch => "sw",
+            Kind::Switch => "set",
             Kind::Pi => "pi",
             Kind::History => "rec",
         }
