@@ -8,10 +8,11 @@
 > ❯ :web rust async  → 在浏览器历史里找 rust async
 > ```
 >
-> 状态：**v0.6** · Rust + ratatui · 替代 PowerToys Command Palette
+> 版本：**0.8.0**（v0.8 进行中）· Rust · TUI 用 ratatui / GUI 实验用 winit + cosmic-text · 替代 PowerToys Command Palette
 > 调研与可行性论证见 [`docs/01-research.md`](docs/01-research.md)，设计决策见 [`docs/02-design.md`](docs/02-design.md)
-> 后续计划见 [`docs/03-roadmap.md`](docs/03-roadmap.md)，
-> **接着开发的入口见 [`docs/06-handover.md`](docs/06-handover.md)**
+> 后续计划见 [`docs/03-roadmap.md`](docs/03-roadmap.md)
+> **接着开发的入口：[`STATE.md`](STATE.md)（当前阶段 / 下一步）→ [`docs/06-handover.md`](docs/06-handover.md)（代码结构 / 坑表）**
+> 用 pi 在本仓库开工时，规矩见 [`AGENTS.md`](AGENTS.md)
 
 ## 快速开始
 
@@ -76,12 +77,13 @@ Copilot 键是个例外（它的原样组合被 shell 占着），但用钩子**
 
 ## 用法
 
-开屏显示**命令列表**；命令本身**以 `:` 开头**（开屏输入框是否预填 `:` 由
-`[general] prefill_colon` 决定，默认 `false` = 空输入但仍列命令）：
+开屏显示**收藏 + 最近执行过的命令**（`home` provider，输入为空时生效）；命令本身**以 `:` 开头**
+（开屏输入框是否预填 `:` 由 `[general] prefill_colon` 决定，默认 `false` = 空输入，
+改成 `true` 则一开就在命令模式）：
 
 | 输入 | 行为 |
 |---|---|
-| （开屏 / 空输入） | 命令列表；回车把 `:命令 ` 填进输入框 |
+| （开屏 / 空输入） | 收藏 + 最近 5 条执行过的命令，回车直接执行；输入 `:` 则改为列出全部命令 |
 | `:` | 用 `:` 开头进入命令模式（Tab 循环补全命令名） |
 | `:app <名字>` | 从自定义列表里启动应用（模糊匹配）；`.lnk` 会递归解析到目标 exe 显示 |
 | `:ev <关键词>` | Everything 搜文件，**支持原生语法**：`:ev ext:pdf 报告`、`:ev folder:Projects` |
@@ -182,15 +184,20 @@ Copilot 键是个例外（它的原样组合被 shell 占着），但用钩子**
 :set:all          连「不可用」的项一起列出
 ```
 
-内置五项**不需要管理员权限**的开/关：
+内置六项**不需要管理员权限**的开关：
 
 - **深色模式**（写 `HKCU` 主题键 + 广播 `WM_SETTINGCHANGE`）
 - **屏幕亮度**（WMI 的 `WmiMonitorBrightness` / `WmiMonitorBrightnessMethods`，0~100，步长 10）
 - **电池养护模式**（反射调用 Lenovo Vantage 的 `IdeaBatteryAgent.dll`，`Storage` ↔ `Normal`）
-- **节能模式**（Windows 11 的 Energy Saver：`Win+A` 打开快速设置 → `Home` + `→→↓` + `Space`
-  切到「节能模式」→ 关闭；键盘失败时回退到鼠标点击。用注册表 `EnergySaverState` 校验）
+- **节能模式**（把联想 Vantage 的「静音省电」和 Windows 11 的 Energy Saver 合成一个开关：
+  开 = 两边都开，关 = Vantage 回智能模式 + 关掉 Energy Saver。Energy Saver 走
+  `Win+A` 打开快速设置 → `Home` + `→→↓` + `Space`，键盘失败时回退到鼠标点击，
+  用注册表 `EnergySaverState` 校验）
 - **保持唤醒**（`D:\Softwares\nosleep\nosleep.exe` 的托盘进程：开 = 启动并立即阻止睡眠，
   关 = 结束进程；`get` 直接看进程是否存在）
+- **更新订阅**（Clash Party：读 `%APPDATA%\mihomo-party\profile.yaml` 的当前订阅与上次更新时间，
+  回车下载并覆盖 `profiles/<id>.yaml`、改 `updated`、重启 Clash Party ——
+  只有它自己会重新生成 `work/config.yaml`，单靠内核 API reload 会丢端口 / TUN / 规则集）
 
 选中一行后：`←/→` 改本地值，`Enter` 写出去；状态显示在行尾（`开` / `关` / `80%`）。
 写操作在后台 worker 里跑（带 5 秒超时），完成后自动重读状态并留在原来那一行。
@@ -374,7 +381,8 @@ src/
     ├── go.rs            go   —— zoxide + Everything + 剪贴板
     ├── run.rs           run  —— 执行命令
     ├── switch.rs        set —— 开关 / 选项 / 数值（actions.toml）
-    └── config_items.rs  cfg  —— 列出配置项
+    ├── config_items.rs  cfg  —— 列出配置项
+    └── home.rs          home —— 开屏内容（收藏 + 最近命令；无关键字，不进命令列表）
 ```
 
 ### 加一个新功能（比如 `go <目录>` 走 zoxide）
@@ -412,5 +420,7 @@ src/
 - [x] **v0.4** 分列显示（份数/最短/最长、选中行滚动）+ 详细信息模式 + `:` 命令前缀 + Tab 补全 + 选择模式
 - [x] **v0.6** 中英文（`general.language`）+ 文案精简；`:go:code` / `:go:yazi` / `:go:pi`；`:run` 默认 PowerShell；状态栏显示位置与后台忙碌
 - [x] **v0.5** `:web` 时间范围（默认一周 / month / all）+ 搜不到才直接打开；`:run` 默认新窗口执行；命令前缀可配置 + 去掉同义修饰符；`:new` 新建文件
-- [x] **v0.7** `:set` 应用内开关 / 选项 / 数值（`actions.toml` 驱动 + 内置深色模式 / 亮度 / 电池养护）
+- [x] **v0.7** `:set` 应用内开关 / 选项 / 数值（`actions.toml` 驱动 + 内置深色模式 / 亮度 / 电池养护 / 节能 / 保持唤醒 / 更新订阅）
 - [ ] **v0.8** 自建无边框窗口，脱离 Windows Terminal（设计见 [`docs/05-native-window.md`](docs/05-native-window.md)）
+      —— GUI 已能显示与输入（`--gui` / `[daemon] panel = "gui"`），剩余：中文输入法 IME、切换默认面板
+      （开工说明见 [`docs/07-shell-handover.md`](docs/07-shell-handover.md)，当前进度见 [`STATE.md`](STATE.md)）

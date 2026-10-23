@@ -5,6 +5,9 @@
 >
 > 结论：**直接反射 Vantage Addin 的 `IdeaPowerAgent.dll`**，普通用户权限即可。
 > 本文是自包含的，另一个对话不需要再翻其他文档。
+>
+> **改名注记（2026-10）**：文中的 `:switch` 现已改名为 `:set`（并新增了 `clash-subscription`
+> 「更新订阅」等项）。本文是调研与设计记录，正文不改历史；当前命令与现状见 [`../STATE.md`](../STATE.md)。
 
 ## 0. TL;DR
 

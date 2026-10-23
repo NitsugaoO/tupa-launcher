@@ -1,35 +1,25 @@
-# 交接文档（给下一个开发会话）
+# 开发手册（代码结构 / 扩展点 / 坑表）
 
-> 想接着做**套壳窗口**或 **switch provider** 的话，先读这里，再读对应的设计文档：
-> [`docs/05-native-window.md`](05-native-window.md)（套壳）、
-> [`docs/04-switch-engine.md`](04-switch-engine.md)（开关/选项/数值）。
+> 本文是**稳定知识**：代码结构、加功能的路径、踩过的坑、调试入口。
+> **当前状态（阶段 / 下一步 / 待验证）不在这里** —— 见 [`../STATE.md`](../STATE.md)；
+> 开工前的硬性规矩（改完怎么生效、收尾清单）见 [`../AGENTS.md`](../AGENTS.md)。
 >
-> 最后更新：v0.7（2026-10-21）
+> 设计文档：[`05-native-window.md`](05-native-window.md)（套壳）、
+> [`04-switch-engine.md`](04-switch-engine.md)（开关引擎）、
+> [`07-shell-handover.md`](07-shell-handover.md)（套壳的具体步骤与待确认决策）。
 
-## 1. 现在是什么状态
+## 1. 状态与“改完怎么生效”（已搬走）
 
-- 版本：`Cargo.toml` 0.8.0；68 个单元/渲染测试通过；`cargo clippy --release` 零警告
-- 能用的命令：`:app` `:ev` `:run` `:go` `:pi` `:web` `:new` `:fav` `:cfg` `:switch`（前缀默认 `:`，当前机器配置成 `@`）
-- 界面：分列（份数/最短/最长）、选中行左右滚动、详细信息模式、Tab 补全、选择模式、中英文
-- 面板还是 `wt -p tupa-launcher` 拉起的 Windows Terminal 窗口（套壳尚未开始）
+- 现在做到哪、下一步、待验证命令 → [`../STATE.md`](../STATE.md)
+- 改完代码怎么让它生效（重启守护进程的三条命令）→ [`../AGENTS.md`](../AGENTS.md)
 
-### 改完之后怎么生效
-
-```bash
-cd ~/Projects/tupa-launcher
-taskkill //IM tupa-launcher.exe //F        # 守护进程占着 exe
-cargo test --release && cargo clippy --release
-cargo build --release
-powershell -NoProfile -Command "Start-Process (Join-Path \$env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Startup\tupa-launcher-daemon.lnk')"
-```
-
-面板进程常驻（`Esc` 只是隐藏），所以改完必须重启上面这一步。
+本文不再维护这两项，避免和 STATE.md / AGENTS.md 漂移。
 
 ## 2. 代码结构
 
 ```
 src/
-├── main.rs        入口 / 事件循环 / --query --check --resolve --reveal --daemon
+├── main.rs        入口 / 事件循环 / --query --check --resolve --reveal --apply --daemon --gui
 ├── app.rs         状态机：解析、键位、补全、选择、历史、收藏、与 worker 通信
 ├── ui.rs          纯渲染：分列布局、详细信息、滚动、状态栏
 ├── exec.rs        执行动作（打开/启动/定位/提权/新窗口/新建文件/
@@ -42,6 +32,7 @@ src/
 ├── theme.rs       颜色
 ├── util.rs        .lnk 解析 / PATH / 编码 / 面板窗口
 ├── daemon.rs      热键 + 面板显隐（Windows）
+├── gui/           GUI 实验：mod.rs（winit 窗口 / 事件循环 / 渲染）、text.rs（cosmic-text 排版）
 └── providers/
     ├── mod.rs     Provider trait / Item / Action / Column / 解析 / worker
     ├── apps.rs    app
@@ -53,7 +44,8 @@ src/
     ├── new.rs     new
     ├── favorites.rs   fav
     ├── config_items.rs cfg
-    ├── switch.rs     switch（actions.toml 的开关/选项/数值）
+    ├── switch.rs     set（actions.toml 的开关/选项/数值；命令名 2026-10 从 switch 改成 set）
+    ├── home.rs       home（开屏：收藏 + 最近命令；无关键字、不进命令列表）
     └── commands.rs    命令列表（keyword 是 `:`，不参与匹配）
 ```
 
@@ -146,30 +138,27 @@ Control::{Run, Toggle{value}, Choice{options,index}, Number{value,min,max,step,s
 | `cmd /C` 命令行长度 | 长脚本的 `-EncodedCommand` base64 会超 8191 字符；内置脚本改为直接 spawn `powershell.exe` |
 | 节能电源计划被隐藏 | `powercfg /list` 不显示，但 `a1841308-3541-4fab-bc81-f71556f20b4a` 仍可用 `/setactive` 直接切换（普通用户，即时） |
 | `Evt::Applied` 丢了 | 等待期间用户又输入会让 `generation` 过期；**无论是否过期都要复位 `applying`**，否则以后按回车再也发不出写请求 |
-| 空格不能当控件切换键 | 空格是搜索词/参数分隔符（`:switch 电源`），拿去切换会在打过滤词时误触发写操作 |
+| 空格不能当控件切换键 | 空格是搜索词/参数分隔符（`:set 电源`），拿去切换会在打过滤词时误触发写操作 |
 | `TestBackend` 宽字符 | 中文在 buffer 里占两格、字符串断言会掺空格；测试里只断言 ASCII 部分或用 `column_of` |
 
-## 5. switch provider（v0.7 已完成）
+## 5. 开关引擎（v0.7 已完成）
 
-已落地（细节见 [`docs/04-switch-engine.md`](04-switch-engine.md) 文末「实现备注」）：
-
-- `Item.control` + `Action::SetControl` + `Cmd::Apply` / `Evt::Applied`
-- `actions.toml` 驱动（toggle / choice / number）+ 5 秒超时
-- 内置五项**免提权**开关：深色模式、屏幕亮度、电池养护模式（Vantage Addin 反射）、
-  节能模式（快速设置 UI 点击）、保持唤醒（nosleep 进程）
-- `:switch` 列表、状态列、`←→` 调整、`Enter` 应用（不隐藏）、失败显示 stderr 第一行
+设计见 [`04-switch-engine.md`](04-switch-engine.md)。机制一句话：`Item.control` +
+`Action::SetControl` + `Cmd::Apply` / `Evt::Applied`；`actions.toml` 驱动（toggle / choice /
+number，5 秒超时）；内置项免提权（深色模式 / 亮度 / 电池养护 / 节能 / 保持唤醒 / 更新订阅）。
 
 **没做**：计划任务提权。本来打算用它做电池养护，后来发现直接调 Vantage 的
 `IdeaBatteryAgent.dll` 就能读写（不需要管理员），所以没往系统里写任务。
 真正需要管理员的功能（BIOS 写入、GameZone Win 键锁）在这台 ThinkBook 上 WMI 不可用，
 要做得先解决驱动/提权。
 
-## 6. 下一步：套壳（交接见 `docs/07-shell-handover.md`）
+## 6. 套壳（GUI）：进行中
 
-设计取舍看 [`docs/05-native-window.md`](05-native-window.md)，**开工说明看
-[`docs/07-shell-handover.md`](07-shell-handover.md)**（当前代码接口、阶段 1 的具体步骤、坑、待确认决策）。
+设计取舍见 [`05-native-window.md`](05-native-window.md)，具体步骤 / 待确认决策见
+[`07-shell-handover.md`](07-shell-handover.md)，**当前进度见 [`../STATE.md`](../STATE.md)**。
 
-现状：面板是 `wt -p tupa-launcher`；`daemon.rs` 用热键 + 窗口显隐。
+现状：`src/gui/` 已能显示与输入（`--gui` 或 `[daemon] panel = "gui"`），默认仍是
+`wt -p tupa-launcher` 拉起的 Windows Terminal 窗口。
 
 选的是 **winit + cosmic-text + softbuffer**（保留 ratatui 的 layout/render 代码）。
 
@@ -177,16 +166,18 @@ Control::{Run, Toggle{value}, Choice{options,index}, Number{value,min,max,step,s
 
 - `ui::draw(&mut App)` 只依赖 `ratatui::Frame`，换成自己把 `Buffer` 画成像素即可
 - 输入层只要把 `winit::event::KeyEvent` 映射成 `crossterm::event::KeyEvent` 喂给 `App::on_key`
-- 最大的坑是**中文输入法**：`Ime::Preedit` 画预编辑、`Ime::Commit` 插入、`set_ime_cursor_area` 定位候选窗
+- 面板本身是个 Windows Terminal 窗口，做不到无边框浮层，`--gui` 才是出路
 
-建议先在 `--gui` 子命令里做，和现有 TUI 并存对比，再切换默认。
+剩下的主要都是打磨项（圆角 / 阴影 / 淡入、鼠标点击、滚动条、DPI 实测、窗口尺寸配置）。
+**中文输入法（IME）已接入**：`Ime::Preedit` 画预编辑、`Ime::Commit` 插入、
+`set_ime_cursor_area` 定位候选窗 —— 要改就先读 `src/gui/mod.rs` 的 `ime()`。
 
 ## 7. 调试入口
 
 ```bash
 tupa-launcher.exe --query "@ev 报告"      # 打印 provider 结果
 tupa-launcher.exe --query "@"             # 命令列表
-tupa-launcher.exe --query "@switch"      # 开关列表（会真的执行 get 脚本）
+tupa-launcher.exe --query "@set"         # 开关列表（会真的执行 get 脚本）
 tupa-launcher.exe --apply brightness 50   # 直接写一次开关（调试 actions.toml）
 tupa-launcher.exe --check                 # 配置里每个 app 能否解析
 tupa-launcher.exe --resolve "C:\x.lnk"    # 快捷方式解析成什么

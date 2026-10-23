@@ -1,10 +1,11 @@
 # 套壳交接（自建无边框窗口）
 
 > **这份文档是给下一个会话的开工说明。** 设计取舍看
-> [`docs/05-native-window.md`](05-native-window.md)；项目整体现状看
-> [`docs/06-handover.md`](06-handover.md)。
+> [`docs/05-native-window.md`](05-native-window.md)；**当前进度看 [`../STATE.md`](../STATE.md)**；
+> 项目整体约定与坑表看 [`docs/06-handover.md`](06-handover.md)。
 >
-> 最后更新：阶段 1~3 已跑通（`--gui` 可用，daemon 已切换到自绘窗口）
+> 阶段 1–5 均已实现（`--gui` 可用、IME 已接入、daemon 支持拉起自绘窗口）；
+> 但 `[daemon] panel` 默认仍是 `tui`，剩下的都是打磨项（见 §1）。
 
 ## 0. 一句话目标
 
@@ -16,7 +17,7 @@
 
 ## 1. 当前状态
 
-**已经实现的（`src/gui/`，约 900 行）：**
+**已经实现的（`src/gui/`）：**
 
 | 文件 | 内容 |
 |---|---|
@@ -68,8 +69,8 @@ panel = "tui"   # Windows Terminal 里的版本（默认，当前线上用的就
 有了这条规则，GUI 自己那次 `center_window` 会被 WM 覆盖（最终位置由 GlazeWM 决定）。
 没跑 WM 时 `center_window` 仍然保证窗口居中。
 
-- 版本 `Cargo.toml` 0.8.0，68 个测试通过，clippy 零警告
-- 命令：`:app` `:ev` `:run` `:go` `:pi` `:web` `:new` `:fav` `:cfg` `:switch`
+- 版本 `Cargo.toml` 0.8.0，`cargo test --release` / `cargo clippy --release` 全绿（数字以输出为准）
+- 命令：`:app` `:ev` `:run` `:go` `:pi` `:web` `:new` `:fav` `:cfg` `:set`（开屏是 `home`）
 - 面板进程：`wt.exe -p tupa-launcher`（Windows Terminal）
 - daemon：`RegisterHotKey`（默认 Alt+`` ` ``）+ 窗口显隐 + Copilot 键钩子
 
