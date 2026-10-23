@@ -427,6 +427,14 @@ pub fn action_group_power() -> &'static str {
     t("电源", "Power")
 }
 
+pub fn action_clash_subscription() -> &'static str {
+    t("更新订阅", "Update subscription")
+}
+
+pub fn action_group_network() -> &'static str {
+    t("网络", "Network")
+}
+
 pub fn action_keep_awake() -> &'static str {
     t("保持唤醒", "Keep awake")
 }

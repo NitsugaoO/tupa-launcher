@@ -93,6 +93,8 @@ pub enum SpecKind {
     Toggle,
     Choice,
     Number,
+    /// 只读信息 + 一个动作：`get` 输出显示文本，回车执行 `on`（例如「更新订阅」）
+    Action,
 }
 
 impl Spec {
@@ -163,6 +165,7 @@ pub fn get_control(spec: &Spec) -> Control {
                 index,
             }
         }
+        SpecKind::Action => Control::Action { detail: raw },
         SpecKind::Number => {
             let Ok(value) = raw.parse::<i64>() else {
                 return Control::Unavailable;
@@ -197,13 +200,23 @@ pub fn apply(id: &str, value: &str) -> Result<String> {
             picked.cloned()
         }
         SpecKind::Choice | SpecKind::Number => spec.set.as_ref().map(|set| substitute(set, value)),
+        SpecKind::Action => spec.on.as_ref().or(spec.set.as_ref()).cloned(),
     };
 
     let Some(command) = command else {
         bail!("{}", i18n::action_no_set(&spec.title));
     };
 
-    run_script(&command, Some(value))?;
+    let output = run_script(&command, Some(value))?;
+    // 动作类条目直接用脚本最后一行当提示（例如「已更新并重启 Clash Party」）
+    if spec.kind == SpecKind::Action {
+        let message = output.lines().last().unwrap_or("").trim().to_string();
+        return Ok(if message.is_empty() {
+            i18n::control_applied(&spec.title, "")
+        } else {
+            message
+        });
+    }
     Ok(i18n::control_applied(&spec.title, &spec.kind.label(value)))
 }
 
@@ -211,6 +224,7 @@ impl SpecKind {
     /// 写完成之后状态栏里的值文本
     fn label(self, value: &str) -> String {
         match self {
+            SpecKind::Action => String::new(),
             SpecKind::Toggle => {
                 if parse_on(value) {
                     i18n::control_on().to_string()
@@ -403,6 +417,16 @@ fn builtin() -> Vec<Spec> {
             on: Some(powershell(KEEP_AWAKE_ON)),
             off: Some(powershell(KEEP_AWAKE_OFF)),
             on_value: Some("on".to_string()),
+            ..Spec::default()
+        },
+        Spec {
+            id: Some("clash-subscription".to_string()),
+            title: i18n::action_clash_subscription().to_string(),
+            subtitle: "Clash Party".to_string(),
+            kind: SpecKind::Action,
+            group: i18n::action_group_network().to_string(),
+            get: powershell(CLASH_INFO_GET),
+            on: Some(powershell(CLASH_UPDATE)),
             ..Spec::default()
         },
         Spec {
@@ -737,6 +761,102 @@ try {
 "#;
 
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Clash Party 订阅：读 profile.yaml 的当前订阅 + 上次更新时间，回车触发更新
+//
+// 更新流程：下载订阅 → 覆盖 profiles/<id>.yaml → 改 profile.yaml 的 updated
+// → 重启 Clash Party。只有它自己会重新生成 work/config.yaml，
+// 单靠内核 API reload 会丢掉端口 / TUN / 规则集等它合并出来的设置。
+// ---------------------------------------------------------------------------
+
+const CLASH_INFO_GET: &str = r#"
+$ErrorActionPreference = 'Stop'
+[Console]::OutputEncoding = [Text.Encoding]::UTF8
+$appDir = Join-Path $env:APPDATA 'mihomo-party'
+$profileYaml = Join-Path $appDir 'profile.yaml'
+if (-not (Test-Path -LiteralPath $profileYaml)) { throw 'mihomo-party profile.yaml not found' }
+$current = ''
+$items = @{}
+$id = ''
+foreach ($line in Get-Content -LiteralPath $profileYaml -Encoding UTF8) {
+    if ($line -match '^\s*-\s*id:\s*(\S+)') { $id = $matches[1]; $items[$id] = @{ name = ''; updated = 0 } }
+    elseif ($id -and $line -match '^\s+name:\s*(.+)$') { $items[$id].name = $matches[1].Trim() }
+    elseif ($id -and $line -match '^\s+updated:\s*(\d+)') { $items[$id].updated = [int64]$matches[1] }
+    elseif ($line -match '^current:\s*(\S+)') { $current = $matches[1] }
+}
+if (-not $current -or -not $items.ContainsKey($current)) { throw 'no current profile' }
+$item = $items[$current]
+$name = if ($item.name) { $item.name } else { $current }
+if ($item.updated -le 0) { Write-Output "$name · 从未更新"; exit 0 }
+$span = (Get-Date) - [DateTimeOffset]::FromUnixTimeMilliseconds($item.updated).LocalDateTime
+$age = if ($span.TotalMinutes -lt 1) { '刚刚' }
+    elseif ($span.TotalHours -lt 1) { '{0:N0} 分钟前' -f $span.TotalMinutes }
+    elseif ($span.TotalDays -lt 1) { '{0:N0} 小时前' -f $span.TotalHours }
+    else { '{0:N0} 天前' -f $span.TotalDays }
+Write-Output "$name · $age"
+"#;
+
+const CLASH_UPDATE: &str = r#"
+$ErrorActionPreference = 'Stop'
+[Console]::OutputEncoding = [Text.Encoding]::UTF8
+$appDir = Join-Path $env:APPDATA 'mihomo-party'
+$profileYaml = Join-Path $appDir 'profile.yaml'
+if (-not (Test-Path -LiteralPath $profileYaml)) { throw 'mihomo-party profile.yaml not found' }
+
+$current = ''
+$items = @{}
+$id = ''
+foreach ($line in Get-Content -LiteralPath $profileYaml -Encoding UTF8) {
+    if ($line -match '^\s*-\s*id:\s*(\S+)') { $id = $matches[1]; $items[$id] = @{ name = ''; url = ''; updated = 0 } }
+    elseif ($id -and $line -match '^\s+name:\s*(.+)$') { $items[$id].name = $matches[1].Trim() }
+    elseif ($id -and $line -match '^\s+url:\s*(\S+)') { $items[$id].url = $matches[1].Trim() }
+    elseif ($id -and $line -match '^\s+updated:\s*(\d+)') { $items[$id].updated = [int64]$matches[1] }
+    elseif ($line -match '^current:\s*(\S+)') { $current = $matches[1] }
+}
+if (-not $current -or -not $items.ContainsKey($current)) { throw 'no current profile' }
+$item = $items[$current]
+if (-not $item.url) { throw '当前订阅没有 URL（本地配置无法在线更新）' }
+
+$response = Invoke-WebRequest -Uri $item.url -UseBasicParsing -TimeoutSec 30 -Headers @{
+    'User-Agent' = 'clash.meta/mihomo-party'
+}
+$content = $response.Content
+if ($content -notmatch '(?m)^(proxies|proxy-providers):') {
+    throw '下载到的内容不像 Clash 配置（缺少 proxies / proxy-providers）'
+}
+
+$profileFile = Join-Path $appDir ("profiles\$current.yaml")
+if (Test-Path -LiteralPath $profileFile) { Copy-Item -LiteralPath $profileFile -Destination "$profileFile.bak" -Force }
+[IO.File]::WriteAllText($profileFile, $content, (New-Object Text.UTF8Encoding($false)))
+
+$lines = Get-Content -LiteralPath $profileYaml -Encoding UTF8
+$now = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+$inCurrent = $false
+for ($i = 0; $i -lt $lines.Count; $i++) {
+    if ($lines[$i] -match '^\s*-\s*id:\s*(\S+)') {
+        $inCurrent = ($matches[1] -eq $current)
+    } elseif ($inCurrent -and $lines[$i] -match '^(\s*)updated:') {
+        $lines[$i] = $matches[1] + 'updated: ' + $now
+        $inCurrent = $false
+    }
+}
+[IO.File]::WriteAllLines($profileYaml, $lines, (New-Object Text.UTF8Encoding($false)))
+
+$exe = $null
+try {
+    $command = (Get-ItemProperty 'HKCU:\Software\Classes\clash\shell\open\command' -ErrorAction Stop).'(default)'
+    $exe = ($command -split '"')[1]
+} catch {}
+if (-not $exe -or -not (Test-Path -LiteralPath $exe)) {
+    $exe = 'C:\Program Files\Clash Party\Clash Party.exe'
+}
+Get-Process -Name 'Clash Party' -ErrorAction SilentlyContinue | Stop-Process -Force
+Start-Sleep -Milliseconds 800
+Start-Process -FilePath $exe
+Start-Sleep -Seconds 2
+Write-Output '已更新并重启 Clash Party'
+"#;
+
 // 保持唤醒：nosleep（D:\Softwares\nosleep\nosleep.exe）
 // ---------------------------------------------------------------------------
 

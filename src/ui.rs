@@ -479,6 +479,7 @@ fn state_style(control: &Control, t: Theme) -> Style {
         Control::Toggle { value: true } => Style::new().fg(t.good),
         Control::Toggle { value: false } => Style::new().fg(t.dim),
         Control::Choice { .. } | Control::Number { .. } => Style::new().fg(t.accent),
+        Control::Action { .. } => Style::new().fg(t.muted),
         Control::Unavailable => Style::new().fg(t.faint),
         Control::Run => Style::new(),
     }

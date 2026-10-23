@@ -127,6 +127,8 @@ pub enum Control {
         step: i64,
         suffix: String,
     },
+    /// 只读信息 + 一个动作：状态列显示 `detail`，回车执行（例如「更新订阅」）
+    Action { detail: String },
     /// 读不到当前状态（脚本失败 / 设备不支持）
     Unavailable,
 }
@@ -150,6 +152,7 @@ impl Control {
             }
             Control::Choice { options, index } => options.get(*index).cloned().unwrap_or_default(),
             Control::Number { value, suffix, .. } => format!("{value}{suffix}"),
+            Control::Action { detail } => detail.clone(),
             Control::Unavailable => crate::i18n::control_unavailable().to_string(),
         }
     }
@@ -182,7 +185,7 @@ impl Control {
                 *value = (*value + delta as i64 * (*step).max(1)).clamp(*min, *max);
                 true
             }
-            Control::Run | Control::Unavailable => false,
+            Control::Run | Control::Action { .. } | Control::Unavailable => false,
         }
     }
 }

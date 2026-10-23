@@ -503,6 +503,7 @@ impl App {
                 None => return true,
             },
             Control::Number { value, .. } => value.to_string(),
+            Control::Action { .. } => String::new(),
             Control::Unavailable => {
                 self.status = Some((i18n::control_unavailable_hint().to_string(), true));
                 return true;
