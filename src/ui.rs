@@ -18,7 +18,9 @@ const PREFIX: u16 = 2;
 const BADGE: u16 = 4;
 /// 收藏星标占 1 列
 const STAR: u16 = 1;
-/// 星标与第一列之间的间隔（比列间隔窄）
+/// 徽标与星标之间的间隔（避免 4 字宽徽标和星标黏在一起）
+const BADGE_GAP: u16 = 1;
+/// 星标与第一列之间的间隔
 const STAR_GAP: u16 = 1;
 /// 列之间的间隔
 const GAP: u16 = 2;
@@ -282,7 +284,8 @@ fn draw_list(frame: &mut Frame, app: &mut App, area: Rect, t: Theme) {
         .map(|item| item.columns.len())
         .max()
         .unwrap_or(0);
-    let fixed = PREFIX + BADGE + STAR + STAR_GAP + if detail { 0 } else { state_width };
+    let fixed =
+        PREFIX + BADGE + BADGE_GAP + STAR + STAR_GAP + if detail { 0 } else { state_width };
     let usable = area.width.saturating_sub(fixed);
     let widths = if detail {
         // 详细信息：每行只有一列，所以每列都能用整行的宽度
@@ -367,7 +370,13 @@ fn item_lines(
     );
 
     if !detail {
-        let mut spans = vec![marker, badge, star, Span::raw(" ".repeat(STAR_GAP as usize))];
+        let mut spans = vec![
+            marker,
+            badge,
+            Span::raw(" ".repeat(BADGE_GAP as usize)),
+            star,
+            Span::raw(" ".repeat(STAR_GAP as usize)),
+        ];
         for (index, text) in item.columns.iter().enumerate() {
             if index > 0 {
                 spans.push(Span::raw(" ".repeat(GAP as usize)));
@@ -393,10 +402,16 @@ fn item_lines(
     }
 
     // 详细信息：第一行是徽标 + 第一列，其余列各自一行，缩进对齐到第一列
-    let indent = Span::raw(" ".repeat((PREFIX + BADGE + STAR + STAR_GAP) as usize));
+    let indent = Span::raw(" ".repeat((PREFIX + BADGE + BADGE_GAP + STAR + STAR_GAP) as usize));
     let mut lines: Vec<Line<'static>> = Vec::with_capacity(item.columns.len().max(1));
 
-    let mut first = vec![marker, badge, star, Span::raw(" ".repeat(STAR_GAP as usize))];
+    let mut first = vec![
+        marker,
+        badge,
+        Span::raw(" ".repeat(BADGE_GAP as usize)),
+        star,
+        Span::raw(" ".repeat(STAR_GAP as usize)),
+    ];
     first.extend(cell(
         item.title(),
         widths.first().copied().unwrap_or(0),

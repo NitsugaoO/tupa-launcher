@@ -423,10 +423,6 @@ pub fn action_energy_saver() -> &'static str {
     t("节能模式", "Energy saver")
 }
 
-pub fn action_quick_settings() -> &'static str {
-    t("快速设置", "Quick settings")
-}
-
 pub fn action_group_power() -> &'static str {
     t("电源", "Power")
 }

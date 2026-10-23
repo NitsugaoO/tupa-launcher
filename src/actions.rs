@@ -347,7 +347,6 @@ pub fn run_script(command: &str, value: Option<&str>) -> Result<String> {
 
 fn builtin() -> Vec<Spec> {
     let battery = |body: &str| powershell(&format!("{BATTERY_BOOTSTRAP}{body}"));
-    let energy = |body: &str| powershell(&format!("{ENERGY_SAVER_BOOTSTRAP}{body}"));
 
     vec![
         Spec {
@@ -376,13 +375,21 @@ fn builtin() -> Vec<Spec> {
         },
         Spec {
             id: Some("energy-saver".to_string()),
+            // Lenovo 的「静音省电」和 Windows 的 Energy Saver 合成一个开关：
+            // 打开 = 两个都开，关闭 = Vantage 回智能模式 + Energy Saver 关掉
             title: i18n::action_energy_saver().to_string(),
-            subtitle: i18n::action_quick_settings().to_string(),
+            subtitle: "Lenovo Vantage + Windows".to_string(),
             kind: SpecKind::Toggle,
             group: i18n::action_group_power().to_string(),
-            get: powershell(ENERGY_SAVER_GET),
-            on: Some(energy(ENERGY_SAVER_ON_BODY)),
-            off: Some(energy(ENERGY_SAVER_OFF_BODY)),
+            get: powershell(&format!(
+                "{VANTAGE_POWER_BOOTSTRAP}{ENERGY_SAVER_GET_COMBINED}"
+            )),
+            on: Some(powershell(&format!(
+                "{VANTAGE_POWER_BOOTSTRAP}{ENERGY_SAVER_BOOTSTRAP}{ENERGY_SAVER_VANTAGE_ON}{ENERGY_SAVER_ON_BODY}"
+            ))),
+            off: Some(powershell(&format!(
+                "{VANTAGE_POWER_BOOTSTRAP}{ENERGY_SAVER_BOOTSTRAP}{ENERGY_SAVER_VANTAGE_OFF}{ENERGY_SAVER_OFF_BODY}"
+            ))),
             on_value: Some("on".to_string()),
             ..Spec::default()
         },
@@ -555,7 +562,48 @@ $response.BatteryChargeMode
 "#;
 
 // ---------------------------------------------------------------------------
-// 节能模式（Windows 11 24H2 Energy Saver）
+// Lenovo Vantage 电源模式（IdeaPowerAgent.dll，普通用户权限）
+//
+// Windows 侧没有可编程接口，只有 Vantage 的托管 Addin 暴露了
+// GetITSMode / SetITSMode（见 docs/08-vantage-power-mode.md）。
+// ---------------------------------------------------------------------------
+
+const VANTAGE_POWER_BOOTSTRAP: &str = r#"
+$ErrorActionPreference = 'Stop'
+$vantageRoot = Join-Path $env:ProgramData 'Lenovo\Vantage\Addins\IdeaNotebookAddin'
+$vantageDir = $null
+$vantageType = $null
+$vantageAgent = $null
+try {
+    $vantageDir = Get-ChildItem -LiteralPath $vantageRoot -Directory -ErrorAction Stop |
+        Sort-Object { try { [version]$_.Name } catch { [version]'0.0' } } -Descending |
+        Select-Object -First 1
+} catch { $vantageDir = $null }
+if ($vantageDir) {
+    foreach ($name in 'Newtonsoft.Json.dll','Lenovo.Vantage.RpcCommon.dll','Lenovo.Vantage.RpcClient.dll','Lenovo.VantageService.Utilities.dll','Lenovo.VantageService.UtilitiesExtensions.dll','PowerContract.dll') {
+        $path = Join-Path $vantageDir.FullName $name
+        if (Test-Path -LiteralPath $path) { try { [Reflection.Assembly]::LoadFrom($path) | Out-Null } catch {} }
+    }
+    $vantageAssembly = [Reflection.Assembly]::LoadFrom((Join-Path $vantageDir.FullName 'IdeaPowerAgent.dll'))
+    $vantageType = $vantageAssembly.GetType('IdeaNotebookAddin.PowerAgent')
+    $vantageAgent = $vantageType.GetMethod('GetInstance', [Reflection.BindingFlags]'Public,Static,Instance').Invoke($null, @())
+}
+function Read-VantageMode {
+    if (-not $vantageType) { return $null }
+    $request = [Activator]::CreateInstance([Lenovo.Modern.Contracts.Power.PowerSettingsRequest])
+    $response = $vantageType.GetMethod('GetITSMode').Invoke($vantageAgent, @($request))
+    return [string]$response.ItsMode
+}
+function Write-VantageMode([string]$mode) {
+    if (-not $vantageType) { return }
+    $request = [Activator]::CreateInstance([Lenovo.Modern.Contracts.Power.PowerSettingsRequest])
+    $request.ItsMode = [Lenovo.Modern.Contracts.Power.ItsModeType]$mode
+    $null = $vantageType.GetMethod('SetITSMode').Invoke($vantageAgent, @($request))
+}
+"#;
+
+// ---------------------------------------------------------------------------
+// 节能模式 = Lenovo Vantage 的「静音省电」+ Windows 11 Energy Saver
 //
 // 没有公开的即时 API：注册表 EnergySaverState 要重启，WNF 写入被 ACL 挡住
 // （SYSTEM 写在 Session 0，跟用户会话隔离）。所以走快速设置 UI 点击：
@@ -564,12 +612,6 @@ $response.BatteryChargeMode
 // 下按钮中心为 (2894, 1298)。如果快速设置的布局/固定项变了，改这两个数。
 // 点击后读注册表校验，没变就报错，不会静默成功。
 // ---------------------------------------------------------------------------
-
-const ENERGY_SAVER_GET: &str = r#"
-$ErrorActionPreference = 'Stop'
-$v = (Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Power' -Name EnergySaverState).EnergySaverState
-if ($v -eq 1) { 'on' } else { 'off' }
-"#;
 
 const ENERGY_SAVER_BOOTSTRAP: &str = r#"
 $ErrorActionPreference = 'Stop'
@@ -621,6 +663,29 @@ function Wait-State([int]$want) {
     for ($i = 0; $i -lt 30; $i++) { if ((Get-State) -eq $want) { return $true }; Start-Sleep -Milliseconds 50 }
     return $false
 }
+"#;
+
+/// 合并后的状态：Vantage 是「静音省电」**并且** Windows Energy Saver 打开才算开
+const ENERGY_SAVER_GET_COMBINED: &str = r#"
+$state = 0
+try { $state = (Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Power' -Name EnergySaverState).EnergySaverState } catch {}
+$mode = $null
+try { $mode = Read-VantageMode } catch {}
+$vantageOk = (-not $mode) -or ($mode -eq 'MmcCool')
+if ($vantageOk -and ($state -eq 1)) { 'on' } else { 'off' }
+"#;
+
+/// 切 Vantage 的部分（Energy Saver 那段复用原来的 ON/OFF body）
+const ENERGY_SAVER_VANTAGE_ON: &str = r#"
+$mode = $null
+try { $mode = Read-VantageMode } catch {}
+if ($mode -and $mode -ne 'MmcCool') { Write-VantageMode 'MmcCool' }
+"#;
+
+const ENERGY_SAVER_VANTAGE_OFF: &str = r#"
+$mode = $null
+try { $mode = Read-VantageMode } catch {}
+if ($mode -and $mode -ne 'ItsAuto') { Write-VantageMode 'ItsAuto' }
 "#;
 
 const ENERGY_SAVER_ON_BODY: &str = r#"
