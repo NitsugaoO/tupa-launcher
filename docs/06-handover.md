@@ -44,7 +44,7 @@ src/
     ├── new.rs     new
     ├── favorites.rs   fav
     ├── config_items.rs cfg
-    ├── clean.rs      clean（pi 会话清理：时间窗口 + 归档 / 回收站 / 恢复）
+    ├── clean.rs     :pi:clean 的实现（时间窗口 + 归档 / 回收站 / 恢复）
     ├── switch.rs     set（actions.toml 的开关/选项/数值；命令名 2026-10 从 switch 改成 set）
     ├── home.rs       home（开屏：收藏 + 最近命令；无关键字、不进命令列表）
     └── commands.rs    命令列表（keyword 是 `:`，不参与匹配）

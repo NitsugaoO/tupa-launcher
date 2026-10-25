@@ -65,13 +65,6 @@ pub fn desc_pi() -> &'static str {
     t("pi 会话", "pi sessions")
 }
 
-pub fn desc_clean() -> &'static str {
-    t(
-        "清理 pi 会话（默认两周前；:week / :month / :restore）",
-        "Clean pi sessions (older than 2 weeks; :week / :month / :restore)",
-    )
-}
-
 /// 列表首列的动作前缀
 pub fn clean_do_archive() -> &'static str {
     t("[归档]", "[archive]")
@@ -323,8 +316,22 @@ pub fn flag_description(flag: &str) -> &'static str {
     match flag {
         "admin" => t("提权执行，会弹 UAC", "Run elevated, UAC prompt"),
         "bg" => t("后台执行，输出丢弃", "Run in background"),
-        "week" => t("最近一周的历史", "History from the past week"),
-        "month" => t("最近一个月的历史", "History from the past month"),
+        "week" => t(
+            "一周（:web 搜索范围 / :pi:clean 时间窗口）",
+            "One week (:web range / :pi:clean window)",
+        ),
+        "month" => t(
+            "一个月（:web 搜索范围 / :pi:clean 时间窗口）",
+            "One month (:web range / :pi:clean window)",
+        ),
+        "clean" => t(
+            "清理会话：时间窗口外的归档 / 删到回收站",
+            "Clean sessions outside the time window",
+        ),
+        "restore" => t(
+            "列出归档会话，回车恢复（配 :pi:clean）",
+            "List archived sessions and restore (with :pi:clean)",
+        ),
         "all" => t(
             "不限时间 / 显示不可用项",
             "No time limit / show unavailable",

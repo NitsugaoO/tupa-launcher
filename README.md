@@ -29,9 +29,12 @@ cargo build --release
 ./target/release/tupa-launcher.exe --query ":app vsc"
 ./target/release/tupa-launcher.exe --query ":"        # 命令列表
 ./target/release/tupa-launcher.exe --query ":set"  # 开关 / 选项 / 数值
-./target/release/tupa-launcher.exe --query ":clean"  # 清理候选（只读，不执行动作）
+./target/release/tupa-launcher.exe --query ":pi:clean"  # 清理候选（只读，不执行动作）
 ./target/release/tupa-launcher.exe --apply brightness 50  # 直接执行一次开关写入
 ```
+
+> 上面的 `:` 是默认前缀；如果你的 `config.toml` 里改成了别的（例如 `@`），
+> `--query` 也要用那个前缀，否则整行会被当成默认 provider 的搜索词。
 
 需要 `es.exe`（Everything 的命令行）—— 自动探测，探测不到就不注册 `ev`。
 Everything 本体没装的话，`ev` 会用不了，其余功能正常。
@@ -91,7 +94,7 @@ Copilot 键是个例外（它的原样组合被 shell 占着），但用钩子**
 | `:run <命令>` | 开一个新终端窗口执行（默认 PowerShell；`:run:bg` 后台，`:run:admin` 提权） |
 | `:go <路径>` | 跳到目录 / 定位文件；空参数读剪贴板；`:go:code` / `:go:yazi` / `:go:pi` 用指定程序打开 |
 | `:pi [关键词]` | 列出所有 pi 会话（标题 / 项目 / 时间），**回车在新终端里 `pi --session` 打开**；`:pi:all` 包含 `session-archive` 里的归档 |
-| `:clean [关键词]` | 清理 pi 会话：列出**超过时间窗口**的会话，回车**归档**（长会话）或**删除到回收站**（瘦会话）；`:clean:week` / `:clean:month` 切窗口（默认两周），`:clean:restore` 从归档恢复 |
+| `:pi:clean [关键词]` | 清理 pi 会话：列出**超过时间窗口**的会话，回车**归档**（长会话）或**删除到回收站**（瘦会话）；`:pi:clean:week` / `:pi:clean:month` 切窗口（默认两周），`:pi:clean:restore` 从归档恢复 |
 | `:web <网址 / 关键词>` | 搜 Edge 历史（默认**一周内**）；搜不到且输入像网址就直接打开（`:web:month` / `:web:all` 扩大范围，`:web:url` 强制打开） |
 | `:new <文件名>` | 在 `~/Projects/New Files` 里新建文件并打开（没写扩展名默认 `.md`，同名不覆盖） |
 | `:fav [类型] [关键词]` | 列出收藏（`:fav app` / `:fav web` 按类型过滤），`Ctrl+D` 收藏 / 取消收藏 |
@@ -104,17 +107,17 @@ Copilot 键是个例外（它的原样组合被 shell 占着），但用钩子**
 前缀本身**可以换**：`config.toml` 里 `general.command_prefix = "@"` 之后就是
 `@app code`、`@run@admin ipconfig`（修饰符分隔符跟着变；`@run:admin` 这种写法也认）。
 
-### `:clean`：清理 pi 会话
+### `:pi:clean`：清理 pi 会话
 
-把「翻了很久的旧会话」变成一条一条可执行的动作。**时间窗口是前置条件**：只列
+`:pi` 的清理视图（同一个 provider，靠 `clean` 修饰符切换）。把「翻了很久的旧会话」变成一条一条可执行的动作。**时间窗口是前置条件**：只列
 最后活跃时间早于窗口的会话，窗口内和收藏的一律**不列出**（保护，不会误删）。
 
 ```text
-:clean              → 两周以前的会话
-:clean:week         → 一周以前
-:clean:month        → 一个月以前
-:clean 插件         → 再按关键词过滤（标题 / 项目路径 / 关键词）
-:clean:restore      → 反过来：列出 session-archive/ 里的归档会话，回车恢复
+:pi:clean              → 两周以前的会话
+:pi:clean:week         → 一周以前
+:pi:clean:month        → 一个月以前
+:pi:clean 插件         → 再按关键词过滤（标题 / 项目路径 / 关键词）
+:pi:clean:restore      → 反过来：列出 session-archive/ 里的归档会话，回车恢复
 ```
 
 每一条的处置由规则决定（不用你选）：
@@ -123,7 +126,7 @@ Copilot 键是个例外（它的原样组合被 shell 占着），但用钩子**
 |---|---|---|
 | `[归档]` | 已总结（有关键词）或消息数 ≥ 8 | 移到 `~/.pi/agent/session-archive/`（可恢复） |
 | `[删除]` | 其余瘦会话 | 进系统回收站（`trash` CLI；不可用时才真删） |
-| `[恢复]` | 仅 `:clean:restore` | 移回 `sessions/` 原目录；重名加 `-restored-<时间>` 后缀，绝不覆盖 |
+| `[恢复]` | 仅 `:pi:clean:restore` | 移回 `sessions/` 原目录；重名加 `-restored-<时间>` 后缀，绝不覆盖 |
 
 - 回车执行后**面板不隐藏**，列表就地刷新，可以连着处理十几条
 - 归档/恢复保留目录结构（`sessions/<cwd目录>/` ↔ `session-archive/<cwd目录>/`），所以恢复后
@@ -157,7 +160,7 @@ Copilot 键是个例外（它的原样组合被 shell 占着），但用钩子**
 ```
 
 - `:` / `:ap` → 补全命令名
-- `:run:ad` → 补全修饰符（`admin` / `bg` / `week` / `month` / `all` / `url` / `restore`）
+- `:run:ad` → 补全修饰符（`admin` / `bg` / `week` / `month` / `all` / `url` / `clean` / `restore`）
 - 一旦敲了空格（进入参数区）就停止补全 —— 参数补全暂时不做
 - 按 Tab 在候选里循环时，**状态栏会显示当前候选的说明**（比如 `admin · 提权执行，会弹 UAC`）
 
@@ -177,8 +180,9 @@ Copilot 键是个例外（它的原样组合被 shell 占着），但用钩子**
 |---|---|
 | `admin` | 提权执行（弹 UAC） |
 | `bg` | `:run` 在后台执行（输出丢弃） |
-| `week` / `month` / `all` | `:web` 的搜索时间范围（默认 `week`）；`:clean` 用 `week` / `month` 作时间窗口（默认两周） |
-| `restore` | `:clean` 列出归档里的会话，回车恢复回 `sessions/` |
+| `week` / `month` / `all` | `:web` 的搜索时间范围（默认 `week`）；`:pi:clean` 用 `week` / `month` 作时间窗口（默认两周） |
+| `clean` | `:pi:clean` 切换到会话清理视图（归档 / 删到回收站） |
+| `restore` | `:pi:clean:restore` 列出归档里的会话，回车恢复回 `sessions/` |
 | `url` | `:web` 强制直接打开网址 |
 | `code` / `yazi` / `pi` | `:go` 用 VSCode / yazi / pi 打开目标 |
 
@@ -409,7 +413,7 @@ src/
     ├── new.rs           new  —— 新建文件
     ├── go.rs            go   —— zoxide + Everything + 剪贴板
     ├── run.rs           run  —— 执行命令
-    ├── clean.rs         clean —— 清理 pi 会话（归档 / 回收站 / 恢复）
+    ├── clean.rs         :pi:clean 的实现（清理 pi 会话：归档 / 回收站 / 恢复）
     ├── switch.rs        set —— 开关 / 选项 / 数值（actions.toml）
     ├── config_items.rs  cfg  —— 列出配置项
     └── home.rs          home —— 开屏内容（收藏 + 最近命令；无关键字，不进命令列表）

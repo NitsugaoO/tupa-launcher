@@ -6,19 +6,18 @@
 //! - 已总结（`session-keywords.json` 里有条目）或消息数 ≥ 8 → **归档**到 `session-archive/`
 //! - 其余瘦会话 → **删除**到系统回收站
 //!
-//! `:clean:restore` 列出归档里的会话，回车移回 `sessions/` 原目录。
+//! `:pi:clean:restore` 列出归档里的会话，回车移回 `sessions/` 原目录。
 //!
-//! 时间窗口用修饰符切：`:clean:week`（一周）/ `:clean:month`（一个月），默认两周。
-//! 会话扫描与标题解析复用 [`super::pi`]，这里只做分类与动作。
+//! 时间窗口用修饰符切：`:pi:clean:week`（一周）/ `:pi:clean:month`（一个月），默认两周。
+//! 会话扫描与标题解析复用 [`super::pi`]，这里只做分类与动作；
+//! 入口是 [`super::pi::PiSessions`]（同一个 provider，`clean` 只是一个修饰符）。
 
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use super::pi::{self, Meta};
-use super::{Action, CleanMode, Column, Item, Kind, Provider};
+use super::{Action, CleanMode, Item, Kind};
 use crate::i18n;
-
-pub struct Clean;
 
 /// 默认只看两周以前的会话
 pub(super) const WINDOW_DEFAULT_DAYS: u64 = 14;
@@ -26,93 +25,70 @@ pub(super) const WINDOW_DEFAULT_DAYS: u64 = 14;
 pub(super) const MULTI_TURN: u32 = 8;
 const DAY_SECS: u64 = 86_400;
 
-/// 处置 · 标题 / 项目 / 时间 / 体积
-const COLUMNS: &[Column] = &[
-    Column::new(5, 14, 0),
-    Column::new(3, 0, 28),
-    Column::new(1, 6, 0),
-    Column::new(1, 0, 10),
-];
+/// `:pi:clean`（以及 `:pi:clean:restore`）的查询实现。
+///
+/// 列与 `:pi` 保持一致（标题 / 项目 / 时间），处置前缀放进标题、体积并入时间列，
+/// 这样两个视图共用同一套列宽规格。
+pub(super) fn query(args: &str, flags: &[String]) -> Vec<Item> {
+    let Some(root) = agent_dir() else {
+        return Vec::new();
+    };
+    let keywords = pi::load_keywords(&root);
+    let favorites = pi::load_favorites(&root);
+    let restore = flags.iter().any(|flag| flag == "restore");
+    let search = args.trim().to_lowercase();
+    let window_days = window_days(flags);
+    let now = SystemTime::now();
 
-impl Provider for Clean {
-    fn keyword(&self) -> &str {
-        "clean"
+    let mut metas = Vec::new();
+    if restore {
+        pi::collect(
+            &root.join("session-archive"),
+            &keywords,
+            &favorites,
+            &mut metas,
+        );
+    } else {
+        pi::collect(&root.join("sessions"), &keywords, &favorites, &mut metas);
     }
 
-    fn description(&self) -> &'static str {
-        i18n::desc_clean()
-    }
-
-    fn flags(&self) -> &'static [&'static str] {
-        &["week", "month", "restore"]
-    }
-
-    fn columns(&self) -> &'static [Column] {
-        COLUMNS
-    }
-
-    fn query(&self, args: &str, flags: &[String]) -> Vec<Item> {
-        let Some(root) = agent_dir() else {
-            return Vec::new();
-        };
-        let keywords = pi::load_keywords(&root);
-        let favorites = pi::load_favorites(&root);
-        let restore = flags.iter().any(|flag| flag == "restore");
-        let query = args.trim().to_lowercase();
-        let window_days = window_days(flags);
-        let now = SystemTime::now();
-
-        let mut metas = Vec::new();
-        if restore {
-            pi::collect(
-                &root.join("session-archive"),
-                &keywords,
-                &favorites,
-                &mut metas,
-            );
-        } else {
-            pi::collect(&root.join("sessions"), &keywords, &favorites, &mut metas);
+    let mut rows: Vec<(SystemTime, Item)> = Vec::new();
+    for meta in metas {
+        if !search.is_empty() && !matches(&meta, &search) {
+            continue;
         }
-
-        let mut rows: Vec<(SystemTime, Item)> = Vec::new();
-        for meta in metas {
-            if !query.is_empty() && !matches(&meta, &query) {
-                continue;
+        let (mode, label) = if restore {
+            (CleanMode::Restore, i18n::clean_do_restore())
+        } else {
+            match classify(&meta, window_days, now) {
+                // 收藏 / 未满窗口：不列出，避免误操作
+                Disposition::Protect => continue,
+                Disposition::Archive => (CleanMode::Archive, i18n::clean_do_archive()),
+                Disposition::Trash => (CleanMode::Trash, i18n::clean_do_trash()),
             }
-            let (mode, label) = if restore {
-                (CleanMode::Restore, i18n::clean_do_restore())
-            } else {
-                match classify(&meta, window_days, now) {
-                    // 收藏 / 未满窗口：不列出，避免误操作
-                    Disposition::Protect => continue,
-                    Disposition::Archive => (CleanMode::Archive, i18n::clean_do_archive()),
-                    Disposition::Trash => (CleanMode::Trash, i18n::clean_do_trash()),
-                }
-            };
-            let item = Item::new(
-                Kind::Clean,
-                vec![
-                    format!("{label} {}", meta.title),
-                    project_name(&meta),
-                    pi::age(meta.mtime),
-                    size_of(&meta.path),
-                ],
-                Action::CleanSession {
-                    path: meta.path.clone(),
-                    mode,
-                },
-            );
-            rows.push((meta.mtime, item));
-        }
-
-        // 清理时最旧的在前（先看最久没动的）；恢复时最近归档的在前
-        if restore {
-            rows.sort_by_key(|(mtime, _)| std::cmp::Reverse(*mtime));
-        } else {
-            rows.sort_by_key(|(mtime, _)| *mtime);
-        }
-        rows.into_iter().map(|(_, item)| item).collect()
+        };
+        let item = Item::new(
+            Kind::Clean,
+            vec![
+                format!("{label} {}", meta.title),
+                project_name(&meta),
+                format!("{} · {}", pi::age(meta.mtime), size_of(&meta.path)),
+            ],
+            Action::CleanSession {
+                path: meta.path.clone(),
+                mode,
+            },
+        );
+        rows.push((meta.mtime, item));
     }
+
+    // 清理时最旧的在前（先看最久没动的）；恢复时最近归档的在前
+    if restore {
+        rows.sort_by_key(|(mtime, _)| std::cmp::Reverse(*mtime));
+    } else {
+        rows.sort_by_key(|(mtime, _)| *mtime);
+    }
+    rows.into_iter().map(|(_, item)| item).collect()
 }
 
 /// 处置：保护（收藏 / 未满窗口） / 归档 / 删除
