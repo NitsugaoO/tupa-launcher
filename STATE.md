@@ -1,6 +1,6 @@
 # tupa-launcher 状态
 
-updated: 2026-10-25 · code: `e12929c`（最后一次改动代码的提交）· 整理时 main 领先 origin/main **13** 个提交（未推送）
+updated: 2026-10-25 · code: `e12929c`（最后一次改动代码的提交）· main 与 origin/main 已同步（`b89d230`）
 
 > 判断本文件是否过期：比较 `code` 与 `git log -1 --format=%h -- src Cargo.toml`。
 > 只改文档的提交不算过期。
@@ -42,7 +42,7 @@ updated: 2026-10-25 · code: `e12929c`（最后一次改动代码的提交）· 
 ## 待验证
 
 ```bash
-cargo test --release      # 全绿（2026-10-23 实测 73 passed，数字以输出为准）
+cargo test --release      # 全绿（2026-10-25 实测 88 passed，数字以输出为准）
 cargo clippy --release    # 零警告
 ```
 
