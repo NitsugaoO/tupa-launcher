@@ -1,6 +1,6 @@
 # tupa-launcher 状态
 
-updated: 2026-10-25 · code: `e12929c`（最后一次改动代码的提交）· main 与 origin/main 已同步（`b89d230`）
+updated: 2026-10-25 · code: `9c4dcb5`（最后一次改动代码的提交）· main 领先 origin/main **1** 个提交（未推送）
 
 > 判断本文件是否过期：比较 `code` 与 `git log -1 --format=%h -- src Cargo.toml`。
 > 只改文档的提交不算过期。
@@ -13,7 +13,7 @@ updated: 2026-10-25 · code: `e12929c`（最后一次改动代码的提交）· 
 
 ## 阶段
 
-- 版本 `Cargo.toml` **0.8.0**
+- 版本 `Cargo.toml` **0.8.0**（`:blog` 删了旧 `:new`，要不要升 0.9.0 由你定）
 - **TUI 面板稳定**：`app` `ev` `run` `pi` `go` `web` `blog` `fav` `cfg` `set` + 开屏 `home`（收藏 + 最近命令）
 - **`:blog` 取代了旧的 `:new`（2026-10-25）**：`src/providers/blog.rs`。不带参数列三个入口
   （本地 `localhost:4000` / GitHub Pages / Cloudflare），`:blog:new <标题>` 在
