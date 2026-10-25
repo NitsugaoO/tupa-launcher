@@ -14,7 +14,13 @@ updated: 2026-10-25 · code: `e12929c`（最后一次改动代码的提交）· 
 ## 阶段
 
 - 版本 `Cargo.toml` **0.8.0**
-- **TUI 面板稳定**：`app` `ev` `run` `pi` `go` `web` `new` `fav` `cfg` `set` + 开屏 `home`（收藏 + 最近命令）
+- **TUI 面板稳定**：`app` `ev` `run` `pi` `go` `web` `blog` `fav` `cfg` `set` + 开屏 `home`（收藏 + 最近命令）
+- **`:blog` 取代了旧的 `:new`（2026-10-25）**：`src/providers/blog.rs`。不带参数列三个入口
+  （本地 `localhost:4000` / GitHub Pages / Cloudflare），`:blog:new <标题>` 在
+  `<blog>/source/_posts` 写 front matter 并用 VSCode 打开（同名不覆盖、空参数列最近文章），
+  `:blog:manage` 后台跑 `pnpm admin` + 1.5s 后打开 `127.0.0.1:5173`。
+  目录与网址在 `config.toml` 的 `[blog]`（`dir` 留空 = `~/blog`）；
+  旧的 `new` provider / `Action::CreateFile` / `general.new_files_dir` 已删干净
 - **自绘 GUI 已能跑**：`src/gui/`（winit + cosmic-text + softbuffer），窗口 / 字体 / 键位 / 中文输入法（IME）/ daemon 接管都已实现；
   用 `--gui` 或在 `config.toml` 里设 `[daemon] panel = "gui"` 打开
 - **但默认仍是 `tui`**：`daemon::launch_panel` 按 `[daemon] panel` 分流，TUI 走 `wt -p tupa-launcher`；
@@ -30,19 +36,23 @@ updated: 2026-10-25 · code: `e12929c`（最后一次改动代码的提交）· 
 
 ## 下一步
 
-1. **`:pi:clean` / `:pi:cleanall` 待实机验**（2026-10-25）：热键唤起 → `@pi:clean` →
+1. **`:blog` 待实机验**（2026-10-25）：热键唤起 → `@blog` 三个入口各点一次；
+   `@blog:new 测试标题` 确认文件建出来、front matter 正确、VSCode 打开；
+   再点一次同一个标题（应提示「已存在，直接打开」而不是覆盖）；
+   最后 `@blog:manage` 看管理页是否在 5173 起来（重复执行会 `EADDRINUSE`，属预期）
+2. **`:pi:clean` / `:pi:cleanall` 待实机验**（2026-10-25）：热键唤起 → `@pi:clean` →
    回车归档一条 → `@pi:clean:restore` 搜回来；再试一条 `[删除]` 看是否进回收站；
    最后 `@pi:cleanall` 回车跑一次批量（当前 32 归档 + 4 删除），确认汇总文案与失败计数；
    顺带确认 `@pi` 原视图没受 4→3 列调整影响
-2. **GUI 打磨**（[`docs/07-shell-handover.md`](docs/07-shell-handover.md) §1「还没做的」）：
+3. **GUI 打磨**（[`docs/07-shell-handover.md`](docs/07-shell-handover.md) §1「还没做的」）：
    圆角 / 阴影 / 淡入、鼠标点击、滚动条、DPI 切换实测、窗口尺寸配置项
-3. 实机跑一段时间 GUI 后，再把 `[daemon] panel` 的默认值从 `tui` 改成 `gui`（保留 TUI 兜底）
-4. 剩下的小项（不阻塞套壳）：主题并入 `~/Themes/generator/generate.py`；`hist` provider；frecency 排序
+4. 实机跑一段时间 GUI 后，再把 `[daemon] panel` 的默认值从 `tui` 改成 `gui`（保留 TUI 兜底）
+5. 剩下的小项（不阻塞套壳）：主题并入 `~/Themes/generator/generate.py`；`hist` provider；frecency 排序
 
 ## 待验证
 
 ```bash
-cargo test --release      # 全绿（2026-10-25 实测 88 passed，数字以输出为准）
+cargo test --release      # 全绿（2026-10-25 实测 90 passed，数字以输出为准）
 cargo clippy --release    # 零警告
 ```
 

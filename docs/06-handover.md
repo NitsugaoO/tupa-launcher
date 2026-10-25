@@ -22,7 +22,7 @@ src/
 ├── main.rs        入口 / 事件循环 / --query --check --resolve --reveal --apply --daemon --gui
 ├── app.rs         状态机：解析、键位、补全、选择、历史、收藏、与 worker 通信
 ├── ui.rs          纯渲染：分列布局、详细信息、滚动、状态栏
-├── exec.rs        执行动作（打开/启动/定位/提权/新窗口/新建文件/
+├── exec.rs        执行动作（打开/启动/定位/提权/新窗口/新建文章/
 │                  用指定程序打开/开关写入）
 ├── actions.rs     actions.toml 解析 + 脚本执行（超时）+ 内置开关
 ├── config.rs      config.toml
@@ -41,7 +41,7 @@ src/
     ├── go.rs      go（zoxide + Everything + 剪贴板 + yazi/pi/code）
     ├── pi.rs      pi（pi 会话列表 + 关键词搜索 + -session 打开）
     ├── web.rs     web（Edge 历史，rusqlite）
-    ├── new.rs     new
+    ├── blog.rs      blog（新建文章 / 管理页 / 站点入口）
     ├── favorites.rs   fav
     ├── config_items.rs cfg
     ├── clean.rs     :pi:clean 的实现（时间窗口 + 归档 / 回收站 / 恢复）
@@ -74,7 +74,7 @@ src/
 ```rust
 Item { kind, columns: Vec<String>, action, control: Control }
                                                 // control = 开关/选项/数值
-Action::{Open, OpenUrl, Launch, LaunchInTerminal, RunCommand, Reveal, OpenInEditor, CreateFile, FillInput, SetControl}
+Action::{Open, OpenUrl, Launch, LaunchInTerminal, RunCommand, Reveal, OpenInEditor, CreateBlogPost, BlogAdmin, FillInput, SetControl}
 Column { weight, min, max }                      // 每列的份数/最短/最长
 Control::{Run, Toggle{value}, Choice{options,index}, Number{value,min,max,step,suffix}, Unavailable}
 ```
@@ -141,6 +141,8 @@ Control::{Run, Toggle{value}, Choice{options,index}, Number{value,min,max,step,s
 | `Evt::Applied` 丢了 | 等待期间用户又输入会让 `generation` 过期；**无论是否过期都要复位 `applying`**，否则以后按回车再也发不出写请求 |
 | 空格不能当控件切换键 | 空格是搜索词/参数分隔符（`:set 电源`），拿去切换会在打过滤词时误触发写操作 |
 | `TestBackend` 宽字符 | 中文在 buffer 里占两格、字符串断言会掺空格；测试里只断言 ASCII 部分或用 `column_of` |
+| `pnpm` 是 `.cmd` | 不能 `Command::new("pnpm")`；走 `pwsh -Command "pnpm admin"` + `.current_dir()`（和 `RunCommand` 共用 `shell_args`） |
+| 管理页白屏 | `pnpm admin` 要几百毫秒才监听 5173，立刻开浏览器会白屏；延迟 1.5s 在**后台线程**打开，不卡面板 |
 
 ## 5. 开关引擎（v0.7 已完成）
 

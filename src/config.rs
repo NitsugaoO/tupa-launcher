@@ -14,6 +14,7 @@ use crate::theme::ThemeOverrides;
 pub struct Config {
     pub general: General,
     pub daemon: Daemon,
+    pub blog: Blog,
     pub theme: ThemeOverrides,
     pub apps: Vec<AppEntry>,
 }
@@ -67,8 +68,6 @@ pub struct General {
     ///
     /// `false` 时开屏是空输入，但仍然显示命令列表。
     pub prefill_colon: bool,
-    /// `:new` 新建文件放在哪个目录；留空 = `~/Projects/New Files`
-    pub new_files_dir: Option<String>,
     /// 命令前缀，默认 `:`，也可以改成 `@` 之类不常用的符号。
     ///
     /// 修饰符分隔符也用这个字符：`@run@admin`。
@@ -86,10 +85,39 @@ impl Default for General {
             max_results: 30,
             everything_path: None,
             prefill_colon: false,
-            new_files_dir: None,
             command_prefix: ":".to_string(),
             language: "zh".to_string(),
             show_hints: true,
+        }
+    }
+}
+
+/// `[blog]` —— `:blog` 用到的目录与网址
+///
+/// 默认值就是本机这套 Hexo 博客（`~/blog`，GitHub Pages + Cloudflare 双部署）。
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct Blog {
+    /// 博客仓库根目录（`package.json` 和 `source/_posts` 在这里）；留空 = `~/blog`
+    pub dir: Option<String>,
+    /// 本地开发服务器（`pnpm server`，Hexo 默认 4000）
+    pub local_url: String,
+    /// GitHub Pages 地址
+    pub github_url: String,
+    /// Cloudflare Workers 地址
+    pub cloudflare_url: String,
+    /// `pnpm admin` 起来的管理页
+    pub admin_url: String,
+}
+
+impl Default for Blog {
+    fn default() -> Self {
+        Blog {
+            dir: None,
+            local_url: "http://localhost:4000".to_string(),
+            github_url: "https://nitsugao.github.io".to_string(),
+            cloudflare_url: "https://blog.wooyun.workers.dev".to_string(),
+            admin_url: "http://127.0.0.1:5173".to_string(),
         }
     }
 }

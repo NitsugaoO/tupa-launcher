@@ -93,9 +93,9 @@ fn build_fields(cfg: &Config) -> Vec<Field> {
             hint: crate::i18n::hint_cfg_max_results(),
         },
         Field {
-            path: "general.new_files_dir",
-            value: opt(&cfg.general.new_files_dir),
-            hint: crate::i18n::hint_cfg_new_files_dir(),
+            path: "blog.dir",
+            value: opt(&cfg.blog.dir),
+            hint: crate::i18n::hint_cfg_blog_dir(),
         },
         Field {
             path: "general.command_prefix",

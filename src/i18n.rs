@@ -128,8 +128,35 @@ pub fn desc_web() -> &'static str {
     t("浏览历史", "Browse history")
 }
 
-pub fn desc_new() -> &'static str {
-    t("新建文件", "New file")
+pub fn desc_blog() -> &'static str {
+    t(
+        "博客：新建文章 / 管理页 / 站点入口",
+        "Blog: new post, admin, site links",
+    )
+}
+
+pub fn blog_local_preview() -> &'static str {
+    t("本地预览", "Local preview")
+}
+
+pub fn blog_github() -> &'static str {
+    t("GitHub Pages", "GitHub Pages")
+}
+
+pub fn blog_cloudflare() -> &'static str {
+    t("Cloudflare", "Cloudflare")
+}
+
+pub fn blog_admin() -> &'static str {
+    t("管理页", "Admin page")
+}
+
+pub fn blog_post_exists() -> &'static str {
+    t("已存在，直接打开", "Exists, opening it")
+}
+
+pub fn blog_posts_dir() -> &'static str {
+    t("source/_posts", "source/_posts")
 }
 
 pub fn desc_fav() -> &'static str {
@@ -175,8 +202,22 @@ pub fn ran(command: &str) -> String {
     s(|| format!("已执行 {command}"), || format!("Ran {command}"))
 }
 
-pub fn created(name: &str) -> String {
-    s(|| format!("已新建 {name}"), || format!("Created {name}"))
+pub fn blog_post_created(name: &str) -> String {
+    s(
+        || format!("已新建文章 {name}"),
+        || format!("Created post {name}"),
+    )
+}
+
+pub fn blog_admin_started() -> &'static str {
+    t("管理页启动中…", "Starting the admin page…")
+}
+
+pub fn blog_dir_missing(path: &str) -> String {
+    s(
+        || format!("博客目录不存在：{path}"),
+        || format!("Blog folder not found: {path}"),
+    )
 }
 
 pub fn clean_archived(name: &str) -> String {
@@ -232,13 +273,6 @@ pub fn cannot(zh_verb: &str, en_verb: &str, target: &str) -> String {
 
 pub fn filled(text: &str) -> String {
     s(|| format!("已填入 {text}"), || format!("Filled: {text}"))
-}
-
-pub fn created_but_cannot_open(path: &str) -> String {
-    s(
-        || format!("已新建，但无法打开 {path}"),
-        || format!("Created, but cannot open {path}"),
-    )
 }
 
 pub fn shortcut_no_args(path: &str) -> String {
@@ -573,10 +607,6 @@ pub fn web_visits(count: i64) -> String {
     s(|| format!("{count} 次"), || format!("{count} visits"))
 }
 
-pub fn new_file_exists() -> &'static str {
-    t("已存在，不覆盖", "Exists, not overwriting")
-}
-
 pub fn config_line(line: Option<usize>) -> String {
     match line {
         Some(number) => s(|| format!("第 {number} 行"), || format!("line {number}")),
@@ -607,8 +637,8 @@ pub fn hint_cfg_everything_path() -> &'static str {
     t("es.exe 路径，留空自动探测", "Path to es.exe, empty = auto")
 }
 
-pub fn hint_cfg_new_files_dir() -> &'static str {
-    t("new 新建文件放在哪", "Where `new` creates files")
+pub fn hint_cfg_blog_dir() -> &'static str {
+    t("博客仓库根目录（留空 ~/blog）", "Blog repo root, empty = ~/blog")
 }
 
 pub fn hint_cfg_command_prefix() -> &'static str {

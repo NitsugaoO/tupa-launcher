@@ -12,13 +12,27 @@ max_results = 30
 # 开屏时输入框是否预填 `:`（true = 直接进命令模式；false = 空输入，但仍显示命令列表）
 prefill_colon = false
 # 命令前缀（默认 `:`）；修饰符分隔符也用它，例如 @run@admin
-# new（新建文件）放在哪个目录；留空 = ~/Projects/New Files
-# new_files_dir = 'C:\Users\<你>\Projects\New Files'
 # 界面语言：zh / en
 # 右下角是否显示快捷键提示
 show_hints = true
 language = "zh"
 command_prefix = ":"
+
+# ---------------------------------------------------------------------------
+# 博客（:blog）：新建文章 / 管理页 / 三个站点入口
+# ---------------------------------------------------------------------------
+
+[blog]
+# 博客仓库根目录（package.json 和 source/_posts 在这里）；留空 = ~/blog
+# dir = 'C:\Users\<你>\blog'
+# 本地预览（pnpm server，Hexo 默认 4000）
+local_url = "http://localhost:4000"
+# GitHub Pages
+github_url = "https://nitsugao.github.io"
+# Cloudflare Workers
+cloudflare_url = "https://blog.wooyun.workers.dev"
+# pnpm admin 起来的管理页
+admin_url = "http://127.0.0.1:5173"
 
 # ---------------------------------------------------------------------------
 # 常驻守护进程（--daemon）：全局热键 + 面板显隐

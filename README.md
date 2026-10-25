@@ -97,7 +97,7 @@ Copilot 键是个例外（它的原样组合被 shell 占着），但用钩子**
 | `:pi:clean [关键词]` | 清理 pi 会话：列出**超过时间窗口**的会话，回车**归档**（长会话）或**删除到回收站**（瘦会话）；`:pi:clean:week` / `:pi:clean:month` 切窗口（默认两周），`:pi:clean:restore` 从归档恢复 |
 | `:pi:cleanall [关键词]` | 同上，但只列**一条汇总项**（归档 N 个 / 删除 M 个 / 总体积），回车**一次处理全部**；可叠窗口：`:pi:cleanall:month` |
 | `:web <网址 / 关键词>` | 搜 Edge 历史（默认**一周内**）；搜不到且输入像网址就直接打开（`:web:month` / `:web:all` 扩大范围，`:web:url` 强制打开） |
-| `:new <文件名>` | 在 `~/Projects/New Files` 里新建文件并打开（没写扩展名默认 `.md`，同名不覆盖） |
+| `:blog [关键词]` | 自己的博客：不带参数列**三个入口**（本地 `localhost:4000` / GitHub Pages / Cloudflare）；`:blog:new <标题>` 在 `source/_posts` 新建文章并**用 VSCode 打开**（同名不覆盖，空参数列最近文章）；`:blog:manage` 后台跑 `pnpm admin` 并打开管理页（`127.0.0.1:5173`） |
 | `:fav [类型] [关键词]` | 列出收藏（`:fav app` / `:fav web` 按类型过滤），`Ctrl+D` 收藏 / 取消收藏 |
 | `:cfg [关键词]` | 列出配置项（当前值 / 行号 / 说明），**回车在 VSCode 里跳到对应行** |
 | `:set [关键词]` | 应用内开关 / 选项 / 数值（深色模式、亮度、电池养护……），回车应用、`←/→` 调整、**不隐藏面板** |
@@ -394,7 +394,16 @@ background panel overlay border fg muted dim faint accent good warn bad
 | `command_prefix` | `:` | 命令前缀，也是修饰符分隔符；想用 `@` 就改成 `"@"` |
 | `language` | `zh` | 界面语言：`zh` / `en`（所有界面文案、命令描述、`--help` 都会跟着变） |
 | `show_hints` | `true` | 右下角的快捷键提示是否显示（`false` 只留左侧状态） |
-| `new_files_dir` | `~/Projects/New Files` | `:new` 新建文件放哪个目录 |
+
+`[blog]` 段（`:blog` 用）：
+
+| 键 | 默认 | 说明 |
+|---|---|---|
+| `dir` | `~/blog` | 博客仓库根目录（`source/_posts` 与 `package.json` 在这里） |
+| `local_url` | `http://localhost:4000` | 本地预览（`pnpm server`，Hexo 默认端口） |
+| `github_url` | `https://nitsugao.github.io` | GitHub Pages |
+| `cloudflare_url` | `https://blog.wooyun.workers.dev` | Cloudflare Workers |
+| `admin_url` | `http://127.0.0.1:5173` | `pnpm admin` 起来的管理页 |
 
 ## 架构
 
@@ -419,7 +428,7 @@ src/
     ├── web.rs           web  —— URL 判断 + Edge 历史（rusqlite）
     ├── favorites.rs     fav  —— 列出收藏 + 按类型过滤
     ├── commands.rs      `:`  —— 命令列表（也是补全的数据源）
-    ├── new.rs           new  —— 新建文件
+    ├── blog.rs           blog —— 新建文章 / 管理页 / 站点入口
     ├── go.rs            go   —— zoxide + Everything + 剪贴板
     ├── run.rs           run  —— 执行命令
     ├── clean.rs         :pi:clean 的实现（清理 pi 会话：归档 / 回收站 / 恢复）

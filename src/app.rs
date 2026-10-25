@@ -829,7 +829,8 @@ impl App {
             | Action::LaunchInTerminal { .. }
             | Action::RunCommand { .. }
             | Action::OpenInEditor { .. }
-            | Action::CreateFile(_)
+            | Action::CreateBlogPost { .. }
+            | Action::BlogAdmin { .. }
             | Action::SetControl { .. }
             | Action::CleanSession { .. }
             | Action::CleanBatch { .. }

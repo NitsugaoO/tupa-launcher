@@ -7,6 +7,7 @@
 //! provider 的搜索词。命令列表本身也是一个 provider（见 [`commands`]）。
 
 pub mod apps;
+pub mod blog;
 pub mod clean;
 pub mod commands;
 pub mod config_items;
@@ -14,7 +15,6 @@ pub mod everything;
 pub mod favorites;
 pub mod go;
 pub mod home;
-pub mod new;
 pub mod pi;
 pub mod run;
 pub mod switch;
@@ -226,8 +226,10 @@ pub enum Action {
     Reveal(PathBuf),
     /// 在编辑器里打开某个文件的指定行
     OpenInEditor { file: PathBuf, line: usize },
-    /// 新建一个空文件（已存在则不覆盖），然后打开它
-    CreateFile(PathBuf),
+    /// 新建一篇博客文章（已存在则不覆盖），然后在编辑器里打开
+    CreateBlogPost { path: PathBuf, title: String },
+    /// 后台跑 `pnpm admin`，稍后打开管理页
+    BlogAdmin { dir: PathBuf, url: String },
     /// 把面板输入替换成这段文本（命令列表用，不执行任何东西）
     FillInput(String),
     /// 把 `actions.toml` 里的某个开关 / 选项 / 数值设成新值
@@ -322,7 +324,8 @@ impl Item {
                 None => command.clone(),
             },
             Action::OpenInEditor { file, line } => format!("{}:{line}", file.display()),
-            Action::CreateFile(path) => path.display().to_string(),
+            Action::CreateBlogPost { path, .. } => path.display().to_string(),
+            Action::BlogAdmin { dir, url } => format!("pnpm admin · {} · {url}", dir.display()),
             Action::SetControl { id, value } => format!("{id} = {value}"),
             Action::CleanSession { path, .. } => path.display().to_string(),
             Action::CleanBatch { .. } => return None,
@@ -405,7 +408,7 @@ pub fn build(cfg: &Config) -> Vec<Box<dyn Provider>> {
     list.push(Box::new(pi::PiSessions));
     list.push(Box::new(go::Go::new(cfg)));
     list.push(Box::new(web::Web::new(cfg)));
-    list.push(Box::new(new::NewFile::new(cfg)));
+    list.push(Box::new(blog::Blog::new(cfg)));
     list.push(Box::new(favorites::Favorites::new(cfg)));
     list.push(Box::new(config_items::ConfigItems));
     list.push(Box::new(switch::Switch));
@@ -451,7 +454,7 @@ pub fn commands_index(infos: &[ProviderInfo]) -> Option<usize> {
 /// `week`/`month`/`all` 时间范围、`url` 直接打开网址）。
 pub const KNOWN_FLAGS: &[&str] = &[
     "admin", "bg", "week", "month", "all", "url", "title", "yazi", "pi", "code", "clean",
-    "cleanall", "restore",
+    "cleanall", "restore", "new", "manage",
 ];
 
 /// 输入行的解析结果
