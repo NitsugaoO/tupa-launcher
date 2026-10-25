@@ -1,6 +1,6 @@
 # tupa-launcher 状态
 
-updated: 2026-10-23 · code: `194892a`（最后一次改动代码的提交）· 整理时 main 领先 origin/main **13** 个提交（未推送）
+updated: 2026-10-25 · code: `29c609d`（最后一次改动代码的提交）· 整理时 main 领先 origin/main **13** 个提交（未推送）
 
 > 判断本文件是否过期：比较 `code` 与 `git log -1 --format=%h -- src Cargo.toml`。
 > 只改文档的提交不算过期。
