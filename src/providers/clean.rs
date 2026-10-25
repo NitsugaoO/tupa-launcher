@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use super::pi::{self, Meta};
-use super::{Action, CleanMode, Item, Kind};
+use super::{Action, CleanMode, CleanOp, Item, Kind};
 use crate::i18n;
 
 /// 默认只看两周以前的会话
@@ -36,6 +36,8 @@ pub(super) fn query(args: &str, flags: &[String]) -> Vec<Item> {
     let keywords = pi::load_keywords(&root);
     let favorites = pi::load_favorites(&root);
     let restore = flags.iter().any(|flag| flag == "restore");
+    // cleanall 只对清理有意义；恢复要一条条挑（恢复 131 个归档会瞬间撑大 sessions/）
+    let batch = flags.iter().any(|flag| flag == "cleanall") && !restore;
     let search = args.trim().to_lowercase();
     let window_days = window_days(flags);
     let now = SystemTime::now();
@@ -53,6 +55,11 @@ pub(super) fn query(args: &str, flags: &[String]) -> Vec<Item> {
     }
 
     let mut rows: Vec<(SystemTime, Item)> = Vec::new();
+    let mut ops: Vec<CleanOp> = Vec::new();
+    let mut archived = 0usize;
+    let mut trashed = 0usize;
+    let mut total_bytes = 0u64;
+
     for meta in metas {
         if !search.is_empty() && !matches(&meta, &search) {
             continue;
@@ -67,12 +74,31 @@ pub(super) fn query(args: &str, flags: &[String]) -> Vec<Item> {
                 Disposition::Trash => (CleanMode::Trash, i18n::clean_do_trash()),
             }
         };
+
+        if batch {
+            match mode {
+                CleanMode::Archive => archived += 1,
+                CleanMode::Trash => trashed += 1,
+                CleanMode::Restore => {}
+            }
+            total_bytes += size_bytes(&meta.path);
+            ops.push(CleanOp {
+                path: meta.path.clone(),
+                mode,
+            });
+            continue;
+        }
+
         let item = Item::new(
             Kind::Clean,
             vec![
                 format!("{label} {}", meta.title),
                 project_name(&meta),
-                format!("{} · {}", pi::age(meta.mtime), size_of(&meta.path)),
+                format!(
+                    "{} · {}",
+                    pi::age(meta.mtime),
+                    fmt_size(size_bytes(&meta.path))
+                ),
             ],
             Action::CleanSession {
                 path: meta.path.clone(),
@@ -80,6 +106,23 @@ pub(super) fn query(args: &str, flags: &[String]) -> Vec<Item> {
             },
         );
         rows.push((meta.mtime, item));
+    }
+
+    // 批量视图：只返回一条汇总项，回车才真正执行
+    if batch {
+        if ops.is_empty() {
+            return Vec::new();
+        }
+        let window = i18n::clean_window_label(window_days);
+        return vec![Item::new(
+            Kind::Clean,
+            vec![
+                i18n::clean_all_label(archived, trashed),
+                i18n::clean_all_scope(ops.len(), &fmt_size(total_bytes), window),
+                window.to_string(),
+            ],
+            Action::CleanBatch { ops },
+        )];
     }
 
     // 清理时最旧的在前（先看最久没动的）；恢复时最近归档的在前
@@ -169,8 +212,11 @@ fn matches(meta: &Meta, query: &str) -> bool {
         .any(|keyword| keyword.to_lowercase().contains(query))
 }
 
-fn size_of(path: &Path) -> String {
-    let bytes = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+fn size_bytes(path: &Path) -> u64 {
+    std::fs::metadata(path).map(|m| m.len()).unwrap_or(0)
+}
+
+fn fmt_size(bytes: u64) -> String {
     if bytes < 1024 {
         format!("{bytes}B")
     } else if bytes < 1024 * 1024 {
@@ -266,6 +312,13 @@ mod tests {
                 .join("a.jsonl")
         );
         assert_eq!(restore_target(root, &archived).expect("restore target"), active);
+    }
+
+    #[test]
+    fn formats_sizes() {
+        assert_eq!(fmt_size(0), "0B");
+        assert_eq!(fmt_size(2048), "2K");
+        assert_eq!(fmt_size(5 * 1024 * 1024), "5.0M");
     }
 
     #[test]

@@ -24,13 +24,15 @@ updated: 2026-10-25 · code: `0ce4787`（最后一次改动代码的提交）· 
   `:pi:clean:week` / `:pi:clean:month`），窗口内与收藏的**不列出**；已总结或消息数 ≥ 8 →
   归档到 `session-archive/`，其余瘦会话 → 系统回收站；`:pi:clean:restore` 列出归档，
   回车恢复回 `sessions/` 原目录（重名加 `-restored-` 后缀）。回车执行后不隐藏面板、
-  就地刷新（可连续处理）。调试：`--query "@pi:clean"`（只读，前缀按本机 `@`）
+  就地刷新（可连续处理）。批量：`:pi:cleanall[:week|:month]` 压成一条汇总项，
+  回车一次处理全部（失败不中断，最后汇报）。调试：`--query "@pi:clean"`（只读，前缀按本机 `@`）
 - 用户本机实际配置：`command_prefix = "@"`、`panel = "tui"`、热键 `alt+\``
 
 ## 下一步
 
-1. **`:pi:clean` 待实机验**（2026-10-25）：热键唤起 → `@pi:clean` → 回车归档一条 →
-   `@pi:clean:restore` 搜回来，确认路径与目录结构；再试一条 `[删除]` 看是否进回收站；
+1. **`:pi:clean` / `:pi:cleanall` 待实机验**（2026-10-25）：热键唤起 → `@pi:clean` →
+   回车归档一条 → `@pi:clean:restore` 搜回来；再试一条 `[删除]` 看是否进回收站；
+   最后 `@pi:cleanall` 回车跑一次批量（当前 32 归档 + 4 删除），确认汇总文案与失败计数；
    顺带确认 `@pi` 原视图没受 4→3 列调整影响
 2. **GUI 打磨**（[`docs/07-shell-handover.md`](docs/07-shell-handover.md) §1「还没做的」）：
    圆角 / 阴影 / 淡入、鼠标点击、滚动条、DPI 切换实测、窗口尺寸配置项

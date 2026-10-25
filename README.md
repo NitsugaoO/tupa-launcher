@@ -95,6 +95,7 @@ Copilot 键是个例外（它的原样组合被 shell 占着），但用钩子**
 | `:go <路径>` | 跳到目录 / 定位文件；空参数读剪贴板；`:go:code` / `:go:yazi` / `:go:pi` 用指定程序打开 |
 | `:pi [关键词]` | 列出所有 pi 会话（标题 / 项目 / 时间），**回车在新终端里 `pi --session` 打开**；`:pi:all` 包含 `session-archive` 里的归档 |
 | `:pi:clean [关键词]` | 清理 pi 会话：列出**超过时间窗口**的会话，回车**归档**（长会话）或**删除到回收站**（瘦会话）；`:pi:clean:week` / `:pi:clean:month` 切窗口（默认两周），`:pi:clean:restore` 从归档恢复 |
+| `:pi:cleanall [关键词]` | 同上，但只列**一条汇总项**（归档 N 个 / 删除 M 个 / 总体积），回车**一次处理全部**；可叠窗口：`:pi:cleanall:month` |
 | `:web <网址 / 关键词>` | 搜 Edge 历史（默认**一周内**）；搜不到且输入像网址就直接打开（`:web:month` / `:web:all` 扩大范围，`:web:url` 强制打开） |
 | `:new <文件名>` | 在 `~/Projects/New Files` 里新建文件并打开（没写扩展名默认 `.md`，同名不覆盖） |
 | `:fav [类型] [关键词]` | 列出收藏（`:fav app` / `:fav web` 按类型过滤），`Ctrl+D` 收藏 / 取消收藏 |
@@ -118,6 +119,9 @@ Copilot 键是个例外（它的原样组合被 shell 占着），但用钩子**
 :pi:clean:month        → 一个月以前
 :pi:clean 插件         → 再按关键词过滤（标题 / 项目路径 / 关键词）
 :pi:clean:restore      → 反过来：列出 session-archive/ 里的归档会话，回车恢复
+
+:pi:cleanall           → 只列 1 条：[全部] 归档 32 个 · 删除 4 个 · 共 18.3M · 两周以前
+:pi:cleanall:month     → 一个月以前的全部（一次清完）
 ```
 
 每一条的处置由规则决定（不用你选）：
@@ -132,6 +136,10 @@ Copilot 键是个例外（它的原样组合被 shell 占着），但用钩子**
 - 归档/恢复保留目录结构（`sessions/<cwd目录>/` ↔ `session-archive/<cwd目录>/`），所以恢复后
   pi 的 `/resume` 能按原项目找到它
 - 判定「多轮」用的是文件前 80 行里的消息数，不会把几 MB 的会话全读进来
+- **批量**（`:pi:cleanall`）：仍然先按同样的规则分类，然后压成一条汇总项；**回车才执行**，
+  所以输入到一半不会误触发。批量里每一步的归档/删除逻辑与单项完全一致，失败不中断，最后汇报
+  「已归档 N 个、删除 M 个（回收站），失败 K 个」。恢复（`:restore`）不支持批量——
+  131 个归档一次全恢复会瞬间把 `sessions/` 撑大，应该一条条挑
 
 ### `:web` 的时间范围与直接打开
 
@@ -182,6 +190,7 @@ Copilot 键是个例外（它的原样组合被 shell 占着），但用钩子**
 | `bg` | `:run` 在后台执行（输出丢弃） |
 | `week` / `month` / `all` | `:web` 的搜索时间范围（默认 `week`）；`:pi:clean` 用 `week` / `month` 作时间窗口（默认两周） |
 | `clean` | `:pi:clean` 切换到会话清理视图（归档 / 删到回收站） |
+| `cleanall` | `:pi:cleanall` 一次处理全部候选（列表里只有一条汇总项，回车执行） |
 | `restore` | `:pi:clean:restore` 列出归档里的会话，回车恢复回 `sessions/` |
 | `url` | `:web` 强制直接打开网址 |
 | `code` / `yazi` / `pi` | `:go` 用 VSCode / yazi / pi 打开目标 |

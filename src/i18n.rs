@@ -78,6 +78,44 @@ pub fn clean_do_restore() -> &'static str {
     t("[恢复]", "[restore]")
 }
 
+/// 批量项标题：`[全部] 归档 3 个 · 删除 5 个`
+pub fn clean_all_label(archive: usize, trash: usize) -> String {
+    s(
+        || format!("[全部] 归档 {archive} 个 · 删除 {trash} 个"),
+        || format!("[all] archive {archive} · delete {trash}"),
+    )
+}
+
+/// 批量项副标题：`共 8 个 · 2.3 MB · 两周以前`
+pub fn clean_all_scope(count: usize, size: &str, window: &str) -> String {
+    s(
+        || format!("共 {count} 个 · {size} · {window}以前"),
+        || format!("{count} items · {size} · older than {window}"),
+    )
+}
+
+pub fn clean_window_label(days: u64) -> &'static str {
+    match days {
+        7 => t("一周", "one week"),
+        30 => t("一个月", "one month"),
+        _ => t("两周", "two weeks"),
+    }
+}
+
+/// 批量执行完的汇总
+pub fn clean_batch_done(archived: usize, trashed: usize, failed: usize) -> String {
+    s(
+        || {
+            let tail = if failed > 0 { format!("，失败 {failed} 个") } else { String::new() };
+            format!("已归档 {archived} 个、删除 {trashed} 个（回收站）{tail}")
+        },
+        || {
+            let tail = if failed > 0 { format!(", {failed} failed") } else { String::new() };
+            format!("Archived {archived}, deleted {trashed} (recycle bin){tail}")
+        },
+    )
+}
+
 pub fn hint_pi() -> &'static str {
     t("输入关键词搜索 pi 会话", "Search pi sessions")
 }
@@ -327,6 +365,10 @@ pub fn flag_description(flag: &str) -> &'static str {
         "clean" => t(
             "清理会话：时间窗口外的归档 / 删到回收站",
             "Clean sessions outside the time window",
+        ),
+        "cleanall" => t(
+            "列出 1 条汇总项，回车一次处理全部候选",
+            "One row to apply every candidate at once",
         ),
         "restore" => t(
             "列出归档会话，回车恢复（配 :pi:clean）",

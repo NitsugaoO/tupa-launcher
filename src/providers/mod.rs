@@ -234,6 +234,15 @@ pub enum Action {
     SetControl { id: String, value: String },
     /// 处理一个 pi 会话：归档 / 删除到回收站 / 从归档恢复
     CleanSession { path: PathBuf, mode: CleanMode },
+    /// 一次处理全部候选（`:pi:cleanall`）：回车才执行
+    CleanBatch { ops: Vec<CleanOp> },
+}
+
+/// 批量清理里的一项
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CleanOp {
+    pub path: PathBuf,
+    pub mode: CleanMode,
 }
 
 /// [`Action::CleanSession`] 的处置方式
@@ -316,6 +325,7 @@ impl Item {
             Action::CreateFile(path) => path.display().to_string(),
             Action::SetControl { id, value } => format!("{id} = {value}"),
             Action::CleanSession { path, .. } => path.display().to_string(),
+            Action::CleanBatch { .. } => return None,
             Action::FillInput(_) => return None,
         };
 
@@ -441,7 +451,7 @@ pub fn commands_index(infos: &[ProviderInfo]) -> Option<usize> {
 /// `week`/`month`/`all` 时间范围、`url` 直接打开网址）。
 pub const KNOWN_FLAGS: &[&str] = &[
     "admin", "bg", "week", "month", "all", "url", "title", "yazi", "pi", "code", "clean",
-    "restore",
+    "cleanall", "restore",
 ];
 
 /// 输入行的解析结果

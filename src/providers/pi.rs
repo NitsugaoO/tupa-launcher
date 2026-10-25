@@ -57,7 +57,7 @@ impl Provider for PiSessions {
     }
 
     fn flags(&self) -> &'static [&'static str] {
-        &["all", "clean", "week", "month", "restore"]
+        &["all", "clean", "cleanall", "week", "month", "restore"]
     }
 
     fn columns(&self) -> &'static [Column] {
@@ -66,7 +66,10 @@ impl Provider for PiSessions {
 
     fn query(&self, args: &str, flags: &[String]) -> Vec<Item> {
         // `:pi:clean` 走清理视图（同一个 provider，避免多一个命令）
-        if flags.iter().any(|flag| flag == "clean") {
+        if flags
+            .iter()
+            .any(|flag| flag == "clean" || flag == "cleanall")
+        {
             return super::clean::query(args, flags);
         }
         let Some(home) = dirs::home_dir() else {

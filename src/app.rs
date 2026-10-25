@@ -458,7 +458,7 @@ impl App {
         }
 
         // 会话清理：执行后不隐藏面板，刷新列表（可以连续处理多条）
-        if matches!(item.action, Action::CleanSession { .. }) {
+        if matches!(item.action, Action::CleanSession { .. } | Action::CleanBatch { .. }) {
             match exec::run(&item.action) {
                 Ok(msg) => {
                     self.status = Some((msg, false));
@@ -658,9 +658,13 @@ impl App {
         } else {
             // 修饰符补全按 provider 来：`:web:` 只该出现 url/week/month/all，
             // 不该把 `:run:` 的 admin/bg 也列出来
+            // 只取**第一个**分隔符之前的关键字：`:pi:month:` → `pi`，
+            // 否则 `head` 会变成 `pi:month`，匹配不到 provider 就退化成 KNOWN_FLAGS，
+            // 把别的命令的修饰符全列出来。
             let head: String = token[..colon]
                 .chars()
                 .skip_while(|c| *c == self.prefix)
+                .take_while(|c| *c != ':' && *c != self.prefix)
                 .collect();
             let allowed = self
                 .infos
@@ -668,7 +672,16 @@ impl App {
                 .find(|info| info.matches(&head))
                 .map(|info| info.flags)
                 .unwrap_or(providers::KNOWN_FLAGS);
-            let candidates = providers::match_prefix(allowed.iter().copied(), typed);
+            // 已经写过的修饰符不再推荐（`:pi:month:` 不该再推 month 自己）
+            let used: Vec<String> = token[..colon]
+                .split([':', self.prefix])
+                .filter(|part| !part.is_empty())
+                .map(str::to_string)
+                .collect();
+            let candidates: Vec<String> = providers::match_prefix(allowed.iter().copied(), typed)
+                .into_iter()
+                .filter(|candidate| !used.iter().any(|used| used.eq_ignore_ascii_case(candidate)))
+                .collect();
             let descriptions = candidates
                 .iter()
                 .map(|candidate| i18n::flag_description(candidate).to_string())
@@ -819,6 +832,7 @@ impl App {
             | Action::CreateFile(_)
             | Action::SetControl { .. }
             | Action::CleanSession { .. }
+            | Action::CleanBatch { .. }
             | Action::FillInput(_) => return,
         };
 
@@ -1138,6 +1152,23 @@ mod tests {
         // `:ev` 不认修饰符：不该冒出别的命令的候选
         app.set_input(":ev:".to_string());
         assert!(app.completion.is_none(), ":ev: 不该有修饰符候选");
+    }
+
+    /// 多个修饰符之后再补全：不能退回 KNOWN_FLAGS 把别的命令的修饰符列出来
+    #[test]
+    fn flag_candidates_stay_with_provider_after_two_flags() {
+        let mut app = app();
+        app.set_input(":pi:month:".to_string());
+        let comp = app.completion.clone().expect(":pi:month: 应该有候选");
+        for stray in ["code", "yazi", "admin", "bg", "url"] {
+            assert!(
+                !comp.candidates.iter().any(|c| c == stray),
+                "不该出现别的命令的修饰符：{stray}"
+            );
+        }
+        assert!(comp.candidates.iter().any(|c| c == "clean"));
+        // month 已经写过了，不该再推荐
+        assert!(!comp.candidates.iter().any(|c| c == "month"));
     }
 
     /// 带控件的列表：id 故意不存在，测试里不会真的改系统设置

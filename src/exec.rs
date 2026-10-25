@@ -90,6 +90,8 @@ pub fn run(action: &Action) -> Result<String> {
         Action::SetControl { id, value } => crate::actions::apply(id, value),
         // pi 会话清理：归档 / 回收站 / 恢复
         Action::CleanSession { path, mode } => clean_session(path, *mode),
+        // 批量：一次跑完（每项仍是同样的归档 / 回收站逻辑）
+        Action::CleanBatch { ops } => clean_batch(ops),
     }
 }
 
@@ -405,6 +407,24 @@ fn clean_session(path: &Path, mode: CleanMode) -> Result<String> {
             Ok(i18n::clean_restored(&session_name(&target)))
         }
     }
+}
+
+/// 批量执行：失败的项不中断，最后汇总
+fn clean_batch(ops: &[crate::providers::CleanOp]) -> Result<String> {
+    let mut archived = 0usize;
+    let mut trashed = 0usize;
+    let mut failed = 0usize;
+    for op in ops {
+        match clean_session(&op.path, op.mode) {
+            Ok(_) => match op.mode {
+                CleanMode::Archive => archived += 1,
+                CleanMode::Trash => trashed += 1,
+                CleanMode::Restore => {}
+            },
+            Err(_) => failed += 1,
+        }
+    }
+    Ok(i18n::clean_batch_done(archived, trashed, failed))
 }
 
 /// 重名时加 `-restored-<HHMMSS>` 后缀
