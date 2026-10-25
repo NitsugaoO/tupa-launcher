@@ -217,7 +217,7 @@ src/
     ├── web.rs           web（Edge 历史 + rusqlite）
     ├── favorites.rs     fav
     ├── commands.rs      命令列表（keyword = `:`）
-    ├── new.rs           new
+    ├── blog.rs          blog（新建文章 / 管理页 / 站点入口）
     ├── run.rs           run
     └── config_items.rs  cfg
 ```
