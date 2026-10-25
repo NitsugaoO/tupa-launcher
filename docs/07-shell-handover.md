@@ -69,7 +69,7 @@ panel = "tui"   # Windows Terminal 里的版本（默认，当前线上用的就
 有了这条规则，GUI 自己那次 `center_window` 会被 WM 覆盖（最终位置由 GlazeWM 决定）。
 没跑 WM 时 `center_window` 仍然保证窗口居中。
 
-- 版本 `Cargo.toml` 0.8.0，`cargo test --release` / `cargo clippy --release` 全绿（数字以输出为准）
+- 版本 `Cargo.toml` 0.9.0，`cargo test --release` / `cargo clippy --release` 全绿（数字以输出为准）
 - 命令：`:app` `:ev` `:run` `:go` `:pi` `:web` `:blog` `:fav` `:cfg` `:set`（开屏是 `home`）
 - 面板进程：`wt.exe -p tupa-launcher`（Windows Terminal）
 - daemon：`RegisterHotKey`（默认 Alt+`` ` ``）+ 窗口显隐 + Copilot 键钩子

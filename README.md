@@ -8,7 +8,7 @@
 > ❯ :web rust async  → 在浏览器历史里找 rust async
 > ```
 >
-> 版本：**0.8.0**（v0.8 进行中）· Rust · TUI 用 ratatui / GUI 实验用 winit + cosmic-text · 替代 PowerToys Command Palette
+> 版本：**0.9.0**（v0.8 套壳仍在进行中）· Rust · TUI 用 ratatui / GUI 实验用 winit + cosmic-text · 替代 PowerToys Command Palette
 > 调研与可行性论证见 [`docs/01-research.md`](docs/01-research.md)，设计决策见 [`docs/02-design.md`](docs/02-design.md)
 > 后续计划见 [`docs/03-roadmap.md`](docs/03-roadmap.md)
 > **接着开发的入口：[`STATE.md`](STATE.md)（当前阶段 / 下一步）→ [`docs/06-handover.md`](docs/06-handover.md)（代码结构 / 坑表）**
@@ -473,6 +473,7 @@ src/
 - [x] **v0.6** 中英文（`general.language`）+ 文案精简；`:go:code` / `:go:yazi` / `:go:pi`；`:run` 默认 PowerShell；状态栏显示位置与后台忙碌
 - [x] **v0.5** `:web` 时间范围（默认一周 / month / all）+ 搜不到才直接打开；`:run` 默认新窗口执行；命令前缀可配置 + 去掉同义修饰符；`:new` 新建文件
 - [x] **v0.7** `:set` 应用内开关 / 选项 / 数值（`actions.toml` 驱动 + 内置深色模式 / 亮度 / 电池养护 / 节能 / 保持唤醒 / 更新订阅）
+- [x] **v0.9** `:blog`（新建文章 / 管理页 / 三个站点入口，配置在 `[blog]` 段；取代旧的 `:new`）
 - [ ] **v0.8** 自建无边框窗口，脱离 Windows Terminal（设计见 [`docs/05-native-window.md`](docs/05-native-window.md)）
       —— GUI 已能显示与输入（`--gui` / `[daemon] panel = "gui"`），剩余：中文输入法 IME、切换默认面板
       （开工说明见 [`docs/07-shell-handover.md`](docs/07-shell-handover.md)，当前进度见 [`STATE.md`](STATE.md)）
