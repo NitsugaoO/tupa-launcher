@@ -29,20 +29,22 @@ const COLUMNS: &[Column] = &[
 ];
 
 #[derive(Debug, Default, Deserialize)]
-struct KeywordInfo {
+pub(super) struct KeywordInfo {
     #[serde(default)]
-    summary: String,
+    pub(super) summary: String,
     #[serde(default)]
-    keywords: Vec<String>,
+    pub(super) keywords: Vec<String>,
 }
 
-struct Meta {
-    path: PathBuf,
-    cwd: Option<PathBuf>,
-    title: String,
-    keywords: Vec<String>,
-    favorite: bool,
-    mtime: SystemTime,
+pub(super) struct Meta {
+    pub(super) path: PathBuf,
+    pub(super) cwd: Option<PathBuf>,
+    pub(super) title: String,
+    pub(super) keywords: Vec<String>,
+    pub(super) favorite: bool,
+    pub(super) mtime: SystemTime,
+    /// 前 80 行里的 user + assistant 消息数（`:clean` 用它判定“多轮”）
+    pub(super) messages: u32,
 }
 
 impl Provider for PiSessions {
@@ -131,7 +133,7 @@ impl Provider for PiSessions {
     }
 }
 
-fn collect(
+pub(super) fn collect(
     dir: &Path,
     keywords: &HashMap<String, KeywordInfo>,
     favorites: &[String],
@@ -160,7 +162,7 @@ fn collect(
     }
 }
 
-fn read_meta(
+pub(super) fn read_meta(
     path: &Path,
     keywords: &HashMap<String, KeywordInfo>,
     favorites: &[String],
@@ -170,6 +172,7 @@ fn read_meta(
 
     let mut cwd = None;
     let mut title = None;
+    let mut messages = 0u32;
 
     for line in reader.lines().take(80) {
         let Ok(line) = line else {
@@ -186,7 +189,11 @@ fn read_meta(
                 let Some(message) = value.get("message") else {
                     continue;
                 };
-                if message.get("role").and_then(|v| v.as_str()) != Some("user") {
+                let role = message.get("role").and_then(|v| v.as_str());
+                if matches!(role, Some("user") | Some("assistant")) {
+                    messages += 1;
+                }
+                if role != Some("user") || title.is_some() {
                     continue;
                 }
                 let Some(text) = message.get("content").and_then(extract_text) else {
@@ -195,7 +202,6 @@ fn read_meta(
                 let first = text.lines().next().unwrap_or("").trim();
                 if !first.is_empty() {
                     title = Some(truncate(first, 80));
-                    break;
                 }
             }
             _ => {}
@@ -229,17 +235,18 @@ fn read_meta(
         keywords,
         favorite,
         mtime,
+        messages,
     })
 }
 
-fn load_keywords(root: &Path) -> HashMap<String, KeywordInfo> {
+pub(super) fn load_keywords(root: &Path) -> HashMap<String, KeywordInfo> {
     std::fs::read_to_string(root.join("session-keywords.json"))
         .ok()
         .and_then(|text| serde_json::from_str(&text).ok())
         .unwrap_or_default()
 }
 
-fn load_favorites(root: &Path) -> Vec<String> {
+pub(super) fn load_favorites(root: &Path) -> Vec<String> {
     std::fs::read_to_string(root.join("session-favorites.json"))
         .ok()
         .and_then(|text| serde_json::from_str(&text).ok())
@@ -269,7 +276,7 @@ fn truncate(text: &str, max_chars: usize) -> String {
     out
 }
 
-fn age(mtime: SystemTime) -> String {
+pub(super) fn age(mtime: SystemTime) -> String {
     let secs = SystemTime::now()
         .duration_since(mtime)
         .unwrap_or_default()

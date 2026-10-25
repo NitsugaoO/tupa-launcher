@@ -19,14 +19,21 @@ updated: 2026-10-23 · code: `194892a`（最后一次改动代码的提交）· 
   用 `--gui` 或在 `config.toml` 里设 `[daemon] panel = "gui"` 打开
 - **但默认仍是 `tui`**：`daemon::launch_panel` 按 `[daemon] panel` 分流，TUI 走 `wt -p tupa-launcher`；
   GUI 尚未打磨到可以当默认
+- **`:clean` 已加入（2026-10-25）**：pi 会话清理 provider（`src/providers/clean.rs`）。
+  时间窗口是前置条件（默认两周，`:week` / `:month`），窗口内与收藏的**不列出**；
+  已总结或消息数 ≥ 8 → 归档到 `session-archive/`，其余瘦会话 → 回收到系统回收站；
+  `:clean:restore` 列出归档，回车恢复回 `sessions/` 原目录（重名加 `-restored-` 后缀）。
+  回车执行后不隐藏面板、就地刷新（可连续处理）。调试：`--query ":clean"`（只读）
 - 用户本机实际配置：`command_prefix = "@"`、`panel = "tui"`、热键 `alt+\``
 
 ## 下一步
 
-1. **GUI 打磨**（[`docs/07-shell-handover.md`](docs/07-shell-handover.md) §1「还没做的」）：
+1. **`:clean` 待实机验**（2026-10-25）：热键唤起 → `@clean` → 回车归档一条 → `@clean:restore`
+   搜回来，确认路径与目录结构；再试一条 `[删除]` 看是否进回收站
+2. **GUI 打磨**（[`docs/07-shell-handover.md`](docs/07-shell-handover.md) §1「还没做的」）：
    圆角 / 阴影 / 淡入、鼠标点击、滚动条、DPI 切换实测、窗口尺寸配置项
-2. 实机跑一段时间 GUI 后，再把 `[daemon] panel` 的默认值从 `tui` 改成 `gui`（保留 TUI 兜底）
-3. 剩下的小项（不阻塞套壳）：主题并入 `~/Themes/generator/generate.py`；`hist` provider；frecency 排序
+3. 实机跑一段时间 GUI 后，再把 `[daemon] panel` 的默认值从 `tui` 改成 `gui`（保留 TUI 兜底）
+4. 剩下的小项（不阻塞套壳）：主题并入 `~/Themes/generator/generate.py`；`hist` provider；frecency 排序
 
 ## 待验证
 

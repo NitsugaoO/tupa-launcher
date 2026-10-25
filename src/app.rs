@@ -457,6 +457,18 @@ impl App {
             return;
         }
 
+        // 会话清理：执行后不隐藏面板，刷新列表（可以连续处理多条）
+        if matches!(item.action, Action::CleanSession { .. }) {
+            match exec::run(&item.action) {
+                Ok(msg) => {
+                    self.status = Some((msg, false));
+                    self.refresh_keep_selection();
+                }
+                Err(e) => self.status = Some((format!("{e:#}"), true)),
+            }
+            return;
+        }
+
         match exec::run(&item.action) {
             // 成功就隐藏面板，把屏幕让给刚打开的程序（进程留着，下次唤起更快）
             Ok(_) => {
@@ -806,6 +818,7 @@ impl App {
             | Action::OpenInEditor { .. }
             | Action::CreateFile(_)
             | Action::SetControl { .. }
+            | Action::CleanSession { .. }
             | Action::FillInput(_) => return,
         };
 

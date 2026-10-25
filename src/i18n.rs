@@ -65,6 +65,26 @@ pub fn desc_pi() -> &'static str {
     t("pi 会话", "pi sessions")
 }
 
+pub fn desc_clean() -> &'static str {
+    t(
+        "清理 pi 会话（默认两周前；:week / :month / :restore）",
+        "Clean pi sessions (older than 2 weeks; :week / :month / :restore)",
+    )
+}
+
+/// 列表首列的动作前缀
+pub fn clean_do_archive() -> &'static str {
+    t("[归档]", "[archive]")
+}
+
+pub fn clean_do_trash() -> &'static str {
+    t("[删除]", "[delete]")
+}
+
+pub fn clean_do_restore() -> &'static str {
+    t("[恢复]", "[restore]")
+}
+
 pub fn hint_pi() -> &'static str {
     t("输入关键词搜索 pi 会话", "Search pi sessions")
 }
@@ -126,6 +146,42 @@ pub fn ran(command: &str) -> String {
 
 pub fn created(name: &str) -> String {
     s(|| format!("已新建 {name}"), || format!("Created {name}"))
+}
+
+pub fn clean_archived(name: &str) -> String {
+    s(
+        || format!("已归档 {name}"),
+        || format!("Archived {name}"),
+    )
+}
+
+pub fn clean_trashed(name: &str) -> String {
+    s(
+        || format!("已删除 {name}（回收站）"),
+        || format!("Deleted {name} (recycle bin)"),
+    )
+}
+
+pub fn clean_restored(name: &str) -> String {
+    s(
+        || format!("已恢复 {name}"),
+        || format!("Restored {name}"),
+    )
+}
+
+pub fn clean_target_exists(target: &str) -> String {
+    s(
+        || format!("目标已存在，未覆盖：{target}"),
+        || format!("Target exists, not overwritten: {target}"),
+    )
+}
+
+pub fn clean_not_a_session() -> &'static str {
+    t("这不是 pi 的会话文件", "Not a pi session file")
+}
+
+pub fn no_agent_dir() -> &'static str {
+    t("找不到 ~/.pi/agent", "Cannot locate ~/.pi/agent")
 }
 
 pub fn opened_in_editor(name: &str, line: usize) -> String {

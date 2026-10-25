@@ -7,6 +7,7 @@
 //! provider 的搜索词。命令列表本身也是一个 provider（见 [`commands`]）。
 
 pub mod apps;
+pub mod clean;
 pub mod commands;
 pub mod config_items;
 pub mod everything;
@@ -45,6 +46,8 @@ pub enum Kind {
     Switch,
     /// pi 会话
     Pi,
+    /// pi 会话清理（归档 / 删除 / 恢复）
+    Clean,
     /// 最近执行过的命令（开屏列表用）
     History,
 }
@@ -61,6 +64,7 @@ impl Kind {
             Kind::Help => "cmd",
             Kind::Switch => "set",
             Kind::Pi => "pi",
+            Kind::Clean => "clean",
             Kind::History => "rec",
         }
     }
@@ -77,6 +81,7 @@ impl Kind {
             Kind::Help,
             Kind::Switch,
             Kind::Pi,
+            Kind::Clean,
         ]
         .into_iter()
         .find(|kind| kind.badge() == badge)
@@ -227,6 +232,19 @@ pub enum Action {
     FillInput(String),
     /// 把 `actions.toml` 里的某个开关 / 选项 / 数值设成新值
     SetControl { id: String, value: String },
+    /// 处理一个 pi 会话：归档 / 删除到回收站 / 从归档恢复
+    CleanSession { path: PathBuf, mode: CleanMode },
+}
+
+/// [`Action::CleanSession`] 的处置方式
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CleanMode {
+    /// 移到 `session-archive/`
+    Archive,
+    /// 进系统回收站
+    Trash,
+    /// 从 `session-archive/` 移回 `sessions/`
+    Restore,
 }
 
 /// 一条结果：徽标（由 [`Kind`] 决定）+ 若干列文本 + 动作
@@ -297,6 +315,7 @@ impl Item {
             Action::OpenInEditor { file, line } => format!("{}:{line}", file.display()),
             Action::CreateFile(path) => path.display().to_string(),
             Action::SetControl { id, value } => format!("{id} = {value}"),
+            Action::CleanSession { path, .. } => path.display().to_string(),
             Action::FillInput(_) => return None,
         };
 
@@ -374,6 +393,7 @@ pub fn build(cfg: &Config) -> Vec<Box<dyn Provider>> {
     }
     list.push(Box::new(run::Run));
     list.push(Box::new(pi::PiSessions));
+    list.push(Box::new(clean::Clean));
     list.push(Box::new(go::Go::new(cfg)));
     list.push(Box::new(web::Web::new(cfg)));
     list.push(Box::new(new::NewFile::new(cfg)));
@@ -421,7 +441,7 @@ pub fn commands_index(infos: &[ProviderInfo]) -> Option<usize> {
 /// 各 provider 只解释自己关心的那几个（`admin` 提权、`bg` 后台、
 /// `week`/`month`/`all` 时间范围、`url` 直接打开网址）。
 pub const KNOWN_FLAGS: &[&str] = &[
-    "admin", "bg", "week", "month", "all", "url", "title", "yazi", "pi", "code",
+    "admin", "bg", "week", "month", "all", "url", "title", "yazi", "pi", "code", "restore",
 ];
 
 /// 输入行的解析结果
