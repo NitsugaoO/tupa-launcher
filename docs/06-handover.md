@@ -133,9 +133,9 @@ Control::{Run, Toggle{value}, Choice{options,index}, Number{value,min,max,step,s
 | Vantage Addin 反射 | 程序集在 `%ProgramData%\Lenovo\Vantage\Addins\IdeaNotebookAddin\<版本>\`，要先加载契约/工具 DLL；`New-Object` 得到的 PSObject 不能直接传给反射 `Invoke`，用 `[Activator]::CreateInstance` |
 | 24H2 Energy Saver | `EnergySaverState` 写入要重启才生效；`PowerManager.EnergySaverStatus` 在 24H2 手动开启时也返回 `Off`（API 不可靠） |
 | Energy Saver 的 WNF | `WNF_PO_ENERGY_SAVER_STATE` 可读，但写：普通/管理员 `ACCESS_DENIED`；SYSTEM 写入成功但读回空（Session 0 与用户会话隔离） |
-| 快速设置的 UIAutomation | 它是 WinUI3，UIA2（PowerShell 5.1）`FromHandle` 后子元素为 0；pwsh 7 的 UIA3 COM `FindAll` 会挂死。最终用 `Win+A` + `Home/→→↓/Space` |
-| 快速设置方向键 | `Home` 回第一个按钮，`→→↓` 到第二行第三个（节能）；比 Tab 顺序稳定，但依赖按钮布局 |
-| 快速设置点击回退 | 坐标相对屏幕右下角的逻辑偏移（当前 -89,-311，200% DPI），仅在方向键失败时用 |
+| 快速设置的 UIAutomation | 它是 WinUI3，UIA2（PowerShell 5.1）`FromHandle` 后子元素为 0；pwsh 7 的 UIA3 COM `FindAll` 会挂死。最终用 `Win+A` + 鼠标点击 |
+| 快速设置方向键（已弃用） | `Home`→`→→↓`→`Space` 切的是**当前焦点项**：固定按钮一变（蓝牙/飞行模式增删）就切错东西，会误关蓝牙/开飞行模式。2026-10-25 改为纯鼠标点击 |
+| 快速设置点击 | 坐标相对屏幕右下角的逻辑偏移（当前 -89,-311，200% DPI）；点偏只会报错、不会误切；点击前记光标，`finally` 里复位 |
 | `cmd /C` 命令行长度 | 长脚本的 `-EncodedCommand` base64 会超 8191 字符；内置脚本改为直接 spawn `powershell.exe` |
 | 节能电源计划被隐藏 | `powercfg /list` 不显示，但 `a1841308-3541-4fab-bc81-f71556f20b4a` 仍可用 `/setactive` 直接切换（普通用户，即时） |
 | `Evt::Applied` 丢了 | 等待期间用户又输入会让 `generation` 过期；**无论是否过期都要复位 `applying`**，否则以后按回车再也发不出写请求 |
@@ -149,6 +149,7 @@ Control::{Run, Toggle{value}, Choice{options,index}, Number{value,min,max,step,s
 设计见 [`04-switch-engine.md`](04-switch-engine.md)。机制一句话：`Item.control` +
 `Action::SetControl` + `Cmd::Apply` / `Evt::Applied`；`actions.toml` 驱动（toggle / choice /
 number，5 秒超时）；内置项免提权（深色模式 / 亮度 / 电池养护 / 节能 / 保持唤醒 / 更新订阅）。
+节能模式只用鼠标点击快速设置（不用方向键，避开误切蓝牙/飞行模式）。
 
 **没做**：计划任务提权。本来打算用它做电池养护，后来发现直接调 Vantage 的
 `IdeaBatteryAgent.dll` 就能读写（不需要管理员），所以没往系统里写任务。

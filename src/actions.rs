@@ -635,6 +635,12 @@ function Write-VantageMode([string]$mode) {
 // 坐标是相对屏幕右下角的逻辑像素偏移，按 DPI 缩放；当前 3072x1920 @200%
 // 下按钮中心为 (2894, 1298)。如果快速设置的布局/固定项变了，改这两个数。
 // 点击后读注册表校验，没变就报错，不会静默成功。
+//
+// 只用鼠标点击，不用键盘导航（2026-10-25 改）：原先的 `Home` -> `Right` x2 ->
+// `Down` -> `Space` 靠的是「焦点落在第几格」，而 Space 切换的是**当前焦点项**。
+// 固定的按钮一旦增删（蓝牙 / 飞行模式 / 亮度…），`Down` 就停到别的行，Space
+// 直接把蓝牙关掉或打开飞行模式。鼠标点偏只是点空，校验会发现状态没变并报错，
+// 最坏结果是「没生效」而不是「切错了别的东西」。
 // ---------------------------------------------------------------------------
 
 const ENERGY_SAVER_BOOTSTRAP: &str = r#"
@@ -644,10 +650,13 @@ using System;
 using System.Text;
 using System.Runtime.InteropServices;
 public static class TupaEnergy {
+    [StructLayout(LayoutKind.Sequential)] public struct POINT { public int X; public int Y; }
+    static int _cursorX, _cursorY; static bool _cursorSaved;
     [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetClassName(IntPtr h, StringBuilder sb, int max);
     [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
     [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
+    [DllImport("user32.dll")] public static extern bool GetCursorPos(out POINT p);
     [DllImport("user32.dll")] public static extern void mouse_event(uint flags, uint dx, uint dy, uint data, UIntPtr extra);
     [DllImport("user32.dll")] public static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra);
     [DllImport("user32.dll")] public static extern int GetSystemMetrics(int index);
@@ -667,11 +676,14 @@ public static class TupaEnergy {
         mouse_event(0x0002, 0, 0, 0, UIntPtr.Zero);
         mouse_event(0x0004, 0, 0, 0, UIntPtr.Zero);
     }
-    public static void Tap(byte vk) {
-        keybd_event(vk, 0, 0, UIntPtr.Zero);
-        System.Threading.Thread.Sleep(20);
-        keybd_event(vk, 0, 2, UIntPtr.Zero);
-        System.Threading.Thread.Sleep(30);
+    public static void SaveCursor() {
+        POINT p;
+        if (GetCursorPos(out p)) { _cursorX = p.X; _cursorY = p.Y; _cursorSaved = true; }
+    }
+    public static void RestoreCursor() {
+        if (!_cursorSaved) { return; }
+        _cursorSaved = false;
+        SetCursorPos(_cursorX, _cursorY);
     }
 }
 '@
@@ -686,6 +698,13 @@ function Wait-Open {
 function Wait-State([int]$want) {
     for ($i = 0; $i -lt 30; $i++) { if ((Get-State) -eq $want) { return $true }; Start-Sleep -Milliseconds 50 }
     return $false
+}
+# 快速设置里「节能模式」按钮的中心：相对屏幕右下角的逻辑像素偏移，按 DPI 缩放
+function Click-Energy {
+    $scale = [TupaEnergy]::GetDpiForSystem() / 96.0
+    $x = [int]([TupaEnergy]::GetSystemMetrics(0) - 89 * $scale)
+    $y = [int]([TupaEnergy]::GetSystemMetrics(1) - 311 * $scale)
+    [TupaEnergy]::Click($x, $y)
 }
 "#;
 
@@ -717,21 +736,12 @@ $want = 1
 if ((Get-State) -eq $want) { 'on'; exit 0 }
 if (-not (Is-Open)) { [TupaEnergy]::WinA(); if (-not (Wait-Open)) { throw 'quick settings did not open' } }
 try {
-    # 方向键：Home 回第一个按钮，再 Right x2 + Down 到「节能模式」，Space 切换
-    [TupaEnergy]::Tap(0x24)
-    [TupaEnergy]::Tap(0x27)
-    [TupaEnergy]::Tap(0x27)
-    [TupaEnergy]::Tap(0x28)
-    [TupaEnergy]::Tap(0x20)
-    if (-not (Wait-State $want)) {
-        # 回退：鼠标点击（布局与预期不同时）
-        $scale = [TupaEnergy]::GetDpiForSystem() / 96.0
-        $x = [int]([TupaEnergy]::GetSystemMetrics(0) - 89 * $scale)
-        $y = [int]([TupaEnergy]::GetSystemMetrics(1) - 311 * $scale)
-        [TupaEnergy]::Click($x, $y)
-        if (-not (Wait-State $want)) { throw 'energy saver did not change (quick settings layout changed?)' }
-    }
+    [TupaEnergy]::SaveCursor()
+    Start-Sleep -Milliseconds 150
+    Click-Energy
+    if (-not (Wait-State $want)) { throw 'energy saver did not change (quick settings layout changed?)' }
 } finally {
+    [TupaEnergy]::RestoreCursor()
     if (Is-Open) { [TupaEnergy]::WinA() }
 }
 'on'
@@ -742,19 +752,12 @@ $want = 2
 if ((Get-State) -eq $want) { 'off'; exit 0 }
 if (-not (Is-Open)) { [TupaEnergy]::WinA(); if (-not (Wait-Open)) { throw 'quick settings did not open' } }
 try {
-    [TupaEnergy]::Tap(0x24)
-    [TupaEnergy]::Tap(0x27)
-    [TupaEnergy]::Tap(0x27)
-    [TupaEnergy]::Tap(0x28)
-    [TupaEnergy]::Tap(0x20)
-    if (-not (Wait-State $want)) {
-        $scale = [TupaEnergy]::GetDpiForSystem() / 96.0
-        $x = [int]([TupaEnergy]::GetSystemMetrics(0) - 89 * $scale)
-        $y = [int]([TupaEnergy]::GetSystemMetrics(1) - 311 * $scale)
-        [TupaEnergy]::Click($x, $y)
-        if (-not (Wait-State $want)) { throw 'energy saver did not change (quick settings layout changed?)' }
-    }
+    [TupaEnergy]::SaveCursor()
+    Start-Sleep -Milliseconds 150
+    Click-Energy
+    if (-not (Wait-State $want)) { throw 'energy saver did not change (quick settings layout changed?)' }
 } finally {
+    [TupaEnergy]::RestoreCursor()
     if (Is-Open) { [TupaEnergy]::WinA() }
 }
 'off'

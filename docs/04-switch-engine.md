@@ -164,16 +164,22 @@ IdeaNotebookAddin.BatteryAgent.GetInstance()
 2. **UIAutomation**：快速设置是 WinUI3，Windows PowerShell 5.1 的 UIA2 用
    `FromHandle` 拿到窗口后子元素为 0；pwsh 7 的 UIA3 COM `FindAll` 会挂死
 
-最终落地：**键盘优先、鼠标回退**。
+最终落地：**只用鼠标点击**（2026-10-25 改，原先是「键盘优先、鼠标回退」）。
 
 - `Win+A` 打开快速设置（轮询 `ControlCenterWindow`，窗口一出现就继续，不等动画）
-- `Home` 回第一个按钮 → `Right` ×2 → `Down` → `Space` 切到「节能模式」
-  （焦点在 3×N 网格里按方向键移动，比 Tab 顺序稳定；实测 1↔2 可重复）
-- 读 `EnergySaverState` 校验；没变就用鼠标点击回退（坐标按 DPI 算，当前 `(2894, 1298)`）
+- `SetCursorPos` + `mouse_event` 点击「节能模式」按钮中心：坐标是相对屏幕右下角的
+  逻辑像素偏移（当前 `-89, -311`，按 DPI 缩放；3072x1920 @200% 下为 `(2894, 1298)`）
+- 点击前记下光标位置，切完（含报错）在 `finally` 里挪回去
+- 读 `EnergySaverState` 校验；没变就 throw，**不会静默成功**
 - `Win+A` 关闭快速设置
 
-实测一次切换约 **1 秒**（鼠标版 4.4 秒）。注意方向键序列依赖快速设置的按钮布局：
-如果调整了固定的按钮，需要改 `Right x2 + Down` 的步数。
+**为什么弃用方向键**：`Home` → `Right` ×2 → `Down` → `Space` 靠的是「焦点落在第几格」，
+而 `Space` 切换的是**当前焦点项**——固定的按钮一旦增删（蓝牙 / 飞行模式 / 亮度…），
+`Down` 就会停到别的行，`Space` 直接把蓝牙关掉或打开飞行模式。鼠标点偏了只是点空，
+校验会发现状态没变并报错，最坏结果是「没生效」而不是「切错了别的东西」。
+
+代价是一次切换变慢（鼠标版实测约 4.4 秒，主要是点击前后的等待）。如果快速设置布局
+变了，改 `Click-Energy` 里的两个偏移即可（`src/actions.rs`）。
 
 > 内置的 `-EncodedCommand` 脚本现在直接 spawn `powershell.exe`，不再经过 `cmd /C`，
 > 否则长脚本的 base64 会撞上 8191 字符的命令行限制。
