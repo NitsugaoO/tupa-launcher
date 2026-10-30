@@ -44,6 +44,10 @@ powershell -NoProfile -Command "Start-Process (Join-Path \$env:APPDATA 'Microsof
 - 命令关键字是 **`set`**（历史上叫 switch，已改名）；文档示例写默认前缀 `:`，
   用户本机 `config.toml` 改成了 `@`，别把两者搞混。
 - 面板渲染只走 `ui::draw`（TUI 与 GUI 共用），别在 GUI 里另写一套布局。
+- **不要用「方向键 + `Space`」操作 Windows 系统 UI**（快速设置 / 通知中心）：`Space` 切的
+  是**当前焦点项**，而系统 UI 的按钮布局会因用户增删固定项而变——必然存在「焦点落错行
+  → 切错开关」的窗口（实战里误关过蓝牙 / 误开过飞行模式）。要操作这类面板，一律
+  **坐标点击 + 读回状态校验**；点击前用 `GetCursorPos` 记光标、`finally` 里复位。
 
 ## 收尾清单
 

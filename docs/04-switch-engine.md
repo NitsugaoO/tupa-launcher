@@ -212,7 +212,7 @@ IdeaNotebookAddin.BatteryAgent.GetInstance()
 - 内置 PowerShell 用 `-EncodedCommand`（UTF-16LE + base64，自己编码），
   绕开 `cmd /C` 对引号 / 管道符的转义。
 - 内置项：深色模式（Toggle）、屏幕亮度（Number 0~100 step 10）、
-  电池养护模式（Toggle，`Storage` ↔ `Normal`）、节能模式（Toggle，快速设置方向键）、
+  电池养护模式（Toggle，`Storage` ↔ `Normal`）、节能模式（Toggle，鼠标点击快速设置）、
   保持唤醒（Toggle，nosleep 进程）。用户 `actions.toml` 里同 `id` 的条目覆盖内置项。
 - 电池养护脚本会自己找 `C:\ProgramData\Lenovo\Vantage\Addins\IdeaNotebookAddin\*`
   里版本最高的目录，所以 Vantage 升级后不用改代码；Vantage 没装时 `get` 失败，条目自动隐藏。

@@ -233,8 +233,8 @@ Copilot 键是个例外（它的原样组合被 shell 占着），但用钩子**
 - **电池养护模式**（反射调用 Lenovo Vantage 的 `IdeaBatteryAgent.dll`，`Storage` ↔ `Normal`）
 - **节能模式**（把联想 Vantage 的「静音省电」和 Windows 11 的 Energy Saver 合成一个开关：
   开 = 两边都开，关 = Vantage 回智能模式 + 关掉 Energy Saver。Energy Saver 走
-  `Win+A` 打开快速设置 → `Home` + `→→↓` + `Space`，键盘失败时回退到鼠标点击，
-  用注册表 `EnergySaverState` 校验）
+  `Win+A` 打开快速设置 → 鼠标点击「节能模式」按钮（不用方向键：Space 切的是焦点项，
+  固定按钮一变就会误关蓝牙/开飞行模式），点完用注册表 `EnergySaverState` 校验）
 - **保持唤醒**（`D:\Softwares\nosleep\nosleep.exe` 的托盘进程：开 = 启动并立即阻止睡眠，
   关 = 结束进程；`get` 直接看进程是否存在）
 - **更新订阅**（Clash Party：读 `%APPDATA%\mihomo-party\profile.yaml` 的当前订阅与上次更新时间，

@@ -1,6 +1,6 @@
 # tupa-launcher 状态
 
-updated: 2026-10-25 · code: `c6a76e9`（最后一次改动代码的提交）· main 与 origin/main 已同步（无未推送提交）
+updated: 2026-10-31 · code: `a6814c9`（最后一次改动代码的提交）· main 与 origin/main 已同步（无未推送提交）
 
 > 判断本文件是否过期：比较 `code` 与 `git log -1 --format=%h -- src Cargo.toml`。
 > 只改文档的提交不算过期。
@@ -32,28 +32,38 @@ updated: 2026-10-25 · code: `c6a76e9`（最后一次改动代码的提交）· 
   回车恢复回 `sessions/` 原目录（重名加 `-restored-` 后缀）。回车执行后不隐藏面板、
   就地刷新（可连续处理）。批量：`:pi:cleanall[:week|:month]` 压成一条汇总项，
   回车一次处理全部（失败不中断，最后汇报）。调试：`--query "@pi:clean"`（只读，前缀按本机 `@`）
+- **节能模式改为纯鼠标点击（2026-10-31）**：不再「键盘优先、鼠标回退」。原来的
+  `Home` → `→→↓` → `Space` 切的是**当前焦点项**，快速设置的固定按钮一增删
+  （蓝牙 / 飞行模式 / 亮度），`Space` 就会误关蓝牙或开飞行模式。现在只有
+  `Click-Energy`（相对屏幕右下角 `-89, -311`，按 DPI 缩放；200% 下 `(2894,1298)`），
+  点完读 `EnergySaverState` 校验，没变就报错 → **最坏是「没生效」，不会「切错别的东西」**；
+  点击前记光标、`finally` 里复位。代价：一次约 4 秒（原 ~1 秒）
 - 用户本机实际配置：`command_prefix = "@"`、`panel = "tui"`、热键 `alt+\``
 
 ## 下一步
 
-1. **`:blog` 待实机验**（2026-10-25）：热键唤起 → `@blog` 三个入口各点一次；
+1. **节能模式（`:set` 纯鼠标点击）待实机验**（2026-10-31）：热键 → `@set` → 节能模式 →
+   回车，确认（a）状态翻转、（b）光标自己回到原位、（c）再点一次翻回来。
+   若报 `energy saver did not change`，说明快速设置布局变了 → 截图量新坐标，
+   改 `src/actions.rs` 里 `Click-Energy` 的 `-89 / -311`
+2. **`:blog` 待实机验**（2026-10-25）：热键唤起 → `@blog` 三个入口各点一次；
    `@blog:new 测试标题` 确认文件建出来、front matter 正确、VSCode 打开；
    再点一次同一个标题（应提示「已存在，直接打开」而不是覆盖）；
    最后 `@blog:manage` 看管理页是否在 5173 起来（重复执行会 `EADDRINUSE`，属预期）
-2. **`:pi:clean` / `:pi:cleanall` 待实机验**（2026-10-25）：热键唤起 → `@pi:clean` →
+3. **`:pi:clean` / `:pi:cleanall` 待实机验**（2026-10-25）：热键唤起 → `@pi:clean` →
    回车归档一条 → `@pi:clean:restore` 搜回来；再试一条 `[删除]` 看是否进回收站；
    最后 `@pi:cleanall` 回车跑一次批量（当前 32 归档 + 4 删除），确认汇总文案与失败计数；
    顺带确认 `@pi` 原视图没受 4→3 列调整影响
-3. **GUI 打磨**（[`docs/07-shell-handover.md`](docs/07-shell-handover.md) §1「还没做的」）：
+4. **GUI 打磨**（[`docs/07-shell-handover.md`](docs/07-shell-handover.md) §1「还没做的」）：
    圆角 / 阴影 / 淡入、鼠标点击、滚动条、DPI 切换实测、窗口尺寸配置项
-4. 实机跑一段时间 GUI 后，再把 `[daemon] panel` 的默认值从 `tui` 改成 `gui`（保留 TUI 兜底）
-5. 剩下的小项（不阻塞套壳）：主题并入 `~/Themes/generator/generate.py`；`hist` provider；frecency 排序
+5. 实机跑一段时间 GUI 后，再把 `[daemon] panel` 的默认值从 `tui` 改成 `gui`（保留 TUI 兜底）
+6. 剩下的小项（不阻塞套壳）：主题并入 `~/Themes/generator/generate.py`；`hist` provider；frecency 排序
 
 ## 待验证
 
 ```bash
-cargo test --release      # 全绿（2026-10-25 实测 90 passed，数字以输出为准）
-cargo clippy --release    # 零警告
+cargo test --release      # 全绿（2026-10-31 实测 90 passed，数字以输出为准）
+cargo clippy --release    # 零警告（2026-10-31 实测）
 ```
 
 改完代码必须**重启守护进程**，否则跑的还是旧 exe —— 步骤见 [`AGENTS.md`](AGENTS.md)。

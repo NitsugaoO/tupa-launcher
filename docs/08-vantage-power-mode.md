@@ -228,7 +228,8 @@ Rust 侧用 `actions.rs` 的 `powershell(script)`（UTF-16LE base64 + `-EncodedC
 - Vantage `MmcCool` 是 EC/固件层的风扇/功耗策略
 - Windows Energy Saver 是系统级节能（动画/透明/后台）
 - 两者可以叠加，但 Energy Saver 没有公开的即时 API（注册表要重启；WNF 写入被 ACL 拒绝），
-  在 tupa 里是用「Win+A → 方向键 → Space」点快速设置实现的（见 `src/actions.rs` 的 `energy-saver`）
+  在 tupa 里是用「Win+A → 鼠标点击节能模式按钮」点快速设置实现的（见 `src/actions.rs` 的 `energy-saver`）。
+  注意**别用方向键 + Space**：Space 切的是当前焦点项，固定按钮一变就会切错东西
 
 ## 5. 坑与注意事项
 
