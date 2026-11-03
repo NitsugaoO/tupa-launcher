@@ -128,6 +128,10 @@ pub fn desc_web() -> &'static str {
     t("浏览历史", "Browse history")
 }
 
+pub fn desc_hist() -> &'static str {
+    t("命令历史", "Command history")
+}
+
 pub fn desc_blog() -> &'static str {
     t(
         "博客：新建文章 / 管理页 / 站点入口",
@@ -740,6 +744,7 @@ pub fn help() -> String {
   :run <命令>      执行命令
   :go <路径>       跳转目录
   :web <关键词>    搜索浏览历史
+  :hist <关键词>   搜索命令历史
   :new <文件名>    新建文件
   :fav [类型]      收藏
   :cfg [关键词]    查看配置
@@ -782,6 +787,7 @@ Commands (prefix defaults to :, configurable)
   :run <command>    run a command
   :go <path>        jump to a folder
   :web <keyword>    search browser history
+  :hist <keyword>   search command history
   :new <file>       create a file
   :fav [kind]       favorites
   :cfg [keyword]    inspect config

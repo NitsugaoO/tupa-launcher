@@ -87,7 +87,7 @@ Copilot 键是个例外（它的原样组合被 shell 占着），但用钩子**
 
 | 输入 | 行为 |
 |---|---|
-| （开屏 / 空输入） | 收藏 + 最近 5 条执行过的命令，回车直接执行；输入 `:` 则改为列出全部命令 |
+| （开屏 / 空输入） | 收藏 + 最近 25 条执行过的命令，回车直接执行；输入 `:` 则改为列出全部命令 |
 | `:` | 用 `:` 开头进入命令模式（Tab 循环补全命令名） |
 | `:app <名字>` | 从自定义列表里启动应用（模糊匹配）；`.lnk` 会递归解析到目标 exe 显示 |
 | `:ev <关键词>` | Everything 搜文件，**支持原生语法**：`:ev ext:pdf 报告`、`:ev folder:Projects` |
@@ -97,6 +97,7 @@ Copilot 键是个例外（它的原样组合被 shell 占着），但用钩子**
 | `:pi:clean [关键词]` | 清理 pi 会话：列出**超过时间窗口**的会话，回车**归档**（长会话）或**删除到回收站**（瘦会话）；`:pi:clean:week` / `:pi:clean:month` 切窗口（默认两周），`:pi:clean:restore` 从归档恢复 |
 | `:pi:cleanall [关键词]` | 同上，但只列**一条汇总项**（归档 N 个 / 删除 M 个 / 总体积），回车**一次处理全部**；可叠窗口：`:pi:cleanall:month` |
 | `:web <网址 / 关键词>` | 搜 Edge 历史（默认**一周内**）；搜不到且输入像网址就直接打开（`:web:month` / `:web:all` 扩大范围，`:web:url` 强制打开） |
+| `:hist [关键词]` | 搜**命令历史**（`history.json`，最多 200 条）：模糊匹配当时的输入行 / 条目标题 / 副标题，带关键词时按相关度排序；回车同开屏——有快照直接再打开，老记录只把输入行填回输入框 |
 | `:blog [关键词]` | 自己的博客：不带参数列**三个入口**（本地 `localhost:4000` / GitHub Pages / Cloudflare）；`:blog:new <标题>` 在 `source/_posts` 新建文章并**用 VSCode 打开**（同名不覆盖，空参数列最近文章）；`:blog:manage` 后台跑 `pnpm admin` 并打开管理页（`127.0.0.1:5173`） |
 | `:fav [类型] [关键词]` | 列出收藏（`:fav app` / `:fav web` 按类型过滤），`Ctrl+D` 收藏 / 取消收藏 |
 | `:cfg [关键词]` | 列出配置项（当前值 / 行号 / 说明），**回车在 VSCode 里跳到对应行** |
@@ -426,6 +427,7 @@ src/
     ├── apps.rs          app  —— 自定义应用列表 + 模糊匹配
     ├── everything.rs    ev   —— 调用 es.exe + 本地相关性重排
     ├── web.rs           web  —— URL 判断 + Edge 历史（rusqlite）
+    ├── hist.rs          hist —— 搜索命令历史（history.json：输入行 + 执行快照）
     ├── favorites.rs     fav  —— 列出收藏 + 按类型过滤
     ├── commands.rs      `:`  —— 命令列表（也是补全的数据源）
     ├── blog.rs           blog —— 新建文章 / 管理页 / 站点入口
@@ -466,7 +468,7 @@ src/
 - [x] 集成 GlazeWM `window_rules`（浮动/居中/尺寸交给 WM）
 - [ ] 主题并入 `~/Themes/generator/generate.py` 流水线（在 `~/.config/tupa-launcher/theme.toml` 里生成）
 - [ ] 智能识别并打开文件夹（`PathPal` 的 "字面 → 祖先回退 → Everything 兜底" 三级策略）
-- [ ] `hist`（历史记录搜索，独立 provider）
+- [x] `hist`（历史记录搜索，独立 provider）
 - [ ] 使用频率统计，把常用项自动排前（frecency）
 - [x] **v0.3** `web`（Edge 历史）+ `fav`（收藏）+ 命令历史（`Ctrl+↑/↓`）
 - [x] **v0.4** 分列显示（份数/最短/最长、选中行滚动）+ 详细信息模式 + `:` 命令前缀 + Tab 补全 + 选择模式

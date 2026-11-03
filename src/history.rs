@@ -12,7 +12,7 @@ use std::path::PathBuf;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::providers::Item;
+use crate::providers::{Action, Item, Kind};
 
 pub const LIMIT: usize = 200;
 
@@ -68,6 +68,21 @@ pub fn save(items: &[Entry]) -> Result<()> {
     Ok(())
 }
 
+/// 把一条历史记录转成可执行的条目。
+///
+/// - 有快照（打开过的文件 / 网页 / 应用）：直接用快照，回车能再打开一次
+/// - 老记录只有输入行：把行填回输入框，不直接执行
+pub fn to_item(entry: &Entry) -> Item {
+    match &entry.item {
+        Some(item) => item.clone(),
+        None => Item::new(
+            Kind::History,
+            vec![entry.line.clone(), String::new()],
+            Action::FillInput(entry.line.clone()),
+        ),
+    }
+}
+
 /// 把一行输入记进历史（去重前移 + 截断）
 pub fn push(items: &mut Vec<Entry>, line: &str, item: Option<Item>) {
     items.retain(|entry| entry.line != line);
@@ -93,6 +108,36 @@ mod tests {
         push(&mut items, "a", None);
         assert_eq!(items.len(), 2);
         assert_eq!(items[0].line, "a");
+    }
+
+    #[test]
+    fn entry_without_snapshot_fills_input() {
+        let entry = Entry {
+            line: "@app code".to_string(),
+            item: None,
+        };
+        let item = to_item(&entry);
+        assert_eq!(item.kind, Kind::History);
+        assert_eq!(item.columns[0], "@app code");
+        assert_eq!(item.action, Action::FillInput("@app code".to_string()));
+    }
+
+    #[test]
+    fn entry_with_snapshot_is_reused() {
+        let snapshot = Item::new(
+            Kind::App,
+            vec!["Visual Studio Code".to_string(), "code".to_string()],
+            Action::Launch {
+                command: "code".to_string(),
+                args: Vec::new(),
+                elevated: false,
+            },
+        );
+        let entry = Entry {
+            line: "@app code".to_string(),
+            item: Some(snapshot.clone()),
+        };
+        assert_eq!(to_item(&entry), snapshot);
     }
 
     #[test]

@@ -7,7 +7,7 @@
 use fuzzy_matcher::FuzzyMatcher;
 use fuzzy_matcher::skim::SkimMatcherV2;
 
-use super::{Action, Column, Item, Kind, Provider};
+use super::{Action, Column, Item, Provider};
 use crate::config::Config;
 use crate::{favorites, history};
 
@@ -66,12 +66,9 @@ impl Provider for Home {
         //    只有输入行的（老记录）就补回输入框
         let mut seen: Vec<Action> = items.iter().map(|item| item.action.clone()).collect();
         let recent: Vec<Item> = history::load()
-            .into_iter()
+            .iter()
             .filter(|entry| keyword.is_empty() || matcher.fuzzy_match(&entry.line, keyword).is_some())
-            .map(|entry| match entry.item {
-                Some(item) => item,
-                None => recent_item(&entry.line),
-            })
+            .map(history::to_item)
             .filter(|item| {
                 // 收藏里已经有的就别在历史里再列一遍
                 if seen.contains(&item.action) {
@@ -89,24 +86,14 @@ impl Provider for Home {
     }
 }
 
-/// 历史条目：只把命令文本填回输入框，不直接执行
-fn recent_item(line: &str) -> Item {
-    Item::new(
-        Kind::History,
-        vec![line.to_string(), String::new(), String::new()],
-        Action::FillInput(line.to_string()),
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn recent_item_fills_input() {
-        let item = recent_item("@app code");
-        assert_eq!(item.kind, Kind::History);
-        assert_eq!(item.columns[0], "@app code");
-        assert_eq!(item.action, Action::FillInput("@app code".to_string()));
+    fn columns_match_the_favorites_layout() {
+        // 收藏是 3 列混装（app / file / web 都往里放），历史快照可能只有 2 列；
+        // 布局按最多的那一行算，短行尾部留空
+        assert_eq!(COLUMNS.len(), 3);
     }
 }

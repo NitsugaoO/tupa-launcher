@@ -41,6 +41,7 @@ src/
     ├── go.rs      go（zoxide + Everything + 剪贴板 + yazi/pi/code）
     ├── pi.rs      pi（pi 会话列表 + 关键词搜索 + -session 打开）
     ├── web.rs     web（Edge 历史，rusqlite）
+    ├── hist.rs    hist（搜 history.json：输入行 + 执行快照，可带关键词）
     ├── blog.rs      blog（新建文章 / 管理页 / 站点入口）
     ├── favorites.rs   fav
     ├── config_items.rs cfg

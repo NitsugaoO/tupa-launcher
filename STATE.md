@@ -1,6 +1,6 @@
 # tupa-launcher 状态
 
-updated: 2026-10-31 · code: `a6814c9`（最后一次改动代码的提交）· main 与 origin/main 已同步（无未推送提交）
+updated: 2026-11-03 · code: `a6814c9`（最后一次改动代码的提交）· main 与 origin/main 已同步（无未推送提交）
 
 > 判断本文件是否过期：比较 `code` 与 `git log -1 --format=%h -- src Cargo.toml`。
 > 只改文档的提交不算过期。
@@ -39,31 +39,54 @@ updated: 2026-10-31 · code: `a6814c9`（最后一次改动代码的提交）· 
   点完读 `EnergySaverState` 校验，没变就报错 → **最坏是「没生效」，不会「切错别的东西」**；
   点击前记光标、`finally` 里复位。代价：一次约 4 秒（原 ~1 秒）
 - 用户本机实际配置：`command_prefix = "@"`、`panel = "tui"`、热键 `alt+\``
+- **应用列表扩到 55 项（2026-11-01，只动本机配置，未改仓库代码）**：`[[apps]]` 18 → 55，
+  按常用度分五组重排（天天用 12 / 工作沟通 9 / 桌面系统 10 / 网络 4 / 影音杂项 20）；
+  `general.max_results` 30 → **60** —— `src/providers/apps.rs` 空查询走 `take(self.max)`，
+  条数超过它会被**静默截断**（配了但空输入看不到）。备份 `config.toml.bak-20261101-160208`。
+  QQ / DeepSeek Harness / Radmin VPN / Where To Study / piik-app 属「装了但没在开始菜单
+  建快捷方式」或漏看，已手工补；`Join QR Code` 明确不加
+- **`:hist` 已加入（2026-11-03）**：`src/providers/hist.rs`，`@hist [关键词]` 搜 `history.json`
+  （最多 200 条，再按 `general.max_results` 截断）：模糊匹配**输入行 / 快照标题 / 快照副标题**，
+  带关键词按得分排序、不带关键词「最近在前」，按 `action` 去重。回车行为同开屏：有快照
+  直接再打开，老记录用 `Action::FillInput` 填回输入框。`history::to_item()` 已抽成公共函数
+  给 `home` 与 `hist` 共用（开屏历史条目从 3 列变 2 列，布局按最多的行算，不受影响）
 
 ## 下一步
 
-1. **节能模式（`:set` 纯鼠标点击）待实机验**（2026-10-31）：热键 → `@set` → 节能模式 →
-   回车，确认（a）状态翻转、（b）光标自己回到原位、（c）再点一次翻回来。
-   若报 `energy saver did not change`，说明快速设置布局变了 → 截图量新坐标，
-   改 `src/actions.rs` 里 `Click-Energy` 的 `-89 / -311`
-2. **`:blog` 待实机验**（2026-10-25）：热键唤起 → `@blog` 三个入口各点一次；
-   `@blog:new 测试标题` 确认文件建出来、front matter 正确、VSCode 打开；
-   再点一次同一个标题（应提示「已存在，直接打开」而不是覆盖）；
-   最后 `@blog:manage` 看管理页是否在 5173 起来（重复执行会 `EADDRINUSE`，属预期）
-3. **`:pi:clean` / `:pi:cleanall` 待实机验**（2026-10-25）：热键唤起 → `@pi:clean` →
-   回车归档一条 → `@pi:clean:restore` 搜回来；再试一条 `[删除]` 看是否进回收站；
-   最后 `@pi:cleanall` 回车跑一次批量（当前 32 归档 + 4 删除），确认汇总文案与失败计数；
-   顺带确认 `@pi` 原视图没受 4→3 列调整影响
-4. **GUI 打磨**（[`docs/07-shell-handover.md`](docs/07-shell-handover.md) §1「还没做的」）：
+1. **`:web` 打开网页不会唤出浏览器（2026-11-01 发现，GlazeWM 环境）**：`src/exec.rs` 的
+   `Action::OpenUrl` 只做 `open::that_detached`，于是已有浏览器实例在**别的 workspace** 里新建
+   标签，窗口保持 GlazeWM 的 `displayState=hidden`，工作区不切 → 用户看不到。实测证据：
+   Edge 窗口在 workspace `1`(all)、当前在 `2`(web)。`:blog` 三入口与收藏里的网址走同一个
+   `Action::OpenUrl`，修一处全受益。
+   - 方案 A（推荐）：`open` 后 `glazewm query windows` 按 `processName` 找浏览器窗口 →
+     `glazewm command focus --container-id <id>`；加配置开关，非 GlazeWM 环境退化为现状。
+     代价：每次多 spawn 两次 `glazewm.exe`（~30–80ms）
+   - 方案 B **别用**：纯 Win32 `SetForegroundWindow` + `ShowWindow`，窗口显示了但 GlazeWM 的
+     `isDisplayed` 不同步，之后 layout 会错乱
+   - 方案 C：常驻订阅 GlazeWM IPC 事件（命名管道），效果最好但工作量大
+2. **frecency 排序（现在只按「最近」）**：`history::Entry` 加 `hits: u32` 与 `last_used`（unix 秒），
+   全部 `#[serde(default)]` 兼容旧 `history.json`（老记录 hits 记 1）；`push` 里命中同一条就
+   `hits += 1`。排序改成 `hits × 新鲜度衰减`，影响两处：开屏那 25 条历史、`@app`/空查询的列表。
+   注意别把 `history::LIMIT = 200` 撑大，也别让排序打乱开屏的「收藏在前」结构
+3. **GUI 打磨**（[`docs/07-shell-handover.md`](docs/07-shell-handover.md) §1「还没做的」）：
    圆角 / 阴影 / 淡入、鼠标点击、滚动条、DPI 切换实测、窗口尺寸配置项
-5. 实机跑一段时间 GUI 后，再把 `[daemon] panel` 的默认值从 `tui` 改成 `gui`（保留 TUI 兜底）
-6. 剩下的小项（不阻塞套壳）：主题并入 `~/Themes/generator/generate.py`；`hist` provider；frecency 排序
+4. 实机跑一段时间 GUI 后，再把 `[daemon] panel` 的默认值从 `tui` 改成 `gui`（保留 TUI 兜底）
+5. 主题并入 `~/Themes/generator/generate.py`（现在 `theme.toml` 是手改的，权威色板是
+   `~/Themes/themes/everforest/tokens.yaml`）：让生成器直接产出 `~/.config/tupa-launcher/theme.toml`，
+   跟博客 / pi / 终端主题同一个来源
+6. **`config.example.toml` 仍只有 7 个示例应用**（本机已 55 项）：倾向**保持精简示例**
+   （只教语法）；若决定同步，改的是**仓库文件**，改完需提交推送
+
+> 2026-11-03 删掉了三条「待实机验」（节能模式 / `:blog` / `:pi:clean`）：都是已经在用的功能，
+> 真出问题时再按报错查。相关坐标与调用链仍留在「阶段」节里备查。同日做完了 `hist` provider，
+> 开屏历史也从 5 条改成了 25 条（填满面板）。
 
 ## 待验证
 
 ```bash
-cargo test --release      # 全绿（2026-10-31 实测 90 passed，数字以输出为准）
-cargo clippy --release    # 零警告（2026-10-31 实测）
+cargo test --release      # 全绿（2026-11-03 实测 93 passed，数字以输出为准）
+cargo clippy --release    # 零警告（2026-11-03 实测）
+tupa-launcher.exe --check # 55 项应用全部可解析、空输入列 55 条（2026-11-01 实测）
 ```
 
 改完代码必须**重启守护进程**，否则跑的还是旧 exe —— 步骤见 [`AGENTS.md`](AGENTS.md)。
