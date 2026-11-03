@@ -3,8 +3,11 @@
 #     即 C:\Users\<你>\.config\tupa-launcher\config.toml
 
 [general]
-# 输入**不带 `:` 前缀**时，整行交给哪个 provider 当搜索词（app / ev）
-default_provider = "app"
+# 输入**不带 `:` 前缀**时，整行交给哪个 provider：
+#   all = 应用 + 命令历史混排（默认）
+#   app = 只搜应用
+#   ev  = Everything 搜文件
+default_provider = "all"
 # 单个 provider 最多返回多少条
 max_results = 30
 # es.exe 路径；留空自动探测（PATH → %LOCALAPPDATA%\Everything → Program Files）

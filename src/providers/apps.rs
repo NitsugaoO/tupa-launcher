@@ -110,6 +110,13 @@ fn display_name(entry: &AppEntry) -> String {
     }
 }
 
+/// flags 里有没有提权修饰符
+pub fn is_elevated(flags: &[String]) -> bool {
+    flags
+        .iter()
+        .any(|flag| matches!(flag.as_str(), "admin" | "elevated" | "sudo"))
+}
+
 impl Provider for Apps {
     fn keyword(&self) -> &str {
         "app"
@@ -124,10 +131,20 @@ impl Provider for Apps {
     }
 
     fn query(&self, args: &str, flags: &[String]) -> Vec<Item> {
-        let q = args.trim();
-        let elevated = flags
-            .iter()
-            .any(|flag| matches!(flag.as_str(), "admin" | "elevated" | "sudo"));
+        self.ranked(args, is_elevated(flags))
+            .into_iter()
+            .take(self.max)
+            .map(|(_, item)| item)
+            .collect()
+    }
+}
+
+impl Apps {
+    /// 带分数的候选（空的查询 = 按 frecency + 配置顺序，分数为 0）。
+    ///
+    /// 分数是 skim 的打分，`all`（应用 + 历史）用它跟历史条目混排。
+    pub fn ranked(&self, query: &str, elevated: bool) -> Vec<(i64, Item)> {
+        let q = query.trim();
         let matcher = SkimMatcherV2::default();
 
         let mut hits: Vec<(i64, usize)> = if q.is_empty() {
@@ -150,19 +167,44 @@ impl Provider for Apps {
         hits.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
 
         hits.into_iter()
-            .take(self.max)
-            .map(|(_, i)| {
-                let e = &self.entries[i];
-                Item::new(
-                    Kind::App,
-                    vec![e.name.clone(), self.display[i].clone()],
-                    Action::Launch {
-                        command: e.command.clone(),
-                        args: e.args.clone(),
-                        elevated,
-                    },
-                )
-            })
+            .map(|(score, i)| (score, self.item_at(i, elevated)))
             .collect()
+    }
+
+    fn item_at(&self, i: usize, elevated: bool) -> Item {
+        let entry = &self.entries[i];
+        Item::new(
+            Kind::App,
+            vec![entry.name.clone(), self.display[i].clone()],
+            Action::Launch {
+                command: entry.command.clone(),
+                args: entry.args.clone(),
+                elevated,
+            },
+        )
+    }
+}
+
+/// 让 `all`（默认 provider）和 `app` 共用同一份应用列表，
+/// 不用二次解析 55 个 `.lnk`
+impl Provider for std::sync::Arc<Apps> {
+    fn keyword(&self) -> &str {
+        (**self).keyword()
+    }
+
+    fn description(&self) -> &'static str {
+        (**self).description()
+    }
+
+    fn columns(&self) -> &'static [super::Column] {
+        (**self).columns()
+    }
+
+    fn flags(&self) -> &'static [&'static str] {
+        (**self).flags()
+    }
+
+    fn query(&self, args: &str, flags: &[String]) -> Vec<Item> {
+        (**self).query(args, flags)
     }
 }

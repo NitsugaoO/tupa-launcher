@@ -79,7 +79,7 @@ impl Default for Glazewm {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct General {
-    /// 输入不以任何 provider 关键字开头时，交给哪个 provider
+    /// 输入不以任何 provider 关键字开头时，交给哪个 provider（默认 `all` = 应用 + 历史）
     pub default_provider: String,
     /// 单个 provider 最多返回多少条结果
     pub max_results: usize,
@@ -106,7 +106,7 @@ pub struct General {
 impl Default for General {
     fn default() -> Self {
         General {
-            default_provider: "app".to_string(),
+            default_provider: "all".to_string(),
             max_results: 30,
             everything_path: None,
             prefill_colon: false,

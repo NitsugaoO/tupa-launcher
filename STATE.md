@@ -38,7 +38,13 @@ updated: 2026-11-03 · code: `8f67bb8`（最后一次改动代码的提交）· 
   `Click-Energy`（相对屏幕右下角 `-89, -311`，按 DPI 缩放；200% 下 `(2894,1298)`），
   点完读 `EnergySaverState` 校验，没变就报错 → **最坏是「没生效」，不会「切错别的东西」**；
   点击前记光标、`finally` 里复位。代价：一次约 4 秒（原 ~1 秒）
-- 用户本机实际配置：`command_prefix = "@"`、`panel = "tui"`、热键 `alt+\``
+- **默认搜索改成「应用 + 历史」混排（2026-11-03）**：新增 `src/providers/all.rs`（keyword `all`），
+  两边都用 `SkimMatcherV2` 打分（同一尺度）后混排，**同分时应用优先**；按 `Action` 去重
+  （历史里已记为 `Launch code` 的不会在应用结果后再出现）；空查询不混（只列应用，开屏另有 `home`）。
+  `all` 与 `app` 共用同一份 `Arc<Apps>`（不重复解析 55 个 `.lnk`）。`[general] default_provider`
+  默认值 `app` → **`all`**；`@app code` 仍然只搜应用。配套把 `Apps::query` / `Hist::query`
+  拆出 `ranked()`（返回 `(分数, Item)`）给混排用
+- 用户本机实际配置：`command_prefix = "@"`、`panel = "tui"`、热键 `alt+\``、`default_provider = "all"`
 - **应用列表扩到 55 项（2026-11-01，只动本机配置，未改仓库代码）**：`[[apps]]` 18 → 55，
   按常用度分五组重排（天天用 12 / 工作沟通 9 / 桌面系统 10 / 网络 4 / 影音杂项 20）；
   `general.max_results` 30 → **60** —— `src/providers/apps.rs` 空查询走 `take(self.max)`，

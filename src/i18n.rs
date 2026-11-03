@@ -49,6 +49,10 @@ pub fn desc_app() -> &'static str {
     t("启动应用", "Launch apps")
 }
 
+pub fn desc_all() -> &'static str {
+    t("应用 + 历史（默认搜索）", "Apps + history")
+}
+
 pub fn desc_ev() -> &'static str {
     t("搜索文件", "Search files")
 }

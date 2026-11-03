@@ -37,6 +37,7 @@ src/
 └── providers/
     ├── mod.rs     Provider trait / Item / Action / Column / 解析 / worker
     ├── apps.rs    app
+    ├── all.rs     all（默认搜索：应用 + 历史混排，共用 app 的列表）
     ├── everything.rs  ev
     ├── run.rs     run
     ├── go.rs      go（zoxide + Everything + 剪贴板 + yazi/pi/code）

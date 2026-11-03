@@ -90,6 +90,7 @@ Copilot 键是个例外（它的原样组合被 shell 占着），但用钩子**
 | （开屏 / 空输入） | 收藏 + 最近 25 条执行过的命令，回车直接执行；输入 `:` 则改为列出全部命令 |
 | `:` | 用 `:` 开头进入命令模式（Tab 循环补全命令名） |
 | `:app <名字>` | 从自定义列表里启动应用（模糊匹配）；`.lnk` 会递归解析到目标 exe 显示 |
+| `:all <关键词>` | 默认搜索的显式写法：**应用 + 命令历史混排**（两边同一套模糊打分，同分时应用优先）；留空只列应用 |
 | `:ev <关键词>` | Everything 搜文件，**支持原生语法**：`:ev ext:pdf 报告`、`:ev folder:Projects` |
 | `:run <命令>` | 开一个新终端窗口执行（默认 PowerShell；`:run:bg` 后台，`:run:admin` 提权） |
 | `:go <路径>` | 跳到目录 / 定位文件；空参数读剪贴板；`:go:code` / `:go:yazi` / `:go:pi` 用指定程序打开 |
@@ -102,7 +103,7 @@ Copilot 键是个例外（它的原样组合被 shell 占着），但用钩子**
 | `:fav [类型] [关键词]` | 列出收藏（`:fav app` / `:fav web` 按类型过滤），`Ctrl+D` 收藏 / 取消收藏 |
 | `:cfg [关键词]` | 列出配置项（当前值 / 行号 / 说明），**回车在 VSCode 里跳到对应行** |
 | `:set [关键词]` | 应用内开关 / 选项 / 数值（深色模式、亮度、电池养护……），回车应用、`←/→` 调整、**不隐藏面板** |
-| `<名字>`（不带 `:`） | 整行交给默认 provider 当搜索词（当前是 `app`） |
+| `<名字>`（不带 `:`） | 整行交给默认 provider 当搜索词（默认 `all`：应用 + 历史混排；改成 `app` 就只搜应用） |
 
 命令前缀（`:app` / `:run:admin`）在输入框里会**高亮成黄色**，一眼能看出当前在哪个命令。
 
@@ -392,7 +393,7 @@ background panel overlay border fg muted dim faint accent good warn bad
 
 | 键 | 默认 | 说明 |
 |---|---|---|
-| `default_provider` | `app` | 不带 `:` 前缀时整行交给谁 |
+| `default_provider` | `all` | 不带 `:` 前缀时整行交给谁（`all` = 应用 + 历史混排；`app` 只搜应用） |
 | `max_results` | `30` | 单个 provider 最多返回多少条 |
 | `everything_path` | 自动探测 | `es.exe` 路径 |
 | `prefill_colon` | `false` | 开屏输入框是否预填命令前缀（`true` = 一开就在命令模式；`false` = 空输入，但结果列表仍是命令列表） |
@@ -440,6 +441,7 @@ src/
 └── providers/
     ├── mod.rs           Provider trait、Item/Action、解析、**后台 worker**
     ├── apps.rs          app  —— 自定义应用列表 + 模糊匹配
+    ├── all.rs           all  —— 默认搜索：应用 + 历史混排（共用 app 的列表）
     ├── everything.rs    ev   —— 调用 es.exe + 本地相关性重排
     ├── web.rs           web  —— URL 判断 + Edge 历史（rusqlite）
     ├── hist.rs          hist —— 搜索命令历史（history.json：输入行 + 执行快照）

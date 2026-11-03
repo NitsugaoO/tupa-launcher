@@ -6,6 +6,7 @@
 //! 输入以 `:` 开头时进入命令模式（`:app code`）；不带 `:` 的整行是默认
 //! provider 的搜索词。命令列表本身也是一个 provider（见 [`commands`]）。
 
+pub mod all;
 pub mod apps;
 pub mod blog;
 pub mod clean;
@@ -401,7 +402,10 @@ impl ProviderInfo {
 /// 注册所有 provider（顺序 = 界面上的优先级）
 pub fn build(cfg: &Config) -> Vec<Box<dyn Provider>> {
     let mut list: Vec<Box<dyn Provider>> = Vec::new();
-    list.push(Box::new(apps::Apps::new(cfg)));
+    let apps = std::sync::Arc::new(apps::Apps::new(cfg));
+    list.push(Box::new(apps.clone()));
+    // 默认搜索：应用 + 历史混排（与 app 共用同一份应用列表）
+    list.push(Box::new(all::All::new(apps, cfg)));
     if let Some(ev) = everything::Everything::new(cfg) {
         list.push(Box::new(ev));
     }

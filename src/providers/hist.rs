@@ -40,7 +40,20 @@ impl Provider for Hist {
     }
 
     fn query(&self, args: &str, _flags: &[String]) -> Vec<Item> {
-        let keyword = args.trim();
+        self.ranked(args)
+            .into_iter()
+            .take(self.max)
+            .map(|(_, item)| item)
+            .collect()
+    }
+}
+
+impl Hist {
+    /// 带分数的候选：带关键词按模糊得分，不带关键词按「最近在前」（分数 0）。
+    ///
+    /// 分数是 skim 的打分，`all`（应用 + 历史）用它跟应用条目混排。
+    pub fn ranked(&self, keyword: &str) -> Vec<(i64, Item)> {
+        let keyword = keyword.trim();
         let matcher = SkimMatcherV2::default();
 
         let mut rows: Vec<(i64, usize, Item)> = Vec::new();
@@ -71,8 +84,7 @@ impl Provider for Hist {
                 seen.push(item.action.clone());
                 true
             })
-            .take(self.max)
-            .map(|(_, _, item)| item)
+            .map(|(score, _, item)| (score, item))
             .collect()
     }
 }
