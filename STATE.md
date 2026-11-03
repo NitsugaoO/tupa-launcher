@@ -50,41 +50,40 @@ updated: 2026-11-03 · code: `a6814c9`（最后一次改动代码的提交）· 
   带关键词按得分排序、不带关键词「最近在前」，按 `action` 去重。回车行为同开屏：有快照
   直接再打开，老记录用 `Action::FillInput` 填回输入框。`history::to_item()` 已抽成公共函数
   给 `home` 与 `hist` 共用（开屏历史条目从 3 列变 2 列，布局按最多的行算，不受影响）
+- **`:web` 打开网页会自己切到浏览器（2026-11-03）**：新增 `src/glazewm.rs`。
+  `Action::OpenUrl`（`:web` 选中项 / `:blog` 三入口 / 收藏里的网址）开完网页后在**后台线程**里
+  `glazewm query workspaces` → 按 `processName` 白名单找浏览器窗口 → 先
+  `focus --workspace <名字>` 让 WM 自己切（实测：Edge 从 `hidden` 变 `shown` 且拿到焦点），
+  300ms 复查没落到目标窗口才补 `focus --container-id`，400ms 后再复查一次防「跳过去又弹回来」。
+  开关 `[glazewm] focus_browser`（默认 `true`；没装 GlazeWM 自动忽略，失败静默）。
+  顺序与复查逻辑照搬 `~/.pi/my-plugins/plugins/pi-notify` 的 `glaze.ts` / `focus.runtime.mjs`：
+  **先 workspace 后 container 不能反** —— 跨 workspace 直接 `--container-id` 会先把 WM
+  内部焦点改掉，之后 `--workspace` 变成 no-op，窗口还是不显示（那边 2026-11-01 实测）；
+  也没用裸 `SetForegroundWindow`（只改显示不改前台，`isDisplayed` 不同步，layout 会乱）
 
 ## 下一步
 
-1. **`:web` 打开网页不会唤出浏览器（2026-11-01 发现，GlazeWM 环境）**：`src/exec.rs` 的
-   `Action::OpenUrl` 只做 `open::that_detached`，于是已有浏览器实例在**别的 workspace** 里新建
-   标签，窗口保持 GlazeWM 的 `displayState=hidden`，工作区不切 → 用户看不到。实测证据：
-   Edge 窗口在 workspace `1`(all)、当前在 `2`(web)。`:blog` 三入口与收藏里的网址走同一个
-   `Action::OpenUrl`，修一处全受益。
-   - 方案 A（推荐）：`open` 后 `glazewm query windows` 按 `processName` 找浏览器窗口 →
-     `glazewm command focus --container-id <id>`；加配置开关，非 GlazeWM 环境退化为现状。
-     代价：每次多 spawn 两次 `glazewm.exe`（~30–80ms）
-   - 方案 B **别用**：纯 Win32 `SetForegroundWindow` + `ShowWindow`，窗口显示了但 GlazeWM 的
-     `isDisplayed` 不同步，之后 layout 会错乱
-   - 方案 C：常驻订阅 GlazeWM IPC 事件（命名管道），效果最好但工作量大
-2. **frecency 排序（现在只按「最近」）**：`history::Entry` 加 `hits: u32` 与 `last_used`（unix 秒），
+1. **frecency 排序（现在只按「最近」）**：`history::Entry` 加 `hits: u32` 与 `last_used`（unix 秒），
    全部 `#[serde(default)]` 兼容旧 `history.json`（老记录 hits 记 1）；`push` 里命中同一条就
    `hits += 1`。排序改成 `hits × 新鲜度衰减`，影响两处：开屏那 25 条历史、`@app`/空查询的列表。
    注意别把 `history::LIMIT = 200` 撑大，也别让排序打乱开屏的「收藏在前」结构
-3. **GUI 打磨**（[`docs/07-shell-handover.md`](docs/07-shell-handover.md) §1「还没做的」）：
+2. **GUI 打磨**（[`docs/07-shell-handover.md`](docs/07-shell-handover.md) §1「还没做的」）：
    圆角 / 阴影 / 淡入、鼠标点击、滚动条、DPI 切换实测、窗口尺寸配置项
-4. 实机跑一段时间 GUI 后，再把 `[daemon] panel` 的默认值从 `tui` 改成 `gui`（保留 TUI 兜底）
-5. 主题并入 `~/Themes/generator/generate.py`（现在 `theme.toml` 是手改的，权威色板是
+3. 实机跑一段时间 GUI 后，再把 `[daemon] panel` 的默认值从 `tui` 改成 `gui`（保留 TUI 兜底）
+4. 主题并入 `~/Themes/generator/generate.py`（现在 `theme.toml` 是手改的，权威色板是
    `~/Themes/themes/everforest/tokens.yaml`）：让生成器直接产出 `~/.config/tupa-launcher/theme.toml`，
    跟博客 / pi / 终端主题同一个来源
-6. **`config.example.toml` 仍只有 7 个示例应用**（本机已 55 项）：倾向**保持精简示例**
+5. **`config.example.toml` 仍只有 7 个示例应用**（本机已 55 项）：倾向**保持精简示例**
    （只教语法）；若决定同步，改的是**仓库文件**，改完需提交推送
 
 > 2026-11-03 删掉了三条「待实机验」（节能模式 / `:blog` / `:pi:clean`）：都是已经在用的功能，
-> 真出问题时再按报错查。相关坐标与调用链仍留在「阶段」节里备查。同日做完了 `hist` provider，
-> 开屏历史也从 5 条改成了 25 条（填满面板）。
+> 真出问题时再按报错查。相关坐标与调用链仍留在「阶段」节里备查。同日做完了 `hist` provider
+> 与 `:web` 唤出浏览器，开屏历史也从 5 条改成了 25 条（填满面板）。
 
 ## 待验证
 
 ```bash
-cargo test --release      # 全绿（2026-11-03 实测 93 passed，数字以输出为准）
+cargo test --release      # 全绿（2026-11-03 实测 98 passed，数字以输出为准）
 cargo clippy --release    # 零警告（2026-11-03 实测）
 tupa-launcher.exe --check # 55 项应用全部可解析、空输入列 55 条（2026-11-01 实测）
 ```

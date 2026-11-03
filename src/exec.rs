@@ -24,6 +24,9 @@ pub fn run(action: &Action) -> Result<String> {
         Action::FillInput(text) => Ok(i18n::filled(text)),
         Action::OpenUrl(url) => {
             open::that_detached(url).with_context(|| i18n::cannot("打开", "open", url))?;
+            // 浏览器可能把标签开在别的 workspace 里，让 GlazeWM 把它切到前台
+            // （后台线程，不卡面板隐藏）
+            crate::glazewm::focus_browser_async();
             Ok(i18n::opened(url))
         }
         Action::Reveal(path) => {
@@ -197,6 +200,7 @@ fn blog_admin(dir: &Path, url: &str) -> Result<String> {
     std::thread::spawn(move || {
         std::thread::sleep(std::time::Duration::from_millis(1500));
         let _ = open::that_detached(&url);
+        crate::glazewm::focus_browser_async();
     });
 
     Ok(i18n::blog_admin_started().to_string())

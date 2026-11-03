@@ -14,6 +14,7 @@ use crate::theme::ThemeOverrides;
 pub struct Config {
     pub general: General,
     pub daemon: Daemon,
+    pub glazewm: Glazewm,
     pub blog: Blog,
     pub theme: ThemeOverrides,
     pub apps: Vec<AppEntry>,
@@ -51,6 +52,26 @@ impl Default for Daemon {
             hotkey: "alt+`".to_string(),
             copilot_key: true,
             panel: "tui".to_string(),
+        }
+    }
+}
+
+/// `[glazewm]` —— GlazeWM 窗口管理器的集成
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct Glazewm {
+    /// 打开网页后，如果浏览器窗口在**另一个 workspace** 里（或被 WM 隐藏），
+    /// 让 GlazeWM 自己把那个 workspace 切到前台。没装 GlazeWM 时自动忽略。
+    ///
+    /// 关掉之后 `:web` / `:blog` 打开的网页只是在后台新建了一个标签，
+    /// 浏览器不在当前 workspace 时就看不到任何变化。
+    pub focus_browser: bool,
+}
+
+impl Default for Glazewm {
+    fn default() -> Self {
+        Glazewm {
+            focus_browser: true,
         }
     }
 }

@@ -24,6 +24,7 @@ src/
 ├── ui.rs          纯渲染：分列布局、详细信息、滚动、状态栏
 ├── exec.rs        执行动作（打开/启动/定位/提权/新窗口/新建文章/
 │                  用指定程序打开/开关写入）
+├── glazewm.rs     GlazeWM 集成（打开网页后切到浏览器所在 workspace）
 ├── actions.rs     actions.toml 解析 + 脚本执行（超时）+ 内置开关
 ├── config.rs      config.toml
 ├── i18n.rs        中英文案（所有用户可见字符串必须走这里）

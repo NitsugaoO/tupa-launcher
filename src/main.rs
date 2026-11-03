@@ -14,6 +14,7 @@ mod config;
 mod daemon;
 mod exec;
 mod favorites;
+mod glazewm;
 mod gui;
 mod history;
 mod i18n;

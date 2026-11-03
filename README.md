@@ -406,6 +406,15 @@ background panel overlay border fg muted dim faint accent good warn bad
 | `cloudflare_url` | `https://blog.wooyun.workers.dev` | Cloudflare Workers |
 | `admin_url` | `http://127.0.0.1:5173` | `pnpm admin` 起来的管理页 |
 
+`[glazewm]` 段（配合 [GlazeWM](https://github.com/glzr-io/glazewm) 窗口管理器）：
+
+| 键 | 默认 | 说明 |
+|---|---|---|
+| `focus_browser` | `true` | 打开网页后，如果浏览器窗口在别的 workspace / 被 WM 隐藏，让 GlazeWM 切过去（`glazewm query workspaces` → `focus --workspace`，失败静默）。没装 GlazeWM 时自动忽略 |
+
+为什么需要它：`open::that_detached` 只在浏览器里新建一个标签，窗口仍 `displayState=hidden`、
+工作区也不切，面板一隐藏就什么都看不到。
+
 ## 架构
 
 ```
@@ -414,6 +423,7 @@ src/
 ├── app.rs               状态机：输入解析、键位、补全、选择、与 worker 通信
 ├── ui.rs                纯渲染：分列布局 / 详细信息 / 选中行滚动 / 状态列
 ├── exec.rs              执行动作：打开文件 / 启动程序 / 定位 / 打开网址
+├── glazewm.rs           GlazeWM 集成：打开网页后把浏览器窗口切到前台
 ├── actions.rs           actions.toml 解析 + 脚本执行（超时）+ 内置开关
 ├── daemon.rs            常驻守护进程：低级键盘钩子 + 面板窗口管理（Windows）
 ├── config.rs            config.toml 加载
