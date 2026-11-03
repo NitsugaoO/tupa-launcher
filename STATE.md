@@ -1,6 +1,6 @@
 # tupa-launcher 状态
 
-updated: 2026-11-03 · code: `bd25422`（最后一次改动代码的提交）· 同步状态以 `git status -sb` 为准
+updated: 2026-11-03 · code: `e2b409e`（最后一次改动代码的提交）· 同步状态以 `git status -sb` 为准
 
 > 判断本文件是否过期：比较 `code` 与 `git log -1 --format=%h -- src Cargo.toml`。
 > 只改文档的提交不算过期。
