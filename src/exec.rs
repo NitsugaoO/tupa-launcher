@@ -247,48 +247,106 @@ fn detach_script(target_shell: &str, command: &str) -> Result<()> {
 }
 
 /// 开一个看得见的终端窗口执行命令（优先 Windows Terminal，没有就新开控制台）
+///
+/// ⚠ **PowerShell 脚本必须用 `-EncodedCommand` 传**：`wt` 把 `;` 当成它自己的命令
+/// 分隔符（**在引号里也照切**），于是 `-Command "Set-Location x; pi --session y"` 会被
+/// 切成两条，第二段 `" pi --session y"`（还带着前导空格）被当成可执行文件 →
+/// `[出现错误 2147942402 (0x80070002) ... 系统找不到指定的文件]`。
+/// base64 里没有 `;` 也没有空格，wt 就无从下刀。
+///
+/// 起始目录走 `wt -d <dir>`（不经 wt 时用 `current_dir`），命令里不再拼 `Set-Location`。
 fn spawn_console(command: &str, dir: Option<&Path>) -> Result<()> {
     let target_shell = shell();
 
-    // 要先切目录的话，把 cd 拼进命令里（两种 shell 语法不同）
-    let line = match dir {
-        Some(dir) if target_shell == "cmd.exe" => {
-            format!("cd /d \"{}\" && {command}", dir.display())
-        }
-        Some(dir) => format!("Set-Location -LiteralPath '{}'; {command}", dir.display()),
-        None => command.to_string(),
-    };
-
-    if let Some(wt) = which("wt") {
-        Command::new(wt)
-            .arg(target_shell)
-            .args(shell_args(&line, false))
-            .spawn()
-            .with_context(|| i18n::cannot("在新窗口执行", "run in a new window", command))?;
-        return Ok(());
-    }
-
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NEW_CONSOLE: u32 = 0x0000_0010;
-
-        Command::new(target_shell)
-            .args(shell_args(&line, false))
-            .creation_flags(CREATE_NEW_CONSOLE)
-            .spawn()
-            .with_context(|| i18n::cannot("在新窗口执行", "run in a new window", command))?;
-    }
+    // 非 Windows 只用来编译 / 跑测试，命令直接交给 sh
     #[cfg(not(windows))]
     {
+        let line = match dir {
+            Some(dir) => format!("cd '{}' && {command}", dir.display()),
+            None => command.to_string(),
+        };
         Command::new("sh")
             .arg("-c")
             .arg(&line)
             .spawn()
             .with_context(|| i18n::cannot("执行", "run", command))?;
+        return Ok(());
     }
 
+    // cmd.exe 没有 `-EncodedCommand`（`;` 在 cmd 里不是分隔符，但也躲不过 wt 的刀）
+    let args: Vec<String> = if target_shell == "cmd.exe" {
+        vec!["/K".to_string(), command.to_string()]
+    } else {
+        vec![
+            "-NoExit".to_string(),
+            "-EncodedCommand".to_string(),
+            encoded_command(command),
+        ]
+    };
+
+    if let Some(wt) = which("wt") {
+        let mut cmd = Command::new(wt);
+        if let Some(dir) = dir {
+            cmd.arg("-d").arg(dir);
+        }
+        cmd.arg(target_shell)
+            .args(&args)
+            .spawn()
+            .with_context(|| i18n::cannot("在新窗口执行", "run in a new window", command))?;
+        return Ok(());
+    }
+
+    let mut cmd = Command::new(target_shell);
+    cmd.args(&args);
+    if let Some(dir) = dir {
+        cmd.current_dir(dir);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NEW_CONSOLE: u32 = 0x0000_0010;
+        cmd.creation_flags(CREATE_NEW_CONSOLE);
+    }
+    cmd.spawn()
+        .with_context(|| i18n::cannot("在新窗口执行", "run in a new window", command))?;
+
     Ok(())
+}
+
+/// PowerShell 的 `-EncodedCommand`：**UTF-16LE** 字节的 base64
+///
+/// 5.1 和 7.x 都支持，而且编码后的参数里不含 `;` / 空格 / 引号，
+/// 能安全地作为 `wt` 的 commandline 参数传下去。
+fn encoded_command(script: &str) -> String {
+    let bytes: Vec<u8> = script.encode_utf16().flat_map(u16::to_le_bytes).collect();
+    base64(&bytes)
+}
+
+/// 标准 base64（带 `=` 填充）。只为 `-EncodedCommand` 服务，不引额外依赖。
+fn base64(data: &[u8]) -> String {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+    let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
+    for chunk in data.chunks(3) {
+        let b0 = chunk[0];
+        let b1 = chunk.get(1).copied().unwrap_or(0);
+        let b2 = chunk.get(2).copied().unwrap_or(0);
+        let n = (u32::from(b0) << 16) | (u32::from(b1) << 8) | u32::from(b2);
+
+        out.push(TABLE[(n >> 18) as usize & 63] as char);
+        out.push(TABLE[(n >> 12) as usize & 63] as char);
+        out.push(if chunk.len() > 1 {
+            TABLE[(n >> 6) as usize & 63] as char
+        } else {
+            '='
+        });
+        out.push(if chunk.len() > 2 {
+            TABLE[n as usize & 63] as char
+        } else {
+            '='
+        });
+    }
+    out
 }
 
 /// 启动一个程序。分三种情况：
@@ -462,6 +520,34 @@ mod tests {
     fn front_matter_escapes_quotes() {
         let text = front_matter("a: \"b\"");
         assert!(text.contains("title: \"a: \\\"b\\\"\""), "实际：{text}");
+    }
+
+    #[test]
+    fn base64_matches_known_vectors() {
+        assert_eq!(base64(b""), "");
+        assert_eq!(base64(b"f"), "Zg==");
+        assert_eq!(base64(b"fo"), "Zm8=");
+        assert_eq!(base64(b"foo"), "Zm9v");
+        assert_eq!(base64(b"foob"), "Zm9vYg==");
+        assert_eq!(base64(b"fooba"), "Zm9vYmE=");
+        assert_eq!(base64(b"foobar"), "Zm9vYmFy");
+    }
+
+    #[test]
+    fn encoded_command_is_utf16le() {
+        // "echo" 的 UTF-16LE 字节是 65 00 63 00 68 00 6f 00
+        assert_eq!(encoded_command("echo"), "ZQBjAGgAbwA=");
+    }
+
+    /// 回归：wt 把 `;` 当自己的分隔符，所以传给它的脚本里不能有 `;`
+    #[test]
+    fn encoded_command_has_no_semicolons() {
+        let encoded = encoded_command("Set-Location 'C:\\a b'; pi --session 'x;y'");
+        assert!(!encoded.contains(';'));
+        assert!(!encoded.contains(' '));
+        assert!(encoded
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '/' | '=')));
     }
 }
 

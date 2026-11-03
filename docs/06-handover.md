@@ -128,7 +128,8 @@ Control::{Run, Toggle{value}, Choice{options,index}, Number{value,min,max,step,s
 | `last_visit_time` 单位 | 是 **Chromium 微秒**（1601 起），`/1_000_000 - 11_644_473_600`；网上的 100ns 是错的 |
 | `Ctrl+Tab` | 被 Windows Terminal 默认占用，面板收不到；备用键 `Ctrl+O` |
 | 状态栏提示宽度 | 英文比中文宽，必须按 `UnicodeWidthStr::width` 算，写死会截断 |
-| PowerShell 路径 | 新窗口里切目录用 `Set-Location -LiteralPath '…'`，cmd 用 `cd /d "…" && …` |
+| PowerShell 新窗口的起始目录 | 用 `wt -d <目录>`（不经 wt 时用 `Command::current_dir`）；**不要拼 `Set-Location …; 命令`**，见下一行 |
+| `wt` 把 `;` 当命令分隔符 | **连引号里也照切**。`-Command "Set-Location x; pi --session y"` 会被切成两条，第二段带前导空格的 `" pi --session y"` 被当成可执行文件 → `[错误 2147942402 (0x80070002)] 系统找不到指定的文件`（2026-11-03 `:pi` 踩到）。给 PowerShell 传脚本一律用 `-EncodedCommand`（UTF-16LE base64，不含 `;` 和空格） |
 | 中文字形/光标 | 光标列要按显示宽度算（`ui::cursor_column`），输入超宽时用 `trim_left` 跟随 |
 | `cmd /C` 里的引号 / 管道 | 内置 PowerShell 用 `-EncodedCommand`（UTF-16LE base64）绕开转义；用户脚本自己小心 |
 | `root\wmi` 实例权限 | 普通用户 `Get-CimInstance` → `0x80041003`；管理员下 ThinkBook 的 `LENOVO_GAMEZONE_DATA` 方法又报「无效的对象」（不是 Gaming 系列） |

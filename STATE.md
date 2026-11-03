@@ -74,6 +74,13 @@ updated: 2026-11-03 · code: `bd25422`（最后一次改动代码的提交）· 
   `elevated` 不参与匹配）。开关 `[general] frecency`（默认 true，关掉就回时间序 / 配置顺序）。
   `@hist` 不动（仍按相关度 / 最近）。顺带修了 `HISTORY_LIMIT` 被回退成 5 的问题（现 25，
   加了单测钉住 ≥20）
+- **新窗口执行修好了（2026-11-03）**：`:pi` 回车只开终端、不启动 pi，报
+  `[错误 2147942402 (0x80070002)] 系统找不到指定的文件`。原因：`spawn_console` 把
+  `Set-Location -LiteralPath '…'; <命令>` 当 `-Command` 参数交给 wt，而 **wt 把 `;` 当自己的
+  命令分隔符（引号里也照切）**，第二段带前导空格的 `" pi --session …"` 被当成可执行文件。
+  现在：起始目录用 `wt -d <目录>`，PowerShell 脚本用 `-EncodedCommand`（UTF-16LE base64，
+  不含 `;` / 空格 / 引号）。`spawn_console` 是共用的，所以 `:run` 的可见窗口、
+  `:go:yazi` / `:go:pi` 一并修好；坑已记入 `docs/06-handover.md` §4
 
 ## 下一步
 
@@ -93,7 +100,7 @@ updated: 2026-11-03 · code: `bd25422`（最后一次改动代码的提交）· 
 ## 待验证
 
 ```bash
-cargo test --release      # 全绿（2026-11-03 实测 102 passed，数字以输出为准）
+cargo test --release      # 全绿（2026-11-03 实测 107 passed，数字以输出为准）
 cargo clippy --release    # 零警告（2026-11-03 实测）
 tupa-launcher.exe --check # 55 项应用全部可解析、空输入列 55 条（2026-11-01 实测）
 ```
