@@ -7,6 +7,7 @@ use fuzzy_matcher::skim::SkimMatcherV2;
 
 use super::{Action, Item, Kind, Provider};
 use crate::config::{AppEntry, Config};
+use crate::history;
 
 pub struct Apps {
     entries: Vec<AppEntry>,
@@ -15,6 +16,8 @@ pub struct Apps {
     /// 与 entries 一一对应：副标题（`.lnk` 已解析成目标 exe 的文件名）
     display: Vec<String>,
     max: usize,
+    /// 空查询是否按 frecency（使用频率 × 新鲜度）排序
+    frecency: bool,
 }
 
 impl Apps {
@@ -28,8 +31,59 @@ impl Apps {
             keys,
             display,
             max: cfg.general.max_results,
+            frecency: cfg.general.frecency,
         }
     }
+
+    /// 空查询的顺序：用过的按 frecency 排在前面，没用过的保持配置顺序。
+    ///
+    /// 历史里记的是完整的 `Action::Launch`，按 `command + args` 精确对回配置项
+    /// （`elevated` 不参与——当初是用 `:app:admin` 启动的也算同一个应用）。
+    fn ranked_by_usage(&self) -> Vec<(i64, usize)> {
+        let usage = if self.frecency {
+            usage_scores()
+        } else {
+            Vec::new()
+        };
+
+        (0..self.entries.len())
+            .map(|i| {
+                let entry = &self.entries[i];
+                let score = usage
+                    .iter()
+                    .filter(|(command, args, _)| command == &entry.command && args == &entry.args)
+                    .map(|(_, _, score)| *score)
+                    .sum::<u64>();
+                (score as i64, i)
+            })
+            .collect()
+    }
+}
+
+/// 历史里每个应用（按 `command + args` 分组）的 frecency 总分
+fn usage_scores() -> Vec<(String, Vec<String>, u64)> {
+    let now = history::now_secs();
+    let mut scores: Vec<(String, Vec<String>, u64)> = Vec::new();
+
+    for entry in history::load().iter() {
+        let Some(item) = &entry.item else { continue };
+        if item.kind != Kind::App {
+            continue;
+        }
+        let Action::Launch { command, args, .. } = &item.action else {
+            continue;
+        };
+        let score = history::score(entry, now);
+        // 同一个应用可能被不同的输入行记过（`@app code` / `@app vsc`），分数累加
+        match scores
+            .iter_mut()
+            .find(|(known, known_args, _)| known == command && known_args == args)
+        {
+            Some(slot) => slot.2 += score,
+            None => scores.push((command.clone(), args.clone(), score)),
+        }
+    }
+    scores
 }
 
 /// 副标题只显示可执行文件名，不把整条路径摊出来。
@@ -77,8 +131,8 @@ impl Provider for Apps {
         let matcher = SkimMatcherV2::default();
 
         let mut hits: Vec<(i64, usize)> = if q.is_empty() {
-            // 空查询：按配置顺序原样列出（相当于"收藏"）
-            (0..self.entries.len()).map(|i| (-(i as i64), i)).collect()
+            // 空查询：常用的按 frecency 靠前，其余保持配置顺序（相当于"收藏"）
+            self.ranked_by_usage()
         } else {
             self.keys
                 .iter()

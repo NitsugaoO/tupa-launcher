@@ -295,6 +295,10 @@ set = '... -Value {value}'
 动作**执行成功**后自动记录（失败的、只查询没执行的都不记），存在
 `~/.config/tupa-launcher/history.json`，去重、最多 200 条。
 
+每条还带**执行次数**与**最后执行时间**，开屏（最近 25 条）与 `@app` 的空查询按
+`次数 × 新鲜度` 排序（一小时内的权重 400 / 一天 200 / 一周 100 / 一月 50 / 更早 25），
+所以常用的会自动浮到前面；`[general] frecency = false` 可以关掉。
+
 | 键 | 作用 |
 |---|---|
 | `Ctrl+↑` | 上一条（更早的）输入 |
@@ -395,6 +399,7 @@ background panel overlay border fg muted dim faint accent good warn bad
 | `command_prefix` | `:` | 命令前缀，也是修饰符分隔符；想用 `@` 就改成 `"@"` |
 | `language` | `zh` | 界面语言：`zh` / `en`（所有界面文案、命令描述、`--help` 都会跟着变） |
 | `show_hints` | `true` | 右下角的快捷键提示是否显示（`false` 只留左侧状态） |
+| `frecency` | `true` | 开屏历史与 `@app` 空查询按「使用频率 × 新鲜度」排序（关掉后：开屏按时间、`@app` 按配置顺序） |
 
 `[blog]` 段（`:blog` 用）：
 

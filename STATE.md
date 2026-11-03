@@ -60,30 +60,34 @@ updated: 2026-11-03 · code: `a371fe0`（最后一次改动代码的提交）· 
   **先 workspace 后 container 不能反** —— 跨 workspace 直接 `--container-id` 会先把 WM
   内部焦点改掉，之后 `--workspace` 变成 no-op，窗口还是不显示（那边 2026-11-01 实测）；
   也没用裸 `SetForegroundWindow`（只改显示不改前台，`isDisplayed` 不同步，layout 会乱）
+- **frecency 排序（2026-11-03）**：`history::Entry` 加了 `hits` / `last_used`（都 `#[serde(default)]`，
+  老 `history.json` 读出来 hits=1、last_used=0，不会解析失败），`push` 命中同一条就 `hits += 1`
+  并刷新时间。`history::score()` = 次数 × 新鲜度权重（×100 定点：1h 内 400 / 1d 200 / 1w 100 /
+  1m 50 / 更早 25），`sort_frecency()` 同分按 last_used 降序。作用两处：开屏那 25 条历史、
+  `@app` 空查询（历史里 `Kind::App` 的 `Action::Launch` 按 `command + args` 聚合成总分，
+  `elevated` 不参与匹配）。开关 `[general] frecency`（默认 true，关掉就回时间序 / 配置顺序）。
+  `@hist` 不动（仍按相关度 / 最近）。顺带修了 `HISTORY_LIMIT` 被回退成 5 的问题（现 25，
+  加了单测钉住 ≥20）
 
 ## 下一步
 
-1. **frecency 排序（现在只按「最近」）**：`history::Entry` 加 `hits: u32` 与 `last_used`（unix 秒），
-   全部 `#[serde(default)]` 兼容旧 `history.json`（老记录 hits 记 1）；`push` 里命中同一条就
-   `hits += 1`。排序改成 `hits × 新鲜度衰减`，影响两处：开屏那 25 条历史、`@app`/空查询的列表。
-   注意别把 `history::LIMIT = 200` 撑大，也别让排序打乱开屏的「收藏在前」结构
-2. **GUI 打磨**（[`docs/07-shell-handover.md`](docs/07-shell-handover.md) §1「还没做的」）：
+1. **GUI 打磨**（[`docs/07-shell-handover.md`](docs/07-shell-handover.md) §1「还没做的」）：
    圆角 / 阴影 / 淡入、鼠标点击、滚动条、DPI 切换实测、窗口尺寸配置项
-3. 实机跑一段时间 GUI 后，再把 `[daemon] panel` 的默认值从 `tui` 改成 `gui`（保留 TUI 兜底）
-4. 主题并入 `~/Themes/generator/generate.py`（现在 `theme.toml` 是手改的，权威色板是
+2. 实机跑一段时间 GUI 后，再把 `[daemon] panel` 的默认值从 `tui` 改成 `gui`（保留 TUI 兜底）
+3. 主题并入 `~/Themes/generator/generate.py`（现在 `theme.toml` 是手改的，权威色板是
    `~/Themes/themes/everforest/tokens.yaml`）：让生成器直接产出 `~/.config/tupa-launcher/theme.toml`，
    跟博客 / pi / 终端主题同一个来源
-5. **`config.example.toml` 仍只有 7 个示例应用**（本机已 55 项）：倾向**保持精简示例**
+4. **`config.example.toml` 仍只有 7 个示例应用**（本机已 55 项）：倾向**保持精简示例**
    （只教语法）；若决定同步，改的是**仓库文件**，改完需提交推送
 
 > 2026-11-03 删掉了三条「待实机验」（节能模式 / `:blog` / `:pi:clean`）：都是已经在用的功能，
-> 真出问题时再按报错查。相关坐标与调用链仍留在「阶段」节里备查。同日做完了 `hist` provider
-> 与 `:web` 唤出浏览器，开屏历史也从 5 条改成了 25 条（填满面板）。
+> 真出问题时再按报错查。相关坐标与调用链仍留在「阶段」节里备查。同日做完了 `hist` provider、
+> `:web` 唤出浏览器、frecency，开屏历史也从 5 条改成了 25 条（填满面板）。
 
 ## 待验证
 
 ```bash
-cargo test --release      # 全绿（2026-11-03 实测 98 passed，数字以输出为准）
+cargo test --release      # 全绿（2026-11-03 实测 102 passed，数字以输出为准）
 cargo clippy --release    # 零警告（2026-11-03 实测）
 tupa-launcher.exe --check # 55 项应用全部可解析、空输入列 55 条（2026-11-01 实测）
 ```

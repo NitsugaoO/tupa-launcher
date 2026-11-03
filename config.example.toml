@@ -15,6 +15,9 @@ prefill_colon = false
 # 界面语言：zh / en
 # 右下角是否显示快捷键提示
 show_hints = true
+# 开屏与 @app 空查询是否按 frecency（使用频率 × 新鲜度）排序
+# 关掉后：开屏历史按时间、@app 按配置顺序
+frecency = true
 language = "zh"
 command_prefix = ":"
 

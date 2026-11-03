@@ -97,6 +97,10 @@ pub struct General {
     pub language: String,
     /// 是否在右下角显示快捷键提示
     pub show_hints: bool,
+    /// 开屏与 `@app` 空查询是否按 frecency（使用频率 × 新鲜度）排序。
+    ///
+    /// 关掉之后：开屏历史按时间、`@app` 按配置顺序。
+    pub frecency: bool,
 }
 
 impl Default for General {
@@ -109,6 +113,7 @@ impl Default for General {
             command_prefix: ":".to_string(),
             language: "zh".to_string(),
             show_hints: true,
+            frecency: true,
         }
     }
 }

@@ -99,6 +99,8 @@ mod tests {
         history::Entry {
             line: line.to_string(),
             item,
+            hits: 1,
+            last_used: 0,
         }
     }
 

@@ -14,8 +14,11 @@ use crate::{favorites, history};
 /// 这个 provider 的关键字（只用于反查下标，不参与输入解析）
 pub const KEYWORD: &str = "home";
 
-/// 开屏最多列几条历史（收藏不算在内）
-const HISTORY_LIMIT: usize = 5;
+/// 开屏最多列几条历史（收藏不算在内）。
+///
+/// 面板是 55% 屏高，本机 1536×960 下列表区约 28 行；5 条收藏 + 本值 ≈ 填满一屏，
+/// 再多就得滚动。收藏数量变化时会有几行出入，滚动始终可用。
+const HISTORY_LIMIT: usize = 25;
 
 /// 收藏可能是各种来源的混装，和 `fav` 用同一套三列布局
 const COLUMNS: &[Column] = &[
@@ -26,12 +29,14 @@ const COLUMNS: &[Column] = &[
 
 pub struct Home {
     max: usize,
+    frecency: bool,
 }
 
 impl Home {
     pub fn new(cfg: &Config) -> Self {
         Home {
             max: cfg.general.max_results,
+            frecency: cfg.general.frecency,
         }
     }
 }
@@ -63,9 +68,14 @@ impl Provider for Home {
         }
 
         // 2) 最近执行的条目：有快照的（打开过的文件 / 网页）直接执行，
-        //    只有输入行的（老记录）就补回输入框
+        //    只有输入行的（老记录）就补回输入框。
+        //    顺序按 frecency（执行次数 × 新鲜度），常用的自然靠前
+        let mut entries = history::load();
+        if self.frecency {
+            history::sort_frecency(&mut entries, history::now_secs());
+        }
         let mut seen: Vec<Action> = items.iter().map(|item| item.action.clone()).collect();
-        let recent: Vec<Item> = history::load()
+        let recent: Vec<Item> = entries
             .iter()
             .filter(|entry| keyword.is_empty() || matcher.fuzzy_match(&entry.line, keyword).is_some())
             .map(history::to_item)
@@ -95,5 +105,11 @@ mod tests {
         // 收藏是 3 列混装（app / file / web 都往里放），历史快照可能只有 2 列；
         // 布局按最多的那一行算，短行尾部留空
         assert_eq!(COLUMNS.len(), 3);
+    }
+
+    #[test]
+    fn history_limit_fills_the_panel() {
+        // 面板可视约 28 行，历史太少就会大片留白（曾被 fmt 误回退成 5 过一次）
+        assert!(HISTORY_LIMIT >= 20, "开屏历史太少，面板会空一大片");
     }
 }

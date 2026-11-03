@@ -985,10 +985,14 @@ mod tests {
             history::Entry {
                 line: "app code".to_string(),
                 item: None,
+                hits: 1,
+                last_used: 0,
             },
             history::Entry {
                 line: "报告".to_string(),
                 item: None,
+                hits: 1,
+                last_used: 0,
             },
         ];
         app
