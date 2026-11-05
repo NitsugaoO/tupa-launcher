@@ -1,10 +1,12 @@
 //! `blog` —— 自己博客（Hexo）的日常操作：新建文章、本地预览、管理页、站点入口。
 //!
 //! ```text
-//! blog              → 五个入口：新建文章 / 本地预览 / 管理页 / GitHub Pages / Cloudflare
+//! blog              → 入口：新建文章 / 本地预览 / 管理页 / GitHub Pages / Cloudflare
+//!                     （本地服务在跑时，紧跟一条「停止本地预览 / 停止管理页」）
 //! blog:new 周末折腾  → 新建 source/_posts/周末折腾.md（带 front matter）并在 VSCode 里打开
 //! blog:new          → 列最近改过的文章（回车用 VSCode 打开）
 //! blog:manage       → 后台跑 `pnpm admin`，端口就绪后打开管理页（127.0.0.1:5173）
+//! blog:stop         → 一次停掉所有在跑的本地服务（预览 / 管理页）
 //! ```
 //!
 //! 仓库目录与三个网址都在 `config.toml` 的 `[blog]` 里（目录留空 = `~/blog`）。
@@ -15,19 +17,21 @@
 //! - 没在跑 → 后台起 `pnpm server` / `pnpm admin`，等端口监听上再打开
 //!
 //! 列表里这两行的状态列是**查询时现探的**（`query` 在后台线程，150ms × 2 的探测不会卡界面）。
+//! 静默起的进程没有窗口可以关，所以运行中会多出「停止…」条目（`Action::ServeStop`）：
+//! 只杀 node / pnpm / cmd，端口被别的东西占着时只报错不动手。
 //!
 //! 新建文章**不覆盖**：同名文件已存在时直接打开它，列表里也会标出来。
 
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-use super::{Action, Column, Item, Kind, Provider};
+use super::{Action, Column, Item, Kind, Provider, ServeTarget};
 use crate::config::Config;
 use crate::i18n;
 use crate::serve;
 
-/// 认识的修饰符（`blog:new` / `blog:manage`）
-const FLAGS: &[&str] = &["new", "manage"];
+/// 认识的修饰符（`blog:new` / `blog:manage` / `blog:stop`）
+const FLAGS: &[&str] = &["new", "manage", "stop"];
 
 /// Windows 不允许进文件名的字符
 const ILLEGAL: &[char] = &['\\', '/', ':', '*', '?', '"', '<', '>', '|'];
@@ -90,33 +94,50 @@ impl Blog {
         )
     }
 
-    /// 一个「本地服务」条目：状态列现探（端口在跑 / 没跑）
-    fn local_item(&self, label: &str, url: &str, action: Action) -> Item {
-        let state = match serve::port_of(url) {
-            Some(port) if serve::is_listening(port) => i18n::serve_running(),
-            _ => i18n::serve_stopped(),
+    /// 一个「本地服务」的条目们：服务行（状态列现探）+ 运行中的「停止…」行
+    fn service_items(&self, label: &str, url: &str, action: Action) -> Vec<Item> {
+        let port = serve::port_of(url);
+        let running = port.is_some_and(serve::is_listening);
+        let state = if running {
+            i18n::serve_running()
+        } else {
+            i18n::serve_state_idle()
         };
-        Item::new(
+
+        let mut items = vec![Item::new(
             Kind::Web,
             vec![label.to_string(), url.to_string(), state.to_string()],
             action,
-        )
+        )];
+
+        // 静默进程没有窗口可关：在跑就紧跟一条停止入口
+        if let (true, Some(port)) = (running, port) {
+            items.push(self.stop_item(label, port));
+        }
+
+        items
     }
 
-    /// 不带修饰符：五个入口
+    /// 不带修饰符：入口 + 本地服务状态（运行中时多一条「停止…」）
     fn entries(&self) -> Vec<Item> {
-        let mut items = vec![
-            self.new_post_item(),
-            self.local_item(
-                i18n::blog_local_preview(),
-                &self.local,
-                Action::BlogPreview {
-                    dir: self.dir.clone(),
-                    url: self.local.clone(),
-                },
-            ),
-            self.local_item(i18n::blog_admin(), &self.admin, self.manage_item_action()),
-        ];
+        let mut items = vec![self.new_post_item()];
+
+        items.extend(self.service_items(
+            i18n::blog_local_preview(),
+            &self.local,
+            Action::BlogPreview {
+                dir: self.dir.clone(),
+                url: self.local.clone(),
+            },
+        ));
+        items.extend(self.service_items(
+            i18n::blog_admin(),
+            &self.admin,
+            Action::BlogAdmin {
+                dir: self.dir.clone(),
+                url: self.admin.clone(),
+            },
+        ));
 
         // 远端站点：没有本地服务，第三列空着（只占宽度，什么都不显示）
         for (label, url) in [
@@ -133,15 +154,50 @@ impl Blog {
         items
     }
 
-    fn manage_item_action(&self) -> Action {
-        Action::BlogAdmin {
-            dir: self.dir.clone(),
-            url: self.admin.clone(),
-        }
+    /// 「停止本地预览 / 停止管理页」
+    fn stop_item(&self, label: &str, port: u16) -> Item {
+        Item::new(
+            Kind::Command,
+            vec![
+                i18n::serve_stop_label(label),
+                i18n::serve_stop_hint(port),
+            ],
+            Action::ServeStop {
+                port,
+                name: label.to_string(),
+            },
+        )
     }
 
-    fn manage_item(&self) -> Item {
-        self.local_item(i18n::blog_admin(), &self.admin, self.manage_item_action())
+    /// `blog:stop`：一次停掉所有在跑的本地服务（一个都没跑就返回空列表）
+    fn stop_all(&self) -> Vec<Item> {
+        let targets: Vec<ServeTarget> = [
+            (i18n::blog_local_preview(), &self.local),
+            (i18n::blog_admin(), &self.admin),
+        ]
+        .into_iter()
+        .filter_map(|(name, url)| {
+            let port = serve::port_of(url)?;
+            serve::is_listening(port).then(|| ServeTarget {
+                port,
+                name: name.to_string(),
+            })
+        })
+        .collect();
+
+        if targets.is_empty() {
+            return Vec::new();
+        }
+
+        let count = targets.len();
+        vec![Item::new(
+            Kind::Command,
+            vec![
+                i18n::serve_stop_all().to_string(),
+                i18n::serve_stop_all_hint(count),
+            ],
+            Action::ServeStopAll { targets },
+        )]
     }
 
     /// `blog:new [标题]`
@@ -246,7 +302,17 @@ impl Provider for Blog {
             return self.new_post(args.trim());
         }
         if flags.iter().any(|flag| flag == "manage") {
-            return vec![self.manage_item()];
+            return self.service_items(
+                i18n::blog_admin(),
+                &self.admin,
+                Action::BlogAdmin {
+                    dir: self.dir.clone(),
+                    url: self.admin.clone(),
+                },
+            );
+        }
+        if flags.iter().any(|flag| flag == "stop") {
+            return self.stop_all();
         }
         self.entries()
     }

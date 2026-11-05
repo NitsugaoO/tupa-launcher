@@ -246,8 +246,103 @@ pub fn serve_running() -> &'static str {
     t("已在运行", "running")
 }
 
-pub fn serve_stopped() -> &'static str {
+pub fn serve_state_idle() -> &'static str {
     t("未启动，回车开", "stopped, Enter starts")
+}
+
+// --- 停止静默后台的本地服务 ---
+
+pub fn serve_stop_label(name: &str) -> String {
+    s(|| format!("停止{name}"), || format!("Stop {name}"))
+}
+
+pub fn serve_stop_hint(port: u16) -> String {
+    s(
+        || format!("杀掉 :{port} 上的进程（含子进程）"),
+        || format!("kill the process tree on :{port}"),
+    )
+}
+
+pub fn serve_stop_all() -> &'static str {
+    t("停止本地服务", "Stop local services")
+}
+
+pub fn serve_stop_all_hint(count: usize) -> String {
+    s(
+        || format!("一次停掉 {count} 个在跑的服务"),
+        || format!("stop all {count} running services"),
+    )
+}
+
+pub fn serve_stopped(name: &str, pids: &str) -> String {
+    s(
+        || format!("已停止{name}（{pids}）"),
+        || format!("Stopped {name} ({pids})"),
+    )
+}
+
+pub fn serve_stop_nothing(name: &str) -> String {
+    s(
+        || format!("{name} 没有在运行"),
+        || format!("{name} is not running"),
+    )
+}
+
+/// 端口被别的东西占着（不是我们起的 node）—— 不能顺手杀
+pub fn serve_not_ours(process: &str, pid: u32) -> String {
+    let process = if process.is_empty() { "?" } else { process };
+    s(
+        || format!("端口被 {process}(PID {pid}) 占用，不是本地服务，没动它"),
+        || format!("port held by {process} (PID {pid}), not a local service - left it alone"),
+    )
+}
+
+pub fn serve_stop_failed(pid: u32, error: &str) -> String {
+    s(
+        || format!("停 PID {pid} 失败：{error}"),
+        || format!("Failed to kill PID {pid}: {error}"),
+    )
+}
+
+pub fn serve_stopped_all(count: usize) -> String {
+    s(
+        || format!("已停止 {count} 个本地服务"),
+        || format!("Stopped {count} local services"),
+    )
+}
+
+pub fn serve_stop_batch(done: usize, failed: &str) -> String {
+    s(
+        || format!("已停止 {done} 个；失败：{failed}"),
+        || format!("Stopped {done}; failed: {failed}"),
+    )
+}
+
+pub fn serve_stop_none() -> &'static str {
+    t("没有在运行的本地服务", "No local services are running")
+}
+
+pub fn serve_stop_detail(port: u16) -> String {
+    s(
+        || format!("停掉监听 :{port} 的进程"),
+        || format!("kill whatever listens on :{port}"),
+    )
+}
+
+pub fn serve_stop_detail_all(ports: &str) -> String {
+    s(
+        || format!("停掉 {ports} 上的本地服务"),
+        || format!("stop local services on {ports}"),
+    )
+}
+
+pub fn serve_pids(list: &str) -> String {
+    s(|| format!("PID {list}"), || format!("PID {list}"))
+}
+
+/// 拼接多条提示时的分隔符（中文用全角分号）
+pub fn list_separator() -> &'static str {
+    t("；", "; ")
 }
 
 pub fn blog_new_post_hint() -> &'static str {
@@ -791,7 +886,7 @@ pub fn help() -> String {
   :go <路径>       跳转目录
   :web <关键词>    搜索浏览历史
   :hist <关键词>   搜索命令历史
-  :blog [new|manage]  博客入口（预览 / 管理页 / 新建文章）
+  :blog [new|manage|stop]  博客入口（预览 / 管理页 / 新建文章 / 停止本地服务）
   :fav [类型]      收藏
   :cfg [关键词]    查看配置
   :set [关键词]    开关 / 选项 / 数值
@@ -834,7 +929,7 @@ Commands (prefix defaults to :, configurable)
   :go <path>        jump to a folder
   :web <keyword>    search browser history
   :hist <keyword>   search command history
-  :blog [new|manage]  blog entries (preview / admin / new post)
+  :blog [new|manage|stop]  blog entries (preview / admin / new post / stop)
   :fav [kind]       favorites
   :cfg [keyword]    inspect config
   :set [keyword]   toggles & values

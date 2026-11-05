@@ -90,6 +90,9 @@ pub fn run(action: &Action) -> Result<String> {
         Action::BlogAdmin { dir, url } => serve_and_open(dir, "pnpm admin", url),
         // 博客本地预览：同上，命令换成 `pnpm server`
         Action::BlogPreview { dir, url } => serve_and_open(dir, "pnpm server", url),
+        // 停掉静默后台的本地服务（没有窗口可关，只能从这里停）
+        Action::ServeStop { port, name } => serve_stop(*port, name),
+        Action::ServeStopAll { targets } => serve_stop_all(targets),
         Action::OpenInEditor { file, line } => {
             open_in_editor(file, *line)?;
             Ok(i18n::opened_in_editor(&short_name(file), *line))
@@ -228,6 +231,78 @@ fn serve_and_open(dir: &Path, command: &str, url: &str) -> Result<String> {
 fn open_and_focus(url: &str) {
     let _ = open::that_detached(url);
     crate::glazewm::focus_browser_async();
+}
+
+/// 停掉占着某个端口的本地服务（`pnpm server` / `pnpm admin` 都是无窗口的后台进程）。
+///
+/// 两道保险：
+///
+/// 1. 只杀 node / pnpm / cmd —— 端口可能被别的程序占着（那就不是我们起的），
+///    顺手杀掉别人的窗口/浏览器是灾难
+/// 2. `taskkill /T` 带子进程：`pnpm` 会拉起 node，只杀父进程会留下孤儿占着端口
+fn serve_stop(port: u16, name: &str) -> Result<String> {
+    let listeners = serve::listeners(port);
+    if listeners.is_empty() {
+        return Ok(i18n::serve_stop_nothing(name));
+    }
+
+    let mut killed: Vec<u32> = Vec::new();
+    let mut notes: Vec<String> = Vec::new();
+
+    for listener in listeners {
+        if !serve::is_our_service(&listener.name) {
+            notes.push(i18n::serve_not_ours(&listener.name, listener.pid));
+            continue;
+        }
+        match serve::kill_pid(listener.pid) {
+            Ok(()) => killed.push(listener.pid),
+            Err(error) => notes.push(i18n::serve_stop_failed(listener.pid, &error)),
+        }
+    }
+
+    if killed.is_empty() {
+        bail!("{}", notes.join(i18n::list_separator()));
+    }
+
+    let message = i18n::serve_stopped(name, &port_pids(&killed));
+    if notes.is_empty() {
+        Ok(message)
+    } else {
+        Ok(format!("{message}{}{}", i18n::list_separator(), notes.join(i18n::list_separator())))
+    }
+}
+
+/// `:blog:stop` —— 一次停掉所有在跑的本地服务（失败不中断，最后汇总）
+fn serve_stop_all(targets: &[crate::providers::ServeTarget]) -> Result<String> {
+    if targets.is_empty() {
+        return Ok(i18n::serve_stop_none().to_string());
+    }
+
+    let mut done = 0usize;
+    let mut failed: Vec<String> = Vec::new();
+
+    for target in targets {
+        match serve_stop(target.port, &target.name) {
+            Ok(_) => done += 1,
+            Err(error) => failed.push(format!("{error:#}")),
+        }
+    }
+
+    if failed.is_empty() {
+        return Ok(i18n::serve_stopped_all(done));
+    }
+
+    let message = i18n::serve_stop_batch(done, &failed.join(i18n::list_separator()));
+    if done == 0 {
+        bail!("{message}");
+    }
+    Ok(message)
+}
+
+/// `[1234, 5678]` → `PID 1234, 5678`
+fn port_pids(pids: &[u32]) -> String {
+    let list: Vec<String> = pids.iter().map(u32::to_string).collect();
+    i18n::serve_pids(&list.join(", "))
 }
 
 /// 优先 PowerShell 7（pwsh），退回 Windows PowerShell，再退回 cmd

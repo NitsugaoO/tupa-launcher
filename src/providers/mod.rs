@@ -261,6 +261,10 @@ pub enum Action {
     BlogAdmin { dir: PathBuf, url: String },
     /// 后台跑 `pnpm server`（Hexo 本地预览），就绪后打开预览页
     BlogPreview { dir: PathBuf, url: String },
+    /// 停掉占着这个端口的本地服务（无窗口的后台进程，只能从这里关）
+    ServeStop { port: u16, name: String },
+    /// 一次停掉所有在跑的本地服务（`:blog:stop`）
+    ServeStopAll { targets: Vec<ServeTarget> },
     /// 把面板输入替换成这段文本（命令列表用，不执行任何东西）
     FillInput(String),
     /// 把 `actions.toml` 里的某个开关 / 选项 / 数值设成新值
@@ -269,6 +273,14 @@ pub enum Action {
     CleanSession { path: PathBuf, mode: CleanMode },
     /// 一次处理全部候选（`:pi:cleanall`）：回车才执行
     CleanBatch { ops: Vec<CleanOp> },
+}
+
+/// [`Action::ServeStopAll`] 的一项
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ServeTarget {
+    pub port: u16,
+    /// 用户可见的称呼（`本地预览`），用在结果 / 错误文案里
+    pub name: String,
 }
 
 /// 批量清理里的一项
@@ -377,6 +389,11 @@ impl Item {
             Action::CreateBlogPost { path, .. } => path.display().to_string(),
             Action::BlogAdmin { dir, url } => format!("pnpm admin · {} · {url}", dir.display()),
             Action::BlogPreview { dir, url } => format!("pnpm server · {} · {url}", dir.display()),
+            Action::ServeStop { port, .. } => crate::i18n::serve_stop_detail(*port),
+            Action::ServeStopAll { targets } => {
+                let ports: Vec<String> = targets.iter().map(|t| format!(":{}", t.port)).collect();
+                crate::i18n::serve_stop_detail_all(&ports.join(", "))
+            }
             Action::SetControl { id, value } => format!("{id} = {value}"),
             Action::CleanSession { path, .. } => path.display().to_string(),
             Action::CleanBatch { .. } => return None,
@@ -517,7 +534,7 @@ pub fn commands_index(infos: &[ProviderInfo]) -> Option<usize> {
 /// `week`/`month`/`all` 时间范围、`url` 直接打开网址）。
 pub const KNOWN_FLAGS: &[&str] = &[
     "admin", "bg", "week", "month", "all", "url", "title", "yazi", "pi", "code", "clean",
-    "cleanall", "restore", "new", "manage",
+    "cleanall", "restore", "new", "manage", "stop",
 ];
 
 /// 输入行的解析结果

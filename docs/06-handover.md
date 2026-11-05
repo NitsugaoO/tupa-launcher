@@ -148,6 +148,7 @@ Control::{Run, Toggle{value}, Choice{options,index}, Number{value,min,max,step,s
 | `pnpm` 是 `.cmd` | 不能 `Command::new("pnpm")`；走 `pwsh -Command "pnpm admin"` + `.current_dir()`（和 `RunCommand` 共用 `shell_args`） |
 | 本地服务无条件 spawn | 旧 `blog_admin` 每次回车都起一个 `pnpm admin`：连点两次 = 第二个 node 端口冲突 → 管理页白屏。Hexo 实测 **5.2 秒**（2026-11-05）才监听 4000，固定 `sleep 1.5s` 后开浏览器就是错误页 |
 | 本地服务就绪判断 | 用 `src/serve.rs`：先探端口（**IPv4 与 IPv6 都试**，Node 不指定 host 时可能只绑 `::1`）→ 在跑就只开浏览器；没跑才 spawn 并轮询最多 `READY_TIMEOUT`（20s），超时**报错**而不是开空白页 |
+| 停静默后台 | 进程是 `Stdio::null` 起的（无窗口），只能从面板停：`netstat -ano -p tcp` 找 PID（`0.0.0.0:4000` 与 `[::]:4000` 是同一个进程，要去重；`ends_with(":4000")` 不会误中 `:14000`）+ `tasklist /FO CSV` 拿进程名 + `taskkill /PID x /T /F`。**只杀 node/pnpm/cmd**：端口被别的程序占着时 `is_listening` 也为真，顺手杀就是灾难 |
 
 ## 5. 开关引擎（v0.7 已完成）
 

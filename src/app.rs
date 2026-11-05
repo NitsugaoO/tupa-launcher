@@ -856,6 +856,8 @@ impl App {
             | Action::CreateBlogPost { .. }
             | Action::BlogAdmin { .. }
             | Action::BlogPreview { .. }
+            | Action::ServeStop { .. }
+            | Action::ServeStopAll { .. }
             | Action::SetControl { .. }
             | Action::CleanSession { .. }
             | Action::CleanBatch { .. }
