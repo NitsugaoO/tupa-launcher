@@ -1,6 +1,6 @@
 # tupa-launcher 状态
 
-updated: 2026-11-04 · code: `c54a3ab`（最后一次改动代码的提交）· 同步状态以 `git status -sb` 为准
+updated: 2026-11-05 · code: `3edd1e9`（最后一次改动代码的提交）· 同步状态以 `git status -sb` 为准
 
 > 判断本文件是否过期：比较 `code` 与 `git log -1 --format=%h -- src Cargo.toml`。
 > 只改文档的提交不算过期。
@@ -94,6 +94,24 @@ updated: 2026-11-04 · code: `c54a3ab`（最后一次改动代码的提交）· 
   排序借 `history::score_of()`；`Item::normalize_web()` 懒修旧的「域名」列（不碰磁盘）
 - **`:web` 列 `[4,6,1]`（2026-11-04）**：第二列从域名换成完整 URL（同站点不同页面分得清）；
   直开条目（`@web github.com/x`）只有两列 `URL | 直接打开`
+- **`:blog` 升级为「入口 + 本地服务管理」（2026-11-05）**：不带参数列**五个入口**
+  （新建文章 / 本地预览 / 管理页 / GitHub Pages / Cloudflare），前两条带**查询时现探的
+  状态列**（已在运行 / 未启动）。新建文章条目只是 `Action::FillInput`（补成 `<前缀>blog:new `）。
+  本文件上方那段「三个入口」的描述已作废
+- **本地服务「按需启动 + 可停」，新增 `src/serve.rs`（2026-11-05）**：`port_of` /
+  `is_listening`（**IPv4 与 IPv6 都探**，Node 不指定 host 时可能只绑 `::1`）/
+  `wait_until_ready`（`READY_TIMEOUT` **20s**，实测 `pnpm server` 就绪 **5.2–5.6s**）/
+  `listeners`（`netstat -ano` 取 PID，`0.0.0.0` 与 `[::]` 去重）/ `kill_pid`
+  （`taskkill /T /F`，连子进程）。`exec::serve_and_open` 统一「在跑只开浏览器，没跑才
+  spawn 并等端口」，修掉旧 `blog_admin` 无条件 spawn（连点两次端口冲突 → 白屏）与
+  固定 `sleep 1.5s`（浏览器先到、页面没好）。停机：运行中的服务紧跟一条「停止本地预览 /
+  停止管理页」（**只杀 node/pnpm/cmd**，端口被别人占着只报错不动手），`:blog:stop` 停全部。
+  `stop` 已加进 `providers::KNOWN_FLAGS`（不加会被当成 args）
+- **GitHub Pages 域名修正（2026-11-05）**：`https://nitsugao.github.io`（实测 **404**）→
+  `https://nitsugaoo.github.io`（实测 **200**）；用户名 `NitsugaoO` 末尾是大写 O，域名里两个 o。
+  改了 `config.rs` 默认值与 `config.example.toml`（本机 `config.toml` 无 `[blog]` 段，靠默认值生效）
+- **`--help` 的 `:new <文件名>` 残留已删（2026-11-05）**：改为
+  `:blog [new|manage|stop]`（i18n 中英两处）
 
 ## 下一步
 
@@ -105,10 +123,10 @@ updated: 2026-11-04 · code: `c54a3ab`（最后一次改动代码的提交）· 
    跟博客 / pi / 终端主题同一个来源
 4. **`config.example.toml` 仍只有 7 个示例应用**（本机已 55 项）：倾向**保持精简示例**
    （只教语法）；若决定同步，改的是**仓库文件**，改完需提交推送
-5. **`--help` 里还留着 `:new <文件名>`**（`src/i18n.rs:752` / `:795`）：`new` provider 早被
-   `:blog:new` 取代并删掉了，这两行是残留 → 改成 `:blog:new <标题>` 或直接删（**2026-11-04 仍未做**）
-6. `all` / `hist` / `fav` 也是混装列表（应用+历史、各种快照、各种收藏）：先看开屏自然排用一阵子
+5. `all` / `hist` / `fav` 也是混装列表（应用+历史、各种快照、各种收藏）：先看开屏自然排用一阵子
    顺不顺眼，再决定要不要给它们也覆写 `layout() -> Natural`（一行的事）
+6. `:blog` 用**自定义列宽** `[4,5,2]`（`blog::COLUMNS`，Web 与 Command 行混装）：实机看
+   标题/网址/状态三列顺不顺眼；嫌 `READY_TIMEOUT` 等太久就做成 `[blog] ready_timeout` 配置项
 
 > 2026-11-03 删掉了三条「待实机验」（节能模式 / `:blog` / `:pi:clean`）：都是已经在用的功能，
 > 真出问题时再按报错查。相关坐标与调用链仍留在「阶段」节里备查。同日做完了 `hist` provider、
@@ -117,9 +135,9 @@ updated: 2026-11-04 · code: `c54a3ab`（最后一次改动代码的提交）· 
 ## 待验证
 
 ```bash
-cargo test --release      # 全绿（2026-11-04 实测 122 passed，数字以输出为准）
-cargo clippy --release    # 零警告（2026-11-04 实测）
-tupa-launcher.exe --check # 55 项应用全部可解析、空输入列 55 条（2026-11-04 实测）
+cargo test --release      # 全绿（2026-11-05 实测 130 passed，数字以输出为准）
+cargo clippy --release    # 零警告（2026-11-05 实测）
+tupa-launcher.exe --check # 55 项应用全部可解析、空输入列 55 条（2026-11-05 实测）
 ```
 
 改完代码必须**重启守护进程**，否则跑的还是旧 exe —— 步骤见 [`AGENTS.md`](AGENTS.md)。
@@ -133,6 +151,14 @@ tupa-launcher.exe --check # 55 项应用全部可解析、空输入列 55 条（
 
 - `alt+\`` 开屏：web 行 URL 是否拿到该有的宽度、最后一列是不是「用过几次」、点一条收藏后是否上浮
 - `@set` / `@cfg`：开关是否仍上下对齐（对齐表路径没动，回归验证）
+
+**2026-11-05 待手点确认**：
+
+- `@blog` → 本地预览：面板停留约 5–6 秒（不冻结），随后浏览器弹出；**再回车应秒开、不重复起进程**
+- `@blog` → 运行中的「停止管理页 / 停止本地预览」：应提示「已停止…（PID …）」且端口释放；
+  `@blog:stop` 一次停掉在跑的全部
+- 事实记录：2026-11-05 收尾时 4000 / 5173 **都没有监听**（当天 5173 曾由「管理页」起过），
+  停止链路**尚未证实是手点通过的**
 
 ## 入口
 
