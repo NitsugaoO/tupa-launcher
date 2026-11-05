@@ -217,8 +217,44 @@ pub fn blog_post_created(name: &str) -> String {
     )
 }
 
-pub fn blog_admin_started() -> &'static str {
-    t("管理页启动中…", "Starting the admin page…")
+/// 本地服务已经在跑（只开浏览器，不重复起进程）
+pub fn serve_already_running(url: &str) -> String {
+    s(
+        || format!("已在运行，正在打开 {url}"),
+        || format!("Already running, opening {url}"),
+    )
+}
+
+/// 刚启动的本地服务已就绪
+pub fn serve_started(url: &str) -> String {
+    s(
+        || format!("服务已就绪，正在打开 {url}"),
+        || format!("Ready, opening {url}"),
+    )
+}
+
+/// 进程起来了但端口没监听上（编译报错 / 依赖没装）
+pub fn serve_timeout(port: u16, command: &str, secs: u64) -> String {
+    s(
+        || format!("{command} 已启动，但 {secs} 秒内端口 {port} 没监听上（看终端日志排查）"),
+        || format!("Started {command}, but port {port} never listened within {secs}s"),
+    )
+}
+
+/// `:blog` 列表里本地服务的状态列
+pub fn serve_running() -> &'static str {
+    t("已在运行", "running")
+}
+
+pub fn serve_stopped() -> &'static str {
+    t("未启动，回车开", "stopped, Enter starts")
+}
+
+pub fn blog_new_post_hint() -> &'static str {
+    t(
+        "回车后输入标题（写入 source/_posts）",
+        "press Enter, then type the title (written to source/_posts)",
+    )
 }
 
 pub fn blog_dir_missing(path: &str) -> String {
@@ -755,7 +791,7 @@ pub fn help() -> String {
   :go <路径>       跳转目录
   :web <关键词>    搜索浏览历史
   :hist <关键词>   搜索命令历史
-  :new <文件名>    新建文件
+  :blog [new|manage]  博客入口（预览 / 管理页 / 新建文章）
   :fav [类型]      收藏
   :cfg [关键词]    查看配置
   :set [关键词]    开关 / 选项 / 数值
@@ -798,7 +834,7 @@ Commands (prefix defaults to :, configurable)
   :go <path>        jump to a folder
   :web <keyword>    search browser history
   :hist <keyword>   search command history
-  :new <file>       create a file
+  :blog [new|manage]  blog entries (preview / admin / new post)
   :fav [kind]       favorites
   :cfg [keyword]    inspect config
   :set [keyword]   toggles & values

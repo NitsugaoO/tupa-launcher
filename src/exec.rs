@@ -8,6 +8,7 @@ use anyhow::{Context, Result, bail};
 
 use crate::i18n;
 use crate::providers::{clean, Action, CleanMode};
+use crate::serve;
 use crate::util::{detached_command, which};
 
 pub fn run(action: &Action) -> Result<String> {
@@ -85,8 +86,10 @@ pub fn run(action: &Action) -> Result<String> {
             create_blog_post(path, title)?;
             Ok(i18n::blog_post_created(&short_name(path)))
         }
-        // 博客管理页：后台跑 `pnpm admin`，稍等再打开网页
-        Action::BlogAdmin { dir, url } => blog_admin(dir, url),
+        // 博客管理页：已在跑就只开浏览器，没跑就后台启动再等就绪
+        Action::BlogAdmin { dir, url } => serve_and_open(dir, "pnpm admin", url),
+        // 博客本地预览：同上，命令换成 `pnpm server`
+        Action::BlogPreview { dir, url } => serve_and_open(dir, "pnpm server", url),
         Action::OpenInEditor { file, line } => {
             open_in_editor(file, *line)?;
             Ok(i18n::opened_in_editor(&short_name(file), *line))
@@ -182,28 +185,49 @@ fn utc_timestamp() -> String {
     )
 }
 
-/// 后台跑 `pnpm admin`，稍等端口监听上再打开管理页
-fn blog_admin(dir: &Path, url: &str) -> Result<String> {
+/// 本地服务的统一处理：**端口在跑就只开浏览器，没跑先起进程、等就绪再开**。
+///
+/// 旧版 `blog_admin` 是无条件 `spawn pnpm admin` + 固定 `sleep 1.5s`：
+/// 连点两次会起第二个 node（端口冲突后管理页白屏），起得慢时浏览器先到、页面还没好。
+/// 现在换成「探测 → 按需启动 → 轮询端口」，两种情况都对：
+///
+/// - 已经在跑：立刻打开，不重复起进程
+/// - 没在跑：`spawn` 后最多等 [`serve::READY_TIMEOUT`] 让端口监听上；超时返回错误
+///   （面板留在原地显示红字，比「浏览器空白页 + 以为启动好了」好排查）
+fn serve_and_open(dir: &Path, command: &str, url: &str) -> Result<String> {
     if !dir.is_dir() {
         bail!("{}", i18n::blog_dir_missing(&dir.display().to_string()));
     }
 
+    // 解析不出端口（配置里写了个怪网址）就没法探测，退回「直接打开」
+    let Some(port) = serve::port_of(url) else {
+        open_and_focus(url);
+        return Ok(i18n::opened(url));
+    };
+
+    if serve::is_listening(port) {
+        open_and_focus(url);
+        return Ok(i18n::serve_already_running(url));
+    }
+
     detached_command(shell())
-        .args(shell_args("pnpm admin", true))
+        .args(shell_args(command, true))
         .current_dir(dir)
         .spawn()
-        .with_context(|| i18n::cannot("启动管理页", "start the admin page", "pnpm admin"))?;
+        .with_context(|| i18n::cannot("启动", "start", command))?;
 
-    // 管理页要几百毫秒才监听上，立刻打开浏览器会是一片空白，
-    // 所以延迟在后台线程里开，不卡面板
-    let url = url.to_string();
-    std::thread::spawn(move || {
-        std::thread::sleep(std::time::Duration::from_millis(1500));
-        let _ = open::that_detached(&url);
-        crate::glazewm::focus_browser_async();
-    });
+    if !serve::wait_until_ready(port, serve::READY_TIMEOUT) {
+        bail!("{}", i18n::serve_timeout(port, command, serve::READY_TIMEOUT.as_secs()));
+    }
 
-    Ok(i18n::blog_admin_started().to_string())
+    open_and_focus(url);
+    Ok(i18n::serve_started(url))
+}
+
+/// 打开网页，并让 GlazeWM 把浏览器窗口切前台（后台线程，不卡面板）
+fn open_and_focus(url: &str) {
+    let _ = open::that_detached(url);
+    crate::glazewm::focus_browser_async();
 }
 
 /// 优先 PowerShell 7（pwsh），退回 Windows PowerShell，再退回 cmd

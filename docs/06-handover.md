@@ -146,7 +146,8 @@ Control::{Run, Toggle{value}, Choice{options,index}, Number{value,min,max,step,s
 | 空格不能当控件切换键 | 空格是搜索词/参数分隔符（`:set 电源`），拿去切换会在打过滤词时误触发写操作 |
 | `TestBackend` 宽字符 | 中文在 buffer 里占两格、字符串断言会掺空格；测试里只断言 ASCII 部分或用 `column_of` |
 | `pnpm` 是 `.cmd` | 不能 `Command::new("pnpm")`；走 `pwsh -Command "pnpm admin"` + `.current_dir()`（和 `RunCommand` 共用 `shell_args`） |
-| 管理页白屏 | `pnpm admin` 要几百毫秒才监听 5173，立刻开浏览器会白屏；延迟 1.5s 在**后台线程**打开，不卡面板 |
+| 本地服务无条件 spawn | 旧 `blog_admin` 每次回车都起一个 `pnpm admin`：连点两次 = 第二个 node 端口冲突 → 管理页白屏。Hexo 实测 **5.2 秒**（2026-11-05）才监听 4000，固定 `sleep 1.5s` 后开浏览器就是错误页 |
+| 本地服务就绪判断 | 用 `src/serve.rs`：先探端口（**IPv4 与 IPv6 都试**，Node 不指定 host 时可能只绑 `::1`）→ 在跑就只开浏览器；没跑才 spawn 并轮询最多 `READY_TIMEOUT`（20s），超时**报错**而不是开空白页 |
 
 ## 5. 开关引擎（v0.7 已完成）
 

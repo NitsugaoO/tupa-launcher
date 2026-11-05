@@ -141,7 +141,7 @@ impl Default for Blog {
         Blog {
             dir: None,
             local_url: "http://localhost:4000".to_string(),
-            github_url: "https://nitsugao.github.io".to_string(),
+            github_url: "https://nitsugaoo.github.io".to_string(),
             cloudflare_url: "https://blog.wooyun.workers.dev".to_string(),
             admin_url: "http://127.0.0.1:5173".to_string(),
         }

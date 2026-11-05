@@ -99,7 +99,7 @@ Copilot 键是个例外（它的原样组合被 shell 占着），但用钩子**
 | `:pi:cleanall [关键词]` | 同上，但只列**一条汇总项**（归档 N 个 / 删除 M 个 / 总体积），回车**一次处理全部**；可叠窗口：`:pi:cleanall:month` |
 | `:web <网址 / 关键词>` | 搜 Edge 历史（默认**一周内**）；搜不到且输入像网址就直接打开（`:web:month` / `:web:all` 扩大范围，`:web:url` 强制打开） |
 | `:hist [关键词]` | 搜**命令历史**（`history.json`，最多 200 条）：模糊匹配当时的输入行 / 条目标题 / 副标题，带关键词时按相关度排序；回车同开屏——有快照直接再打开，老记录只把输入行填回输入框 |
-| `:blog [关键词]` | 自己的博客：不带参数列**三个入口**（本地 `localhost:4000` / GitHub Pages / Cloudflare）；`:blog:new <标题>` 在 `source/_posts` 新建文章并**用 VSCode 打开**（同名不覆盖，空参数列最近文章）；`:blog:manage` 后台跑 `pnpm admin` 并打开管理页（`127.0.0.1:5173`） |
+| `:blog [new|manage]` | 自己的博客：不带参数列**五个入口**——新建文章 / 本地预览 / 管理页 / GitHub Pages / Cloudflare。本地预览与管理页带状态列（「已在运行」/「未启动」）：**服务在跑就只开浏览器，没跑就先在后台起 `pnpm server` / `pnpm admin`，等端口真的监听上再打开**（不再重复起进程）。`:blog:new <标题>` 在 `source/_posts` 新建文章并**用 VSCode 打开**（同名不覆盖，空参数列最近文章）；`:blog:manage` 直接到管理页 |
 | `:fav [类型] [关键词]` | 列出收藏（`:fav app` / `:fav web` 按类型过滤），`Ctrl+D` 收藏 / 取消收藏 |
 | `:cfg [关键词]` | 列出配置项（当前值 / 行号 / 说明），**回车在 VSCode 里跳到对应行** |
 | `:set [关键词]` | 应用内开关 / 选项 / 数值（深色模式、亮度、电池养护……），回车应用、`←/→` 调整、**不隐藏面板** |
@@ -408,7 +408,7 @@ background panel overlay border fg muted dim faint accent good warn bad
 |---|---|---|
 | `dir` | `~/blog` | 博客仓库根目录（`source/_posts` 与 `package.json` 在这里） |
 | `local_url` | `http://localhost:4000` | 本地预览（`pnpm server`，Hexo 默认端口） |
-| `github_url` | `https://nitsugao.github.io` | GitHub Pages |
+| `github_url` | `https://nitsugaoo.github.io` | GitHub Pages（用户名 `NitsugaoO`，域名里是**两个 o**） |
 | `cloudflare_url` | `https://blog.wooyun.workers.dev` | Cloudflare Workers |
 | `admin_url` | `http://127.0.0.1:5173` | `pnpm admin` 起来的管理页 |
 
@@ -447,7 +447,7 @@ src/
     ├── hist.rs          hist —— 搜索命令历史（history.json：输入行 + 执行快照）
     ├── favorites.rs     fav  —— 列出收藏 + 按类型过滤
     ├── commands.rs      `:`  —— 命令列表（也是补全的数据源）
-    ├── blog.rs           blog —— 新建文章 / 管理页 / 站点入口
+    ├── blog.rs           blog —— 新建文章 / 本地预览 / 管理页 / 站点入口
     ├── go.rs            go   —— zoxide + Everything + 剪贴板
     ├── run.rs           run  —— 执行命令
     ├── clean.rs         :pi:clean 的实现（清理 pi 会话：归档 / 回收站 / 恢复）
@@ -492,7 +492,7 @@ src/
 - [x] **v0.6** 中英文（`general.language`）+ 文案精简；`:go:code` / `:go:yazi` / `:go:pi`；`:run` 默认 PowerShell；状态栏显示位置与后台忙碌
 - [x] **v0.5** `:web` 时间范围（默认一周 / month / all）+ 搜不到才直接打开；`:run` 默认新窗口执行；命令前缀可配置 + 去掉同义修饰符；`:new` 新建文件
 - [x] **v0.7** `:set` 应用内开关 / 选项 / 数值（`actions.toml` 驱动 + 内置深色模式 / 亮度 / 电池养护 / 节能 / 保持唤醒 / 更新订阅）
-- [x] **v0.9** `:blog`（新建文章 / 管理页 / 三个站点入口，配置在 `[blog]` 段；取代旧的 `:new`）
+- [x] **v0.9** `:blog`（新建文章 / 本地预览 / 管理页 / 站点入口，配置在 `[blog]` 段；取代旧的 `:new`）
 - [ ] **v0.8** 自建无边框窗口，脱离 Windows Terminal（设计见 [`docs/05-native-window.md`](docs/05-native-window.md)）
       —— GUI 已能显示与输入（`--gui` / `[daemon] panel = "gui"`），剩余：中文输入法 IME、切换默认面板
       （开工说明见 [`docs/07-shell-handover.md`](docs/07-shell-handover.md)，当前进度见 [`STATE.md`](STATE.md)）

@@ -855,6 +855,7 @@ impl App {
             | Action::OpenInEditor { .. }
             | Action::CreateBlogPost { .. }
             | Action::BlogAdmin { .. }
+            | Action::BlogPreview { .. }
             | Action::SetControl { .. }
             | Action::CleanSession { .. }
             | Action::CleanBatch { .. }

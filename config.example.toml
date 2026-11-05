@@ -34,7 +34,7 @@ command_prefix = ":"
 # 本地预览（pnpm server，Hexo 默认 4000）
 local_url = "http://localhost:4000"
 # GitHub Pages
-github_url = "https://nitsugao.github.io"
+github_url = "https://nitsugaoo.github.io"
 # Cloudflare Workers
 cloudflare_url = "https://blog.wooyun.workers.dev"
 # pnpm admin 起来的管理页

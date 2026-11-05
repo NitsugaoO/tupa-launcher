@@ -1,28 +1,43 @@
-//! `blog` —— 自己博客（Hexo）的三件事：站点入口、新建文章、管理页。
+//! `blog` —— 自己博客（Hexo）的日常操作：新建文章、本地预览、管理页、站点入口。
 //!
 //! ```text
-//! blog              → 三个入口：本地预览 / GitHub Pages / Cloudflare
+//! blog              → 五个入口：新建文章 / 本地预览 / 管理页 / GitHub Pages / Cloudflare
 //! blog:new 周末折腾  → 新建 source/_posts/周末折腾.md（带 front matter）并在 VSCode 里打开
 //! blog:new          → 列最近改过的文章（回车用 VSCode 打开）
-//! blog:manage       → 后台跑 `pnpm admin`，稍后打开管理页（127.0.0.1:5173）
+//! blog:manage       → 后台跑 `pnpm admin`，端口就绪后打开管理页（127.0.0.1:5173）
 //! ```
 //!
 //! 仓库目录与三个网址都在 `config.toml` 的 `[blog]` 里（目录留空 = `~/blog`）。
+//!
+//! 本地预览 / 管理页都走「先探测端口」的路子（见 [`crate::serve`]）：
+//!
+//! - 服务在跑 → 只开浏览器，不重复起进程
+//! - 没在跑 → 后台起 `pnpm server` / `pnpm admin`，等端口监听上再打开
+//!
+//! 列表里这两行的状态列是**查询时现探的**（`query` 在后台线程，150ms × 2 的探测不会卡界面）。
 //!
 //! 新建文章**不覆盖**：同名文件已存在时直接打开它，列表里也会标出来。
 
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-use super::{Action, Item, Kind, Provider};
+use super::{Action, Column, Item, Kind, Provider};
 use crate::config::Config;
 use crate::i18n;
+use crate::serve;
 
 /// 认识的修饰符（`blog:new` / `blog:manage`）
 const FLAGS: &[&str] = &["new", "manage"];
 
 /// Windows 不允许进文件名的字符
 const ILLEGAL: &[char] = &['\\', '/', ':', '*', '?', '"', '<', '>', '|'];
+
+/// 标题 · 网址 · 本地服务状态。
+///
+/// 第三列只在本地预览 / 管理页两行有内容（「已在运行」/「未启动，回车开」），
+/// 三个网址入口留空 —— 宽度给得比较宽，因为中文状态带提示语。
+pub(crate) const COLUMNS: &[Column] =
+    &[Column::new(4, 10, 0), Column::new(5, 12, 0), Column::new(2, 6, 18)];
 
 pub struct Blog {
     dir: PathBuf,
@@ -32,6 +47,8 @@ pub struct Blog {
     admin: String,
     /// `blog:new` 空参数时列几篇最近改过的文章
     max: usize,
+    /// 命令前缀（「新建文章」条目要把 `blog:new ` 补进输入框）
+    prefix: char,
 }
 
 impl Blog {
@@ -52,6 +69,7 @@ impl Blog {
             cloudflare: cfg.blog.cloudflare_url.clone(),
             admin: cfg.blog.admin_url.clone(),
             max: cfg.general.max_results,
+            prefix: cfg.general.command_prefix.chars().next().unwrap_or(':'),
         }
     }
 
@@ -60,36 +78,70 @@ impl Blog {
         self.dir.join("source").join("_posts")
     }
 
-    /// 不带修饰符：三个站点入口
+    /// 「新建文章」条目：回车只是把 `blog:new ` 补进输入框，标题接着打
+    fn new_post_item(&self) -> Item {
+        Item::new(
+            Kind::Help,
+            vec![
+                format!("{prefix}blog:new", prefix = self.prefix),
+                i18n::blog_new_post_hint().to_string(),
+            ],
+            Action::FillInput(format!("{prefix}blog:new ", prefix = self.prefix)),
+        )
+    }
+
+    /// 一个「本地服务」条目：状态列现探（端口在跑 / 没跑）
+    fn local_item(&self, label: &str, url: &str, action: Action) -> Item {
+        let state = match serve::port_of(url) {
+            Some(port) if serve::is_listening(port) => i18n::serve_running(),
+            _ => i18n::serve_stopped(),
+        };
+        Item::new(
+            Kind::Web,
+            vec![label.to_string(), url.to_string(), state.to_string()],
+            action,
+        )
+    }
+
+    /// 不带修饰符：五个入口
     fn entries(&self) -> Vec<Item> {
-        [
-            (i18n::blog_local_preview(), &self.local),
+        let mut items = vec![
+            self.new_post_item(),
+            self.local_item(
+                i18n::blog_local_preview(),
+                &self.local,
+                Action::BlogPreview {
+                    dir: self.dir.clone(),
+                    url: self.local.clone(),
+                },
+            ),
+            self.local_item(i18n::blog_admin(), &self.admin, self.manage_item_action()),
+        ];
+
+        // 远端站点：没有本地服务，第三列空着（只占宽度，什么都不显示）
+        for (label, url) in [
             (i18n::blog_github(), &self.github),
             (i18n::blog_cloudflare(), &self.cloudflare),
-        ]
-        .into_iter()
-        .map(|(label, url)| {
-            Item::new(
+        ] {
+            items.push(Item::new(
                 Kind::Web,
-                vec![label.to_string(), url.clone()],
+                vec![label.to_string(), url.to_string(), String::new()],
                 Action::OpenUrl(url.clone()),
-            )
-        })
-        .collect()
+            ));
+        }
+
+        items
+    }
+
+    fn manage_item_action(&self) -> Action {
+        Action::BlogAdmin {
+            dir: self.dir.clone(),
+            url: self.admin.clone(),
+        }
     }
 
     fn manage_item(&self) -> Item {
-        Item::new(
-            Kind::Command,
-            vec![
-                i18n::blog_admin().to_string(),
-                format!("pnpm admin · {}", self.dir.display()),
-            ],
-            Action::BlogAdmin {
-                dir: self.dir.clone(),
-                url: self.admin.clone(),
-            },
-        )
+        self.local_item(i18n::blog_admin(), &self.admin, self.manage_item_action())
     }
 
     /// `blog:new [标题]`
@@ -183,6 +235,10 @@ impl Provider for Blog {
 
     fn flags(&self) -> &'static [&'static str] {
         FLAGS
+    }
+
+    fn columns(&self) -> &'static [Column] {
+        COLUMNS
     }
 
     fn query(&self, args: &str, flags: &[String]) -> Vec<Item> {

@@ -19,6 +19,7 @@ mod gui;
 mod history;
 mod i18n;
 mod providers;
+mod serve;
 mod theme;
 mod ui;
 mod util;

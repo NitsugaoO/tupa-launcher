@@ -257,8 +257,10 @@ pub enum Action {
     OpenInEditor { file: PathBuf, line: usize },
     /// 新建一篇博客文章（已存在则不覆盖），然后在编辑器里打开
     CreateBlogPost { path: PathBuf, title: String },
-    /// 后台跑 `pnpm admin`，稍后打开管理页
+    /// 后台跑 `pnpm admin`，就绪后打开管理页（已在跑则只打开）
     BlogAdmin { dir: PathBuf, url: String },
+    /// 后台跑 `pnpm server`（Hexo 本地预览），就绪后打开预览页
+    BlogPreview { dir: PathBuf, url: String },
     /// 把面板输入替换成这段文本（命令列表用，不执行任何东西）
     FillInput(String),
     /// 把 `actions.toml` 里的某个开关 / 选项 / 数值设成新值
@@ -374,6 +376,7 @@ impl Item {
             Action::OpenInEditor { file, line } => format!("{}:{line}", file.display()),
             Action::CreateBlogPost { path, .. } => path.display().to_string(),
             Action::BlogAdmin { dir, url } => format!("pnpm admin · {} · {url}", dir.display()),
+            Action::BlogPreview { dir, url } => format!("pnpm server · {} · {url}", dir.display()),
             Action::SetControl { id, value } => format!("{id} = {value}"),
             Action::CleanSession { path, .. } => path.display().to_string(),
             Action::CleanBatch { .. } => return None,
