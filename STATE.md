@@ -1,6 +1,6 @@
 # tupa-launcher 状态
 
-updated: 2026-11-03 · code: `e2b409e`（最后一次改动代码的提交）· 同步状态以 `git status -sb` 为准
+updated: 2026-11-04 · code: `c54a3ab`（最后一次改动代码的提交）· 同步状态以 `git status -sb` 为准
 
 > 判断本文件是否过期：比较 `code` 与 `git log -1 --format=%h -- src Cargo.toml`。
 > 只改文档的提交不算过期。
@@ -81,6 +81,19 @@ updated: 2026-11-03 · code: `e2b409e`（最后一次改动代码的提交）· 
   现在：起始目录用 `wt -d <目录>`，PowerShell 脚本用 `-EncodedCommand`（UTF-16LE base64，
   不含 `;` / 空格 / 引号）。`spawn_console` 是共用的，所以 `:run` 的可见窗口、
   `:go:yazi` / `:go:pi` 一并修好；坑已记入 `docs/06-handover.md` §4
+- **开屏列版式单列一路（2026-11-04）**：`RowLayout::{Aligned,Natural}` 挂在
+  `Provider::layout()`，随结果下发到 `App.layout`。**只有 `home` 是 `Natural`**（每段按自己
+  长度排、段间 2 空格、行尾不填充，整行超宽才按 `Kind::columns()` 压缩）；其余列表仍是对齐表。
+  版式来源统一到 `Kind::columns()`（引用各 provider 的 `COLUMNS` 常量，`pub(crate)`）
+- **开屏最后一列 = 启动器使用次数（2026-11-04）**：`history::hits_of()`（同 `action` 多条相加）。
+  web 行原来那列是 **Edge 浏览次数**（快照值、会过期），先摘掉再换。只有 ≤2 列的行补这一列，
+  `cfg`（位置+说明）/ `pi`（目录+时间）不追加。**`@web` 里仍是 Edge 次数**
+- **开屏点击会计数（2026-11-04）**：输入框空时 `execute()` 成功走 `history::record_open()`：
+  按 `Action` 找旧记录 `hits+1`，找不到就用 `<前缀><provider> <完整标识>` 补一条（`Ctrl+↑` 可重放）。
+  原 bug：`push` 拿空输入行当去重键，直接被丢弃。收藏的列同时跟历史走（**第一列保留收藏名**）、
+  排序借 `history::score_of()`；`Item::normalize_web()` 懒修旧的「域名」列（不碰磁盘）
+- **`:web` 列 `[4,6,1]`（2026-11-04）**：第二列从域名换成完整 URL（同站点不同页面分得清）；
+  直开条目（`@web github.com/x`）只有两列 `URL | 直接打开`
 
 ## 下一步
 
@@ -93,7 +106,9 @@ updated: 2026-11-03 · code: `e2b409e`（最后一次改动代码的提交）· 
 4. **`config.example.toml` 仍只有 7 个示例应用**（本机已 55 项）：倾向**保持精简示例**
    （只教语法）；若决定同步，改的是**仓库文件**，改完需提交推送
 5. **`--help` 里还留着 `:new <文件名>`**（`src/i18n.rs:752` / `:795`）：`new` provider 早被
-   `:blog:new` 取代并删掉了，这两行是残留 → 改成 `:blog:new <标题>` 或直接删
+   `:blog:new` 取代并删掉了，这两行是残留 → 改成 `:blog:new <标题>` 或直接删（**2026-11-04 仍未做**）
+6. `all` / `hist` / `fav` 也是混装列表（应用+历史、各种快照、各种收藏）：先看开屏自然排用一阵子
+   顺不顺眼，再决定要不要给它们也覆写 `layout() -> Natural`（一行的事）
 
 > 2026-11-03 删掉了三条「待实机验」（节能模式 / `:blog` / `:pi:clean`）：都是已经在用的功能，
 > 真出问题时再按报错查。相关坐标与调用链仍留在「阶段」节里备查。同日做完了 `hist` provider、
@@ -102,9 +117,9 @@ updated: 2026-11-03 · code: `e2b409e`（最后一次改动代码的提交）· 
 ## 待验证
 
 ```bash
-cargo test --release      # 全绿（2026-11-03 实测 107 passed，数字以输出为准）
-cargo clippy --release    # 零警告（2026-11-03 实测）
-tupa-launcher.exe --check # 55 项应用全部可解析、空输入列 55 条（2026-11-03 实测）
+cargo test --release      # 全绿（2026-11-04 实测 122 passed，数字以输出为准）
+cargo clippy --release    # 零警告（2026-11-04 实测）
+tupa-launcher.exe --check # 55 项应用全部可解析、空输入列 55 条（2026-11-04 实测）
 ```
 
 改完代码必须**重启守护进程**，否则跑的还是旧 exe —— 步骤见 [`AGENTS.md`](AGENTS.md)。
@@ -113,6 +128,11 @@ tupa-launcher.exe --check # 55 项应用全部可解析、空输入列 55 条（
 
 - `@pi` 回车打开会话：直接进 pi（修复前只开终端，报 `0x80070002`）
 - `@web <网页>` 回车：浏览器在别的 workspace 时自己跳过去（`[glazewm] focus_browser`）
+
+**2026-11-04 待手点确认**：
+
+- `alt+\`` 开屏：web 行 URL 是否拿到该有的宽度、最后一列是不是「用过几次」、点一条收藏后是否上浮
+- `@set` / `@cfg`：开关是否仍上下对齐（对齐表路径没动，回归验证）
 
 ## 入口
 
