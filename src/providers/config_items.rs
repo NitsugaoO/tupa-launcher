@@ -16,7 +16,7 @@ use crate::config::{self, Config};
 pub struct ConfigItems;
 
 /// 配置项 · 当前值 · 位置 · 说明
-const COLUMNS: &[Column] = &[
+pub(crate) const COLUMNS: &[Column] = &[
     Column::new(5, 14, 0),
     Column::new(2, 0, 26),
     Column::new(1, 0, 16),

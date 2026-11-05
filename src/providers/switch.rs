@@ -14,7 +14,7 @@ use crate::providers::Control;
 pub struct Switch;
 
 /// 标题 · 来源/分组（状态列由界面按 `Control` 追加）
-const COLUMNS: &[Column] = &[Column::new(5, 14, 0), Column::new(3, 0, 0)];
+pub(crate) const COLUMNS: &[Column] = &[Column::new(5, 14, 0), Column::new(3, 0, 0)];
 
 impl Provider for Switch {
     fn keyword(&self) -> &str {

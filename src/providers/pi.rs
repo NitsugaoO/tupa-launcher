@@ -22,7 +22,7 @@ use crate::i18n;
 pub struct PiSessions;
 
 /// 标题 · 项目 · 时间
-const COLUMNS: &[Column] = &[
+pub(crate) const COLUMNS: &[Column] = &[
     Column::new(5, 14, 0),
     Column::new(3, 0, 28),
     Column::new(1, 6, 0),

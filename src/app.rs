@@ -9,7 +9,8 @@ use crate::config::Config;
 use crate::exec;
 use crate::i18n;
 use crate::providers::{
-    self, Action, Cmd, Column, Control, DEFAULT_COLUMNS, Evt, Item, Parsed, ProviderInfo, commands,
+    self, Action, Cmd, Column, Control, DEFAULT_COLUMNS, Evt, Item, Parsed, ProviderInfo,
+    RowLayout, commands,
 };
 use crate::theme::Theme;
 use crate::{favorites, history};
@@ -50,6 +51,8 @@ pub struct App {
     pub prefix_end: Option<usize>,
     /// 当前结果的列宽规格
     pub columns: &'static [Column],
+    /// 这一屏的行宽怎么算（开屏是自然排，其余是对齐表）
+    pub layout: RowLayout,
     /// 传给当前 provider 的参数
     args: String,
     /// 关键字上的修饰符（`:run:admin` → `["admin"]`）
@@ -141,6 +144,7 @@ impl App {
             active: default_idx,
             prefix_end: None,
             columns: DEFAULT_COLUMNS,
+            layout: RowLayout::Aligned,
             args: String::new(),
             flags: Vec::new(),
             theme,
@@ -249,12 +253,14 @@ impl App {
                     generation,
                     items,
                     columns,
+                    layout,
                 } => {
                     if generation != self.generation {
                         continue; // 过期结果
                     }
                     self.items = items;
                     self.columns = columns;
+                    self.layout = layout;
                     self.loaded = true;
                     self.pending = false;
 
@@ -472,7 +478,12 @@ impl App {
         match exec::run(&item.action) {
             // 成功就隐藏面板，把屏幕让给刚打开的程序（进程留着，下次唤起更快）
             Ok(_) => {
-                self.remember_input(Some(item));
+                if self.at_home() {
+                    // 开屏（输入框空着）没有输入行可当历史键，按条目本身累加次数
+                    self.bump_item(&item);
+                } else {
+                    self.remember_input(Some(item));
+                }
                 self.should_hide = true;
             }
             Err(e) => self.status = Some((format!("{e:#}"), true)),
@@ -744,6 +755,19 @@ impl App {
             return;
         }
         history::push(&mut self.history, &line, item);
+        if let Err(e) = history::save(&self.history) {
+            eprintln!("保存历史失败：{e:#}");
+        }
+    }
+
+    /// 在开屏里执行成功：给对应的历史记录 +1 次（让 frecency 也认开屏这条路）。
+    ///
+    /// 历史里没有这个条目（只在收藏里）就补一条 —— 不然收藏里的东西永远
+    /// 进不了 frecency，开屏里也不会因为常用而浮上来。
+    fn bump_item(&mut self, item: &Item) {
+        if !history::record_open(&mut self.history, item, self.prefix) {
+            return;
+        }
         if let Err(e) = history::save(&self.history) {
             eprintln!("保存历史失败：{e:#}");
         }

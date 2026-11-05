@@ -33,7 +33,7 @@ use serde::{Deserialize, Serialize};
 use crate::config::Config;
 
 /// 结果条目的大类，决定徽标显示
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Kind {
     App,
     File,
@@ -68,6 +68,24 @@ impl Kind {
             Kind::Pi => "pi",
             Kind::Clean => "clean",
             Kind::History => "rec",
+        }
+    }
+
+    /// 这类条目默认的列宽规格（`None` = 用列表级默认）。
+    ///
+    /// 版式挂在**内容类型**上而不是列表上：开屏 / `all` / `hist` 这些混装列表里
+    /// 每行按自己的类型排版（web 行给 URL 更多宽度，`cfg` 行四列各得其所）。
+    /// 数值都引用对应 provider 的常量，不另写一份。
+    pub fn columns(self) -> Option<&'static [Column]> {
+        match self {
+            Kind::Web => Some(web::COLUMNS),
+            Kind::Setting => Some(config_items::COLUMNS),
+            Kind::Switch => Some(switch::COLUMNS),
+            Kind::Pi => Some(pi::COLUMNS),
+            Kind::Help | Kind::Command => Some(commands::COLUMNS),
+            Kind::History => Some(home::COLUMNS),
+            // app / file / dir / clean：列表级默认（一般就是两列）
+            Kind::App | Kind::File | Kind::Dir | Kind::Clean => None,
         }
     }
 
@@ -112,6 +130,15 @@ impl Column {
 
 /// 默认两列：标题（5 份、最少 12 列）+ 副标题（3 份）
 pub const DEFAULT_COLUMNS: &[Column] = &[Column::new(5, 12, 0), Column::new(3, 0, 0)];
+
+/// 一组结果的行宽怎么算。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RowLayout {
+    /// 整表一套列宽，同类内容对齐成表（默认，`app` / `web` / `set` 这些都是）
+    Aligned,
+    /// 每行按内容自然宽度、段间只留固定间隔（开屏那种混装列表）
+    Natural,
+}
 
 /// 条目的交互类型。
 ///
@@ -301,6 +328,25 @@ impl Item {
         self.columns.first().map(String::as_str).unwrap_or("")
     }
 
+    /// 把旧的 web 快照列修成当前布局：三列里的第二列从「域名」换成完整 URL。
+    ///
+    /// 收藏 / 历史里存的是当时的列文本，[`providers::web`] 改过列布局之后
+    /// 老快照还写着 `host`。这里懒修正（不碰磁盘，下次保存时自然写回）。
+    ///
+    /// 只动三列的快照：两列的是 `:web` 直开条目（第二列是「直接打开」），
+    /// 已经写着完整 URL 的新快照也保持不动。
+    pub fn normalize_web(&mut self) {
+        if self.kind != Kind::Web || self.columns.len() != 3 {
+            return;
+        }
+        let Action::OpenUrl(url) = &self.action else {
+            return;
+        };
+        if self.columns[1] != *url {
+            self.columns[1] = url.clone();
+        }
+    }
+
     /// 第二列（副标题）
     pub fn subtitle(&self) -> &str {
         self.columns.get(1).map(String::as_str).unwrap_or("")
@@ -374,6 +420,14 @@ pub trait Provider: Send {
     /// 这一组结果有几列、各自怎么分宽度（见 [`Column`]）
     fn columns(&self) -> &'static [Column] {
         DEFAULT_COLUMNS
+    }
+
+    /// 这一组结果的行宽怎么算（见 [`RowLayout`]）。
+    ///
+    /// 默认排成对齐的表；只有内容混装的列表（开屏：收藏 + 历史 + 设置 +
+    /// 会话什么都有）才用 [`RowLayout::Natural`]，让每段按自己的长度排。
+    fn layout(&self) -> RowLayout {
+        RowLayout::Aligned
     }
 
     /// 这个 provider 认识的 `:flag` 修饰符（只用于输入补全，解析仍走 [`KNOWN_FLAGS`]）。
@@ -569,6 +623,7 @@ pub enum Evt {
         generation: u64,
         items: Vec<Item>,
         columns: &'static [Column],
+        layout: RowLayout,
     },
     /// 写操作完成（`Err` 里是要显示在状态栏的错误）
     Applied {
@@ -613,9 +668,9 @@ pub fn spawn_worker(providers: Vec<Box<dyn Provider>>) -> (Sender<Cmd>, Receiver
                 continue;
             };
 
-            let (items, columns) = match providers.get(provider) {
-                Some(p) => (p.query(&args, &flags), p.columns()),
-                None => (Vec::new(), DEFAULT_COLUMNS),
+            let (items, columns, layout) = match providers.get(provider) {
+                Some(p) => (p.query(&args, &flags), p.columns(), p.layout()),
+                None => (Vec::new(), DEFAULT_COLUMNS, RowLayout::Aligned),
             };
 
             if evt_tx
@@ -623,6 +678,7 @@ pub fn spawn_worker(providers: Vec<Box<dyn Provider>>) -> (Sender<Cmd>, Receiver
                     generation,
                     items,
                     columns,
+                    layout,
                 })
                 .is_err()
             {
@@ -775,5 +831,52 @@ mod tests {
 
         assert!(!Control::Unavailable.adjust(1));
         assert!(!Control::Run.adjust(1));
+    }
+
+    #[test]
+    fn kind_carries_its_own_column_spec() {
+        // 版式挂在内容类型上：混装列表里靠它逐行排版
+        assert_eq!(Kind::Web.columns(), Some(web::COLUMNS));
+        assert_eq!(Kind::Setting.columns(), Some(config_items::COLUMNS));
+        assert_eq!(Kind::Help.columns(), Some(commands::COLUMNS));
+        assert_eq!(Kind::History.columns(), Some(home::COLUMNS));
+        // app / file / dir / clean 用列表级默认
+        assert_eq!(Kind::App.columns(), None);
+        assert_eq!(Kind::File.columns(), None);
+    }
+
+    #[test]
+    fn normalize_web_fixes_the_old_host_column() {
+        // 旧快照：标题 / 域名 / 次数
+        let mut item = Item::new(
+            Kind::Web,
+            vec![
+                "呜云 · 博客管理".to_string(),
+                "127.0.0.1:5173".to_string(),
+                "20 次".to_string(),
+            ],
+            Action::OpenUrl("http://127.0.0.1:5173/".to_string()),
+        );
+        item.normalize_web();
+        assert_eq!(item.columns[1], "http://127.0.0.1:5173/");
+        assert_eq!(item.columns[0], "呜云 · 博客管理", "标题不能被改");
+
+        // 直开条目的两列（第二列是「直接打开」）不能被当成旧布局
+        let mut direct = Item::new(
+            Kind::Web,
+            vec!["https://a.example".to_string(), "直接打开".to_string()],
+            Action::OpenUrl("https://a.example".to_string()),
+        );
+        direct.normalize_web();
+        assert_eq!(direct.columns[1], "直接打开");
+
+        // 非 web 条目一动不动
+        let mut file = Item::new(
+            Kind::File,
+            vec!["a.txt".to_string(), "C:/tmp".to_string(), "x".to_string()],
+            Action::Open(PathBuf::from("C:/tmp/a.txt")),
+        );
+        file.normalize_web();
+        assert_eq!(file.columns[1], "C:/tmp");
     }
 }

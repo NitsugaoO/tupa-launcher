@@ -9,7 +9,7 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::app::App;
 use crate::i18n;
-use crate::providers::{Column, Control, Item};
+use crate::providers::{Column, Control, Item, RowLayout};
 use crate::theme::Theme;
 
 /// 选中标记（`▸ ` / 两个空格）
@@ -272,27 +272,41 @@ fn draw_list(frame: &mut Frame, app: &mut App, area: Rect, t: Theme) {
     let selected = app.list_state.selected();
     let tick = app.tick;
     let detail = app.detail;
-    let columns = app.columns;
+    let fallback = app.columns;
 
     // 开关 / 选项 / 数值：最后额外留一列显示当前状态
     let state_width = state_column_width(&app.items);
 
     // 徽标 / 星标 / 固定间隔之后的宽度，留给数据列（扣除列间隔）
-    let column_count = app
-        .items
-        .iter()
-        .map(|item| item.columns.len())
-        .max()
-        .unwrap_or(0);
     let fixed =
         PREFIX + BADGE + BADGE_GAP + STAR + STAR_GAP + if detail { 0 } else { state_width };
     let usable = area.width.saturating_sub(fixed);
-    let widths = if detail {
-        // 详细信息：每行只有一列，所以每列都能用整行的宽度
-        vec![usable; column_count]
+
+    // 对齐表（默认）：整屏一套列宽，同类内容上下对齐成表
+    let aligned = if detail || app.layout == RowLayout::Natural {
+        Vec::new()
     } else {
-        let gaps = GAP * column_count.saturating_sub(1) as u16;
-        layout_columns(columns, column_count, usable.saturating_sub(gaps))
+        let count = app
+            .items
+            .iter()
+            .map(|item| item.columns.len())
+            .max()
+            .unwrap_or(0);
+        let gaps = GAP * count.saturating_sub(1) as u16;
+        layout_columns(fallback, count, usable.saturating_sub(gaps))
+    };
+
+    // 开屏（`RowLayout::Natural`）：每段按自己的长度排、段间只留 [`GAP`] 个
+    // 空格，不拼成表、也不填满行尾 —— 混装列表里排成表只会互相拖累。
+    let widths_for = |item: &Item| -> Vec<u16> {
+        if detail {
+            // 详细信息：每列独占一整行
+            return vec![usable; item.columns.len()];
+        }
+        match app.layout {
+            RowLayout::Aligned => aligned.clone(),
+            RowLayout::Natural => row_widths(item, fallback, usable),
+        }
     };
 
     let rows: Vec<ListItem> = app
@@ -304,7 +318,7 @@ fn draw_list(frame: &mut Frame, app: &mut App, area: Rect, t: Theme) {
             let star = app.is_favorite(item);
             ListItem::new(item_lines(
                 item,
-                &widths,
+                &widths_for(item),
                 is_selected,
                 detail,
                 star,
@@ -320,6 +334,7 @@ fn draw_list(frame: &mut Frame, app: &mut App, area: Rect, t: Theme) {
     app.animate = selected
         .and_then(|index| app.items.get(index))
         .map(|item| {
+            let widths = widths_for(item);
             let overflow = item.columns.iter().enumerate().any(|(index, text)| {
                 let width = widths.get(index).copied().unwrap_or(0) as usize;
                 UnicodeWidthStr::width(text.as_str()) > width
@@ -340,6 +355,36 @@ fn draw_list(frame: &mut Frame, app: &mut App, area: Rect, t: Theme) {
         .highlight_style(Style::new().bg(t.overlay).add_modifier(Modifier::BOLD));
 
     frame.render_stateful_widget(list, area, &mut app.list_state);
+}
+
+/// 一行的列宽：**每段按自己的实际长度**，段之间只留 [`GAP`] 个空格。
+///
+/// 不按列对齐、也不拉到面板宽度 —— 行尾自然结束。只有整行真装不下时，
+/// 才按这一类的版式权重（[`Kind::columns`]）等比压缩，长网址因此不会被
+/// 挤到只剩几个字符。
+fn row_widths(item: &Item, fallback: &[Column], usable: u16) -> Vec<u16> {
+    let count = item.columns.len();
+    if count == 0 {
+        return Vec::new();
+    }
+
+    let natural: Vec<u16> = item
+        .columns
+        .iter()
+        .map(|text| UnicodeWidthStr::width(text.as_str()) as u16)
+        .collect();
+    let gaps = GAP * count.saturating_sub(1) as u16;
+    let needed: u32 = natural.iter().map(|width| u32::from(*width)).sum::<u32>() + u32::from(gaps);
+
+    if needed <= u32::from(usable) {
+        return natural;
+    }
+
+    layout_columns(
+        item.kind.columns().unwrap_or(fallback),
+        count,
+        usable.saturating_sub(gaps),
+    )
 }
 
 /// 把一个条目渲染成 1 行（紧凑）或 N 行（详细信息）
@@ -755,6 +800,57 @@ fn draw_status(frame: &mut Frame, app: &App, area: Rect, t: Theme) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::providers::{Action, DEFAULT_COLUMNS, Kind};
+
+    #[test]
+    fn rows_use_natural_width() {
+        // 每段按自己的长度排、段间两个空格，行尾不填到面板宽
+        let url = "https://example.com/a/b";
+        let web = Item::new(
+            Kind::Web,
+            vec!["标题".to_string(), url.to_string(), "3 次".to_string()],
+            Action::OpenUrl(url.to_string()),
+        );
+        let app = Item::new(
+            Kind::App,
+            vec!["Visual Studio Code".to_string(), "code".to_string()],
+            Action::Launch {
+                command: "code".to_string(),
+                args: Vec::new(),
+                elevated: false,
+            },
+        );
+
+        let web_widths = row_widths(&web, DEFAULT_COLUMNS, 100);
+        let app_widths = row_widths(&app, DEFAULT_COLUMNS, 100);
+
+        // 「标题」4 列、「3 次」4 列（数字 + 空格 + 宽字符）
+        assert_eq!(web_widths, vec![4, url.len() as u16, 4]);
+        assert_eq!(app_widths, vec![18, 4]);
+        // 两行都没被拉到 100 列
+        assert!(web_widths.iter().sum::<u16>() < 100);
+        assert!(app_widths.iter().sum::<u16>() < 100);
+    }
+
+    #[test]
+    fn rows_shrink_only_when_too_wide() {
+        let url = "https://example.com/a/very/long/path/that/keeps/going";
+        let web = Item::new(
+            Kind::Web,
+            vec!["标题".to_string(), url.to_string(), "12 次".to_string()],
+            Action::OpenUrl(url.to_string()),
+        );
+
+        // 装得下：自然宽度
+        let wide = row_widths(&web, DEFAULT_COLUMNS, 200);
+        assert_eq!(wide[1], url.len() as u16);
+
+        // 装不下：按 web 的 4:6:1 压缩到可用宽度
+        let narrow = row_widths(&web, DEFAULT_COLUMNS, 60);
+        let total: u16 = narrow.iter().sum::<u16>() + 2 * GAP;
+        assert_eq!(total, 60, "{narrow:?}");
+        assert!(narrow[1] > narrow[0], "URL 仍然拿最大那份：{narrow:?}");
+    }
 
     #[test]
     fn columns_follow_weights() {
@@ -855,8 +951,24 @@ mod render_tests {
         assert!(lines[2].contains("Terminal"), "{:?}", lines[2]);
         assert!(lines[2].contains("wt"), "{:?}", lines[2]);
         assert!(lines[3].contains("Visual Studio Code"), "{:?}", lines[3]);
-        // 第二列在所有行里从同一列开始
+        // 普通列表排成对齐表：第二列在所有行里从同一列开始
         assert_eq!(column_of(&lines[2], "wt"), column_of(&lines[3], "code"));
+    }
+
+    #[test]
+    fn natural_layout_does_not_align_rows() {
+        // 开屏用自然排版：每段按自己长度排，行与行不对齐
+        let mut app = app_with_items();
+        app.layout = RowLayout::Natural;
+        let lines = screen(&mut app, 80, 12);
+
+        let title = column_of(&lines[2], "Terminal").expect("标题");
+        // 第二列紧跟第一列，只隔 GAP 个空格
+        assert_eq!(column_of(&lines[2], "wt"), Some(title + 8 + GAP as usize));
+        // 长标题那行的第二列更靠右（不再为对齐补空格）
+        let short = column_of(&lines[2], "wt").expect("wt");
+        let long = column_of(&lines[3], "code").expect("code");
+        assert!(long > short, "{long} 应该大于 {short}");
     }
 
     #[test]
@@ -1119,7 +1231,7 @@ mod render_tests {
         let lines = screen(&mut app, 80, 12);
         assert!(lines[2].trim_end().ends_with('开'), "{:?}", lines[2]);
         assert!(lines[3].trim_end().ends_with('关'), "{:?}", lines[3]);
-        // 状态列右对齐：两行的状态从同一列开始
+        // 对齐表：状态列右对齐，两行的状态从同一列开始
         assert_eq!(column_of(&lines[2], "开"), column_of(&lines[3], "关"));
 
         // 状态栏换成控件专用的按键提示（宽字符在 TestBackend 里会被拆成两格，

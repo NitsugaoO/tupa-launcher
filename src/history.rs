@@ -100,7 +100,12 @@ pub fn save(items: &[Entry]) -> Result<()> {
 /// - 老记录只有输入行：把行填回输入框，不直接执行
 pub fn to_item(entry: &Entry) -> Item {
     match &entry.item {
-        Some(item) => item.clone(),
+        Some(item) => {
+            // 老快照的 web 列可能还是「域名」，这里顺手修成完整 URL
+            let mut item = item.clone();
+            item.normalize_web();
+            item
+        }
         None => Item::new(
             Kind::History,
             vec![entry.line.clone(), String::new()],
@@ -129,6 +134,75 @@ pub fn push(items: &mut Vec<Entry>, line: &str, item: Option<Item>) {
         },
     );
     items.truncate(LIMIT);
+}
+
+/// 执行成功后按「被执行的条目本身」给历史次数 +1（开屏点击走这条路）。
+///
+/// 开屏时输入框是空的，没有输入行可当去重键，[`push`] 会被空行挡掉；
+/// 所以这里按 [`Action`] 找回它对应的那条记录：次数累加、刷新时间、
+/// 顺手更新快照（列布局改过之后开屏显示也跟着变），再移到最前。
+///
+/// 找不到就什么都不做 —— 只有收藏、从没在输入框里执行过的东西不新建记录，
+/// 否则没有合理的 `line` 可写，还会挤占开屏那几条历史。
+/// 返回是否命中了已有记录。
+pub fn bump(items: &mut Vec<Entry>, item: &Item) -> bool {
+    let Some(index) = items.iter().position(|entry| {
+        entry
+            .item
+            .as_ref()
+            .is_some_and(|old| old.action == item.action)
+    }) else {
+        return false;
+    };
+
+    let mut entry = items.remove(index);
+    entry.hits = entry.hits.saturating_add(1);
+    entry.last_used = now_secs();
+    entry.item = Some(item.clone());
+    items.insert(0, entry);
+    items.truncate(LIMIT);
+    true
+}
+
+/// 开屏里执行成功后的记账：先按 `action` 找旧记录累加，找不到就补一条。
+///
+/// 补的那条需要一行 `line` 当去重键，用 `<前缀><provider> <完整标识>` 拼出来
+/// （见 [`synthetic_line`]）：既是唯一的，`Ctrl+↑` 回放时也能重跑。
+/// 返回是否记上了（重放不了的动作不记）。
+pub fn record_open(items: &mut Vec<Entry>, item: &Item, prefix: char) -> bool {
+    if bump(items, item) {
+        return true;
+    }
+    let Some(line) = synthetic_line(item, prefix) else {
+        return false;
+    };
+    push(items, &line, Some(item.clone()));
+    true
+}
+
+/// 给一条还没有历史的条目编一行输入（写文件的 / 改配置的 / 清理会话的不编）。
+fn synthetic_line(item: &Item, prefix: char) -> Option<String> {
+    let (keyword, key) = match &item.action {
+        Action::OpenUrl(url) => ("web", url.clone()),
+        Action::Launch { command, args, .. } => (
+            "app",
+            if args.is_empty() {
+                command.clone()
+            } else {
+                format!("{command} {}", args.join(" "))
+            },
+        ),
+        Action::Open(path) | Action::Reveal(path) => ("ev", path.display().to_string()),
+        Action::OpenInEditor { file, .. } => ("ev", file.display().to_string()),
+        Action::RunCommand { command, .. } | Action::LaunchInTerminal { command, .. } => {
+            ("run", command.clone())
+        }
+        _ => return None,
+    };
+    if key.trim().is_empty() {
+        return None;
+    }
+    Some(format!("{prefix}{keyword} {key}"))
 }
 
 // ---------------------------------------------------------------------------
@@ -162,6 +236,41 @@ pub fn sort_frecency(items: &mut [Entry], now: u64) {
     });
 }
 
+/// 某个动作在启动器里被执行过几次（同 `action` 的多条记录相加）。
+///
+/// 开屏最后一列显示的就是它；与 [`score`] 用的 `hits` 同源，只是那里取的是
+/// 「最近那条的分数」，这里要的是「一共用过几次」。
+pub fn hits_of(items: &[Entry], action: &Action) -> u32 {
+    items
+        .iter()
+        .filter(|entry| {
+            entry
+                .item
+                .as_ref()
+                .is_some_and(|item| &item.action == action)
+        })
+        .map(|entry| entry.hits)
+        .sum()
+}
+
+/// 某个动作在历史里的 frecency 得分（没记录就是 0）。
+///
+/// 收藏没有自己的使用计数：开屏里点收藏会补一条历史（`App::bump_item`），
+/// 所以收藏的排序直接借历史里同 `action` 那条的分数。
+pub fn score_of(items: &[Entry], action: &Action, now: u64) -> u64 {
+    items
+        .iter()
+        .filter(|entry| {
+            entry
+                .item
+                .as_ref()
+                .is_some_and(|item| &item.action == action)
+        })
+        .map(|entry| score(entry, now))
+        .max()
+        .unwrap_or(0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -177,6 +286,114 @@ mod tests {
         assert_eq!(items[0].hits, 2, "重复执行要累加次数");
         assert_eq!(items[1].hits, 1);
         assert!(items[0].last_used > 0);
+    }
+
+    #[test]
+    fn bump_counts_open_at_home() {
+        let code = Item::new(
+            Kind::App,
+            vec!["Visual Studio Code".to_string(), "code".to_string()],
+            Action::Launch {
+                command: "code".to_string(),
+                args: Vec::new(),
+                elevated: false,
+            },
+        );
+        let mut items = Vec::new();
+        push(&mut items, "code", Some(code.clone()));
+        push(&mut items, "other", None);
+
+        assert!(bump(&mut items, &code), "按 action 应该能找到那条记录");
+        assert_eq!(items[0].line, "code", "bump 之后要移到最前");
+        assert_eq!(items[0].hits, 2, "开屏点击也要累加次数");
+        assert!(items[0].last_used > 0);
+        assert_eq!(items[1].line, "other");
+    }
+
+    #[test]
+    fn bump_ignores_items_never_run_here() {
+        let favorite = Item::new(
+            Kind::Web,
+            vec!["Example".to_string(), "https://example.com".to_string()],
+            Action::OpenUrl("https://example.com".to_string()),
+        );
+        let mut items = Vec::new();
+        push(&mut items, "code", None);
+
+        assert!(!bump(&mut items, &favorite), "没执行过的不新建记录");
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].hits, 1);
+    }
+
+    #[test]
+    fn record_open_adds_a_history_line_for_favorites() {
+        let url = "https://a.example/x".to_string();
+        let item = Item::new(
+            Kind::Web,
+            vec!["示例".to_string(), url.clone()],
+            Action::OpenUrl(url.clone()),
+        );
+        let mut items = Vec::new();
+
+        assert!(record_open(&mut items, &item, '@'));
+        assert_eq!(items.len(), 1, "收藏里第一次点击要补一条历史");
+        assert_eq!(items[0].line, "@web https://a.example/x");
+        assert_eq!(items[0].hits, 1);
+
+        // 第二次就命中这条，累加而不新增
+        assert!(record_open(&mut items, &item, '@'));
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].hits, 2);
+    }
+
+    #[test]
+    fn record_open_skips_actions_that_cannot_be_replayed() {
+        let item = Item::new(
+            Kind::Web,
+            vec!["x".to_string()],
+            Action::FillInput("@cfg".to_string()),
+        );
+        let mut items = Vec::new();
+        assert!(!record_open(&mut items, &item, '@'));
+        assert!(items.is_empty());
+    }
+
+    #[test]
+    fn hits_of_sums_every_line_of_the_same_action() {
+        let url = "https://a.example/x".to_string();
+        let item = Item::new(
+            Kind::Web,
+            vec!["A".to_string(), url.clone()],
+            Action::OpenUrl(url.clone()),
+        );
+        let mut items = Vec::new();
+        push(&mut items, "code", Some(item.clone()));
+        push(&mut items, "code", Some(item.clone())); // hits = 2
+        push(&mut items, "@web a", Some(item.clone())); // 同一动作的另一行，hits = 1
+
+        assert_eq!(hits_of(&items, &Action::OpenUrl(url)), 3);
+        assert_eq!(hits_of(&items, &Action::OpenUrl("nope".into())), 0);
+    }
+
+    #[test]
+    fn score_of_reads_the_matching_action() {
+        let now = 1_000_000_000u64;
+        let url = "https://example.com".to_string();
+        let item = Item::new(
+            Kind::Web,
+            vec!["Example".to_string(), url.clone()],
+            Action::OpenUrl(url.clone()),
+        );
+        let mut items = Vec::new();
+        push(&mut items, "@web example", Some(item.clone()));
+        push(&mut items, "@web example", Some(item.clone()));
+
+        assert_eq!(score_of(&items, &Action::OpenUrl(url), now), 2 * 400);
+        assert_eq!(
+            score_of(&items, &Action::OpenUrl("https://other".into()), now),
+            0,
+            "没记录的动作得 0 分"
+        );
     }
 
     #[test]

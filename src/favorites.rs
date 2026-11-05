@@ -36,7 +36,12 @@ pub fn load() -> Vec<Item> {
     let Ok(text) = std::fs::read_to_string(&path) else {
         return Vec::new();
     };
-    parse(&text)
+    let mut items = parse(&text);
+    // 老收藏存的是旧列布局（第二列是域名），显示前修成完整 URL
+    for item in &mut items {
+        item.normalize_web();
+    }
+    items
 }
 
 /// 解析收藏文件内容：新格式（`columns`）优先，读不动再按旧格式（`title` / `subtitle`）转

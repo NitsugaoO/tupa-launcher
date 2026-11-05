@@ -19,7 +19,7 @@ pub struct Commands {
     prefix: char,
 }
 
-const COLUMNS: &[Column] = &[Column::new(1, 6, 16), Column::new(6, 0, 0)];
+pub(crate) const COLUMNS: &[Column] = &[Column::new(1, 6, 16), Column::new(6, 0, 0)];
 
 impl Commands {
     pub fn new(metas: Vec<Meta>, cfg: &Config) -> Self {

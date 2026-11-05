@@ -615,6 +615,12 @@ pub fn web_visits(count: i64) -> String {
     s(|| format!("{count} 次"), || format!("{count} visits"))
 }
 
+/// 开屏最后一列：这个条目在启动器里被执行过几次（`history.json` 的 hits），
+/// 与 [`web_visits`]（浏览器访问次数）是两回事。
+pub fn uses(count: u32) -> String {
+    s(|| format!("{count} 次"), || format!("{count} uses"))
+}
+
 pub fn config_line(line: Option<usize>) -> String {
     match line {
         Some(number) => s(|| format!("第 {number} 行"), || format!("line {number}")),
@@ -833,6 +839,7 @@ mod tests {
     fn formats_with_current_language() {
         assert_eq!(opened("x"), "已打开 x");
         assert_eq!(web_visits(3), "3 次");
+        assert_eq!(uses(2), "2 次");
     }
 
     #[test]

@@ -40,11 +40,14 @@ const EXACT_BONUS: i64 = 200;
 /// URL（host + 路径）里完整包含关键词的基准分
 const URL_BONUS: i64 = 60;
 
-/// 标题（宽）· 域名 · 访问次数
-const COLUMNS: &[Column] = &[
+/// 标题 · 完整网址 · 访问次数
+///
+/// 网址列比标题还宽：只看 `host` 分不出同一站点下的不同页面，
+/// 所以第二列直接放完整 URL（超宽会被截断，`Ctrl+Tab` 详情能看到全部）。
+pub(crate) const COLUMNS: &[Column] = &[
+    Column::new(4, 10, 0),
     Column::new(6, 12, 0),
-    Column::new(2, 8, 40),
-    Column::new(1, 0, 12),
+    Column::new(1, 4, 8),
 ];
 
 pub struct Web {
@@ -198,10 +201,10 @@ fn search_rows(rows: &[&Row], input: &str, max: usize, field: Field) -> Vec<Item
 }
 
 fn open_item(url: String) -> Item {
-    let host = host_of(&url).unwrap_or_default().to_string();
+    // 标题位就是网址本身，第二列只说明“这不是历史项”；不重复写一遍 URL
     Item::new(
         Kind::Web,
-        vec![url.clone(), host, crate::i18n::web_direct().to_string()],
+        vec![url.clone(), crate::i18n::web_direct().to_string()],
         Action::OpenUrl(url),
     )
 }
@@ -253,10 +256,13 @@ fn to_item(row: &Row) -> Item {
     } else {
         row.title.clone()
     };
-    let host = host_of(&row.url).unwrap_or_default().to_string();
     Item::new(
         Kind::Web,
-        vec![title, host, crate::i18n::web_visits(row.visit_count)],
+        vec![
+            title,
+            row.url.clone(),
+            crate::i18n::web_visits(row.visit_count),
+        ],
         Action::OpenUrl(row.url.clone()),
     )
 }
@@ -329,13 +335,6 @@ fn as_url(input: &str) -> Option<String> {
         url.push_str(path);
     }
     Some(url)
-}
-
-/// 取出网址的域名（`https://a.b/c` → `a.b`），失败就返回 `None`
-fn host_of(url: &str) -> Option<&str> {
-    let rest = url.split_once("://").map(|(_, rest)| rest).unwrap_or(url);
-    let host = rest.split(['/', '?', '#']).next()?;
-    if host.is_empty() { None } else { Some(host) }
 }
 
 // ---------------------------------------------------------------------------
@@ -499,8 +498,17 @@ mod tests {
     }
 
     #[test]
-    fn host_extraction() {
-        assert_eq!(host_of("https://a.b/c?d=1"), Some("a.b"));
-        assert_eq!(host_of("a.b"), Some("a.b"));
+    fn empty_title_falls_back_to_url() {
+        // 列布局的第二列就是完整 URL，标题为空时不能空着两列
+        let row = Row {
+            url: "https://example.com/a/b".to_string(),
+            title: "  ".to_string(),
+            visit_count: 2,
+            last_visit: 0,
+        };
+        let item = to_item(&row);
+        assert_eq!(item.columns[0], "https://example.com/a/b");
+        assert_eq!(item.columns[1], "https://example.com/a/b");
+        assert_eq!(item.columns[2], crate::i18n::web_visits(2));
     }
 }
