@@ -124,9 +124,14 @@ Control::{Run, Toggle{value}, Choice{options,index}, Number{value,min,max,step,s
 | daemon `FreeConsole` 后 spawn | 用 `util::detached_command`（`Stdio::null()`），否则 `Ok` 但不建窗口 |
 | 低级键盘钩子 | 300ms 超时，已弃用；热键走 `RegisterHotKey`，**永远不要吞修饰键抬起** |
 | WT 窗口识别 | 标题可能带后缀，用「类名 + 标题前缀」；**不能用 contains**（pi 的 `π - tupa-launcher` 会被误判） |
+| WezTerm 窗口识别 | `--class tupa-launcher` 在 Windows 上就是 win32 窗口类名（实测生效），**类名全机唯一，不要再查标题** —— WezTerm 的标题会跟着前台进程变（跑 ping 时变成 `PING.EXE`），拿标题匹配必然漏 |
+| 守护进程起 WezTerm | 用 `wezterm-gui.exe`（GUI 子系统，`detached_command` 直接 spawn 即可），**不要用 `wezterm.exe`**（控制台程序，会先弹黑窗）；反向的 WT 必须走 `ShellExecuteW` |
+| WezTerm 复用已有实例 | 不带 `--always-new-process` 时面板会挂进用户日常的 WezTerm/mux，类名与生命周期不再由我们控制；面板是常驻的，多一个进程无所谓 |
+| WezTerm 内联覆盖 | `--config key=value` 只作用于本实例，不动用户的 `wezterm.lua`。面板需要 `enable_tab_bar=false`（单标签也显示 tab 栏）、`window_padding` 全 0、`window_background_opacity=1.0`、`win32_system_backdrop='Disable'`（不透明时 Acrylic 没意义）。`win32_system_backdrop` **没有 `None`**，合法值是 `Disable`/`Acrylic`/`Mica`/`Tabbed`/`Auto` |
+| terminal 兜底 | 配置写了 `wezterm` 但本机没装时，`launch_wezterm` 退回 `launch_wt`；`find_panel` 同时接受两种类名，所以退回后仍能找到窗口，不会每次热键都重启一个 |
 | Edge 历史被独占 | 必须先复制到临时目录再用 SQLite 打开 |
 | `last_visit_time` 单位 | 是 **Chromium 微秒**（1601 起），`/1_000_000 - 11_644_473_600`；网上的 100ns 是错的 |
-| `Ctrl+Tab` | 被 Windows Terminal 默认占用，面板收不到；备用键 `Ctrl+O` |
+| `Ctrl+Tab` | 被 Windows Terminal 和 WezTerm 都默认占用（切标签），面板收不到；备用键 `Ctrl+O` |
 | 状态栏提示宽度 | 英文比中文宽，必须按 `UnicodeWidthStr::width` 算，写死会截断 |
 | PowerShell 新窗口的起始目录 | 用 `wt -d <目录>`（不经 wt 时用 `Command::current_dir`）；**不要拼 `Set-Location …; 命令`**，见下一行 |
 | `wt` 把 `;` 当命令分隔符 | **连引号里也照切**。`-Command "Set-Location x; pi --session y"` 会被切成两条，第二段带前导空格的 `" pi --session y"` 被当成可执行文件 → `[错误 2147942402 (0x80070002)] 系统找不到指定的文件`（2026-11-03 `:pi` 踩到）。给 PowerShell 传脚本一律用 `-EncodedCommand`（UTF-16LE base64，不含 `;` 和空格） |

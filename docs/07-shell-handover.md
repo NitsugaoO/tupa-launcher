@@ -6,10 +6,15 @@
 >
 > 阶段 1–5 均已实现（`--gui` 可用、IME 已接入、daemon 支持拉起自绘窗口）；
 > 但 `[daemon] panel` 默认仍是 `tui`，剩下的都是打磨项（见 §1）。
+>
+> **（2026-11 起冷冻）**：面板的默认宿主改成 **WezTerm**（`[daemon] terminal`，见
+> [`06-handover.md`](06-handover.md) §4），圆角/无边框/居中这些原来要靠自绘才能得到的效果，
+> 现成终端 + Win11 DWM + GlazeWM 已经能提供。本文件保留作资产记录：
+> 除非以后真的需要像素级布局或淡入动画，否则**不要继续往这里投时间**。
 
 ## 0. 一句话目标
 
-把面板从 `wt -p tupa-launcher` 换成 **`tupa-launcher.exe --gui`** 的自绘无边框窗口：
+把面板从终端的标签页换成 **`tupa-launcher.exe --gui`** 的自绘无边框窗口（**已冷冻，见文首**）：
 
 - 复用 `App` 状态机、`ui::draw`、所有 provider
 - 保留现有 TUI（`--gui` 并存，先不改默认）

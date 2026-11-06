@@ -30,6 +30,7 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result};
 
 pub use crate::util::PanelKind;
+pub use crate::util::TerminalKind;
 
 use windows_sys::Win32::Foundation::{GetLastError, HWND, LPARAM, LRESULT, WPARAM};
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
@@ -45,8 +46,18 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     WM_APP, WM_HOTKEY, WM_KEYDOWN, WM_SYSKEYDOWN,
 };
 
-/// 终端面板使用的 WT profile 名
+/// 终端面板使用的 WT profile 名（仅在退回 Windows Terminal 时用）
 const WT_PROFILE: &str = "tupa-launcher";
+
+/// 面板外壳：用哪种面板 + TUI 跑在哪个终端里。
+///
+/// 两个字段都写进配置（`[daemon] panel` / `[daemon] terminal`），
+/// 启动时解析一次就固定下来 —— 消息循环里每帧重算没意义。
+#[derive(Debug, Clone, Copy)]
+pub struct Shell {
+    pub panel: PanelKind,
+    pub terminal: TerminalKind,
+}
 
 /// 热键 ID（同一个进程里唯一即可）
 const HOTKEY_ID: i32 = 1;
@@ -144,7 +155,7 @@ fn parse_key(name: &str) -> Result<u32> {
 // 主流程
 // ---------------------------------------------------------------------------
 
-pub fn run(hotkey: &Hotkey, copilot_key: bool, panel: PanelKind, debug: bool) -> Result<()> {
+pub fn run(hotkey: &Hotkey, copilot_key: bool, shell: Shell, debug: bool) -> Result<()> {
     if !is_single_instance() {
         log("已有守护进程在运行，本次退出");
         return Ok(());
@@ -205,7 +216,7 @@ pub fn run(hotkey: &Hotkey, copilot_key: bool, panel: PanelKind, debug: bool) ->
             // 窗口操作丢给独立线程：消息循环要一直保持轻快
             std::thread::spawn(move || {
                 let _guard = TOGGLE_LOCK.lock();
-                toggle_panel(panel, debug);
+                toggle_panel(shell, debug);
             });
         }
     }
@@ -286,13 +297,13 @@ fn inject_key_up(vk: u16) {
 // 窗口
 // ---------------------------------------------------------------------------
 
-fn toggle_panel(panel: PanelKind, debug: bool) {
-    let hwnd = find_panel(panel);
+fn toggle_panel(shell: Shell, debug: bool) {
+    let hwnd = find_panel(shell.panel);
     if hwnd.is_null() {
         if debug {
             log("未找到面板窗口，尝试启动");
         }
-        launch_panel(panel, debug);
+        launch_panel(shell, debug);
         return;
     }
 
@@ -306,9 +317,9 @@ fn toggle_panel(panel: PanelKind, debug: bool) {
         }
 
         if visible && is_foreground {
-            crate::util::hide_panel(panel);
+            crate::util::hide_panel(shell.panel);
         } else {
-            crate::util::show_panel(panel);
+            crate::util::show_panel(shell.panel);
             SetForegroundWindow(hwnd);
         }
     }
@@ -319,15 +330,11 @@ fn find_panel(panel: PanelKind) -> HWND {
     crate::util::find_panel(panel)
 }
 
-/// 启动面板窗口：拉起同目录的 `tupa-launcher.exe --gui`。
-///
-/// 面板现在是普通的 GUI 进程（不再依赖 Windows Terminal），
-/// 所以直接 `CreateProcess` 就行；`detached_command` 会把标准句柄换成 null，
-/// 守护进程 `FreeConsole()` 之后也不会把无效句柄继承过去。
-fn launch_panel(panel: PanelKind, debug: bool) {
-    match panel {
+/// 启动面板窗口：自绘窗口直接拉起 `--gui`，终端面板拉起宿主终端。
+fn launch_panel(shell: Shell, debug: bool) {
+    match shell.panel {
         PanelKind::Gui => launch_gui(debug),
-        PanelKind::Tui => launch_tui(debug),
+        PanelKind::Tui => launch_terminal(shell.terminal, debug),
     }
 }
 
@@ -350,12 +357,83 @@ fn launch_gui(debug: bool) {
     }
 }
 
-/// 终端面板：`wt.exe -p tupa-launcher`。
+/// 终端面板：按配置选 WezTerm / Windows Terminal，都失败就报错。
+fn launch_terminal(terminal: TerminalKind, debug: bool) {
+    match terminal {
+        TerminalKind::Wezterm => launch_wezterm(debug),
+        TerminalKind::Wt => launch_wt(debug),
+    }
+}
+
+/// WezTerm 面板：`wezterm-gui start --always-new-process --class tupa-launcher -- <自身>`。
+///
+/// 几个参数的来历（都是实测定下来的，别随手删）：
+///
+/// - `wezterm-gui` 而不是 `wezterm`：前者是 GUI 子系统，守护进程 `FreeConsole()` 之后直接
+///   `CreateProcess` 就能起窗口；后者是控制台程序，会先弹一个黑窗。
+/// - `--class tupa-launcher`：Windows 上 `--class` 就是 win32 窗口类名。实测生效，
+///   于是 `find_panel` 可以只认类名、不必再猜标题（WezTerm 的标题会跟着前台进程跑）。
+/// - `--always-new-process`：不复用已经在跑的 WezTerm / mux。否则面板会挂进用户日常那个
+///   WezTerm 实例里，类名和生命周期都不再由我们控制。面板是常驻的，多一个进程无所谓。
+/// - `--cwd`：和原来的 WT profile 一致（用户主目录），否则会继承守护进程的 cwd。
+///
+/// `--config` 是**本实例独有**的覆盖，不碰用户的 `wezterm.lua`。用户那份配置适合日常终端，
+/// 但四个值放在面板上都不对（实测逐项确认）：
+///
+/// | 键 | 用户值 | 面板需要 |
+/// |---|---|---|
+/// | `enable_tab_bar` | `true` | `false` —— 单标签也显示 tab 栏，白吃一行 |
+/// | `window_padding` | `8/6` | 全 `0` —— TUI 自己画边框，要让内容贴边 |
+/// | `window_background_opacity` | `0.72` | `1.0` —— 和原 WT profile 一样不透明 |
+/// | `win32_system_backdrop` | `Acrylic` | `Disable` —— 不透明时没意义，还会多一层合成 |
+///
+/// 实测冷启动到窗口出现 ~700–900ms。热键唤出走 `ShowWindow`（实测 ~65ms），跟这个延迟无关。
+fn launch_wezterm(debug: bool) {
+    let Some(gui) = crate::util::wezterm_gui() else {
+        log("找不到 wezterm-gui.exe，退回 Windows Terminal");
+        launch_wt(debug);
+        return;
+    };
+    let Ok(exe) = std::env::current_exe() else {
+        log("启动面板失败：拿不到自身路径");
+        return;
+    };
+
+    let mut command = crate::util::detached_command(&gui);
+    command
+        .arg("--config")
+        .arg("enable_tab_bar=false")
+        .arg("--config")
+        .arg("window_padding={left=0,right=0,top=0,bottom=0}")
+        .arg("--config")
+        .arg("window_background_opacity=1.0")
+        .arg("--config")
+        .arg("win32_system_backdrop='Disable'")
+        .arg("start")
+        .arg("--always-new-process")
+        .arg("--class")
+        .arg(crate::util::WEZTERM_CLASS)
+        .arg("--cwd")
+        .arg(dirs::home_dir().unwrap_or_default())
+        .arg("--")
+        .arg(&exe);
+
+    match command.spawn() {
+        Ok(_) => {
+            if debug {
+                log(&format!("已启动 WezTerm 面板 {}", gui.display()));
+            }
+        }
+        Err(error) => log(&format!("启动 WezTerm 面板失败：{error}，退回 Windows Terminal")),
+    }
+}
+
+/// Windows Terminal 面板：`wt.exe -p tupa-launcher`（WezTerm 不可用时的兜底）。
 ///
 /// 必须用 `ShellExecuteW` 而不是 `CreateProcess`：守护进程调用过 `FreeConsole()`，
 /// 自身已经没有控制台了，而 `wt.exe` 是控制台程序 —— 直接 spawn 会「启动成功」
 /// 但根本不创建窗口（实测 spawn 返回 Ok，窗口却一个都没出现）。
-fn launch_tui(debug: bool) {
+fn launch_wt(debug: bool) {
     use windows_sys::Win32::UI::Shell::ShellExecuteW;
     use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
 

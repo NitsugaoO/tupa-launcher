@@ -56,7 +56,10 @@ fn main() -> Result<()> {
             return daemon::run(
                 &hotkey,
                 cfg.daemon.copilot_key,
-                util::PanelKind::parse(&cfg.daemon.panel),
+                daemon::Shell {
+                    panel: util::PanelKind::parse(&cfg.daemon.panel),
+                    terminal: util::TerminalKind::resolve(&cfg.daemon.terminal),
+                },
                 args.iter().any(|a| a == "--debug"),
             );
         }

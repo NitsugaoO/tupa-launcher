@@ -474,9 +474,14 @@ src/
 
 - 只在 Windows 上验证过（`exec.rs`、`daemon.rs` 和 `everything.rs` 有 Windows 专属逻辑，其余跨平台）。
 - `es.exe` 通过管道输出的是**系统 ANSI 代码页**（中文系统 = GBK），代码里有 UTF-8 → GBK 的回退解码。
-- 全局热键默认 `Alt+`` `（`config.toml` 的 `[daemon] hotkey` 可改）；面板依赖 Windows Terminal，
-  `Ctrl+Tab` 被 WT 默认占用，所以「详细信息」还准备了 `Ctrl+O`。
-- 面板窗口是 Windows Terminal 窗口，做不到无边框浮层；“居中”是守护进程用 `SetWindowPos` 摆出来的。
+- 全局热键默认 `Alt+`` `（`config.toml` 的 `[daemon] hotkey` 可改）；TUI 面板默认跑在
+  **WezTerm** 里（`[daemon] terminal = "auto"`，装了就用），没装则退回 Windows Terminal。
+  `Ctrl+Tab` 两种终端都自己占着，所以「详细信息」还准备了 `Ctrl+O`。
+- WezTerm 面板靠 `--class tupa-launcher` 的**窗口类名**识别（全机唯一），比 WT 靠标题前缀稳；
+  WezTerm 的窗口标题会跟着前台进程变，不能拿去匹配。面板用 `--config` 内联覆盖了用户的
+  `wezterm.lua`：关 tab 栏、padding 归零、背景不透明。
+- 退回 WT 时需要 `config.toml` 里有个叫 `tupa-launcher` 的 profile；两种宿主都做不到无边框，
+  "居中 / 62%×55%" 由 GlazeWM `window_rules` 负责。
 
 ## 路线图
 
@@ -493,6 +498,7 @@ src/
 - [x] **v0.5** `:web` 时间范围（默认一周 / month / all）+ 搜不到才直接打开；`:run` 默认新窗口执行；命令前缀可配置 + 去掉同义修饰符；`:new` 新建文件
 - [x] **v0.7** `:set` 应用内开关 / 选项 / 数值（`actions.toml` 驱动 + 内置深色模式 / 亮度 / 电池养护 / 节能 / 保持唤醒 / 更新订阅）
 - [x] **v0.9** `:blog`（新建文章 / 本地预览 / 管理页 / 站点入口，配置在 `[blog]` 段；取代旧的 `:new`）
-- [ ] **v0.8** 自建无边框窗口，脱离 Windows Terminal（设计见 [`docs/05-native-window.md`](docs/05-native-window.md)）
-      —— GUI 已能显示与输入（`--gui` / `[daemon] panel = "gui"`），剩余：中文输入法 IME、切换默认面板
+- [x] **v0.8** 自建无边框窗口，脱离 Windows Terminal（设计见 [`docs/05-native-window.md`](docs/05-native-window.md))
+      —— GUI 已能显示与输入（`--gui` / `[daemon] panel = "gui"`），但**已停止打磨**：
+      默认宿主改为 WezTerm（`[daemon] terminal`），`WindowsTerminal` 只在找不到 WezTerm 时兜底
       （开工说明见 [`docs/07-shell-handover.md`](docs/07-shell-handover.md)，当前进度见 [`STATE.md`](STATE.md)）

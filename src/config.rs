@@ -39,11 +39,16 @@ pub struct Daemon {
     /// 所以要走低级键盘钩子拦下 `F23`；不想要就设 `false`。
     pub copilot_key: bool,
 
-    /// 热键唤起的面板用哪一版：`tui`（Windows Terminal，默认）还是 `gui`（自绘窗口）。
+    /// 热键唤起的面板用哪一版：`tui`（终端里的界面，默认）还是 `gui`（自绘窗口）。
     ///
     /// 两套界面共用同一份代码和状态机，只是外壳不同。
-    /// GUI 版还在打磨（字体/圆角/鼠标等），所以默认仍走终端版。
     pub panel: String,
+
+    /// TUI 面板跑在哪个终端里：`auto`（默认）、`wezterm`、`wt`。
+    ///
+    /// `auto` = 装了 WezTerm 就用 WezTerm（窗口类名可控，不会误判），
+    /// 否则退回 Windows Terminal（需要 `wt` 里有个叫 `tupa-launcher` 的 profile）。
+    pub terminal: String,
 }
 
 impl Default for Daemon {
@@ -52,6 +57,7 @@ impl Default for Daemon {
             hotkey: "alt+`".to_string(),
             copilot_key: true,
             panel: "tui".to_string(),
+            terminal: "auto".to_string(),
         }
     }
 }

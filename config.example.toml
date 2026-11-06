@@ -50,9 +50,14 @@ hotkey = "alt+`"
 # 是否接管 Copilot 键（Win+Shift+F23）
 copilot_key = true
 # 热键唤起哪种面板：
-#   tui = Windows Terminal 里的终端界面（默认）
+#   tui = 终端模拟器里的终端界面（默认）
 #   gui = 自绘无边框窗口（实验特性，相当于 tupa-launcher --gui）
 panel = "tui"
+# TUI 面板跑在哪个终端里：auto / wezterm / wt
+#   auto = 装了 WezTerm 就用 WezTerm，否则退回 Windows Terminal
+# WezTerm 面板用 `--class tupa-launcher` 锁定窗口（类名全机唯一），比 WT 靠标题前缀更稳。
+# 退回 wt 时需要一个叫 `tupa-launcher` 的 Windows Terminal profile。
+terminal = "auto"
 
 # ---------------------------------------------------------------------------
 # GlazeWM 集成

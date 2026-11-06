@@ -175,12 +175,12 @@ pub fn resolve_executable(command: &str) -> Option<PathBuf> {
 }
 
 // ---------------------------------------------------------------------------
-// 面板窗口（Windows Terminal）
+// 面板窗口（终端宿主 / 自绘窗口）
 // ---------------------------------------------------------------------------
 
 /// 面板窗口的外壳类型
 ///
-/// - `Tui`：Windows Terminal 里的终端界面（窗口属于 `WindowsTerminal.exe`）
+/// - `Tui`：终端模拟器里的终端界面（窗口属于终端进程）
 /// - `Gui`：`tupa-launcher --gui` 的自绘窗口（窗口属于 `tupa-launcher.exe`）
 ///
 /// 两者的窗口归属完全不同，所以找窗口的方式也必须分开。
@@ -200,6 +200,62 @@ impl PanelKind {
     }
 }
 
+/// TUI 面板跑在哪个终端模拟器里。
+///
+/// 两个宿主的差别只有「怎么启动」和「怎么找回窗口」：
+///
+/// - **WezTerm**：`wezterm-gui start --class tupa-launcher -- <自身>`。窗口类名是我们
+///   自己指定的，天然唯一；但它**会跟着前台进程改标题**（实测变成 `TUPA-LAUNCHER.EXE`），
+///   所以不能靠标题识别。
+/// - **Windows Terminal**：`wt.exe -p tupa-launcher`。类名固定是 `CASCADIA_HOSTING_WINDOW_CLASS`，
+///   只能靠 `suppressApplicationTitle` + 标题前缀区分。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TerminalKind {
+    Wezterm,
+    Wt,
+}
+
+impl TerminalKind {
+    /// 解析配置里的 `[daemon] terminal`。
+    ///
+    /// `auto`（以及任何看不懂的值）= 装了 WezTerm 就用 WezTerm，否则退回 Windows Terminal。
+    /// 显式写 `wezterm` 但本机没装时也会在启动阶段退回 WT（见 `daemon::launch_wezterm`）。
+    pub fn resolve(value: &str) -> TerminalKind {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "wezterm" => TerminalKind::Wezterm,
+            "wt" | "windows-terminal" | "windowsterminal" => TerminalKind::Wt,
+            // auto / 未知值 / 空 → 按本机装了什么决定
+            _ if wezterm_gui().is_some() => TerminalKind::Wezterm,
+            _ => TerminalKind::Wt,
+        }
+    }
+}
+
+/// 找 `wezterm-gui.exe`。
+///
+/// 优先 PATH；用户实际是**便携装**（不在 PATH 里），所以再按 WezTerm 的两种默认目录补探。
+/// 返回 `None` 表示本机没装，调用方退回 Windows Terminal。
+pub fn wezterm_gui() -> Option<PathBuf> {
+    if let Some(path) = which("wezterm-gui") {
+        return Some(path);
+    }
+
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    if let Ok(local) = std::env::var("LOCALAPPDATA") {
+        let base = PathBuf::from(local).join("Programs").join("WezTerm");
+        candidates.push(base.join("wezterm-nightly").join("wezterm-gui.exe"));
+        candidates.push(base.join("wezterm-gui.exe"));
+    }
+    if let Ok(program_files) = std::env::var("ProgramFiles") {
+        candidates.push(
+            PathBuf::from(program_files)
+                .join("WezTerm")
+                .join("wezterm-gui.exe"),
+        );
+    }
+    candidates.into_iter().find(|path| path.is_file())
+}
+
 /// 面板窗口标题
 #[cfg(windows)]
 pub const PANEL_TITLE: &str = "tupa-launcher";
@@ -212,6 +268,9 @@ pub const PANEL_CLASS: &str = "TupaLauncherWindow";
 /// Windows Terminal 的窗口类名（TUI 面板藏在它里面）
 #[cfg(windows)]
 pub const WT_CLASS: &str = "CASCADIA_HOSTING_WINDOW_CLASS";
+/// WezTerm 面板的窗口类名：启动时用 `--class` 指定，所以是**我们说了算**的唯一值。
+#[cfg(windows)]
+pub const WEZTERM_CLASS: &str = "tupa-launcher";
 
 #[cfg(windows)]
 static FOUND_PANEL: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
@@ -236,10 +295,12 @@ fn is_panel_title(title: &str) -> bool {
 
 /// 找指定类型的面板窗口。
 ///
-/// - TUI：窗口类是 `CASCADIA_HOSTING_WINDOW_CLASS`，标题前缀 `tupa-launcher`
+/// - TUI + WezTerm：窗口类是 `tupa-launcher`（`--class` 指定），**类名即唯一标识**，
+///   不再看标题（WezTerm 的标题会跟着前台进程跑，认不住）
+/// - TUI + Windows Terminal：窗口类是 `CASCADIA_HOSTING_WINDOW_CLASS`，还要标题前缀匹配
 /// - GUI：窗口类是 `TupaLauncherWindow`，进程是 `tupa-launcher.exe`
 ///
-/// 两种都必须按标题锁定，否则 pi 的 `π - tupa-launcher` 会被误判。
+/// 后两种必须按标题锁定，否则 pi 的 `π - tupa-launcher` 会被误判。
 #[cfg(windows)]
 pub fn find_panel(kind: PanelKind) -> windows_sys::Win32::Foundation::HWND {
     use std::sync::atomic::Ordering;
@@ -264,13 +325,21 @@ unsafe extern "system" fn enum_panel_proc(
 
     let class = window_class(hwnd);
     let want_gui = PANEL_KIND.load(Ordering::SeqCst) == 1;
+    let is_wezterm = !want_gui && class == WEZTERM_CLASS;
     let class_ok = if want_gui {
         class == PANEL_CLASS
     } else {
-        class == WT_CLASS
+        is_wezterm || class == WT_CLASS
     };
     if !class_ok {
         return 1;
+    }
+
+    // WezTerm 的类名是我们 `--class` 指定的，全机唯一 —— 到此就可以收工。
+    // 它的窗口标题会随前台进程变（实测跑 ping 时标题是 `PING.EXE`），必须跳过标题检查。
+    if is_wezterm {
+        FOUND_PANEL.store(hwnd as usize, Ordering::SeqCst);
+        return 0;
     }
 
     let mut title_buf = [0u16; 512];
