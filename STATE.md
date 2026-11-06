@@ -1,6 +1,6 @@
 # tupa-launcher 状态
 
-updated: 2026-11-05 · code: `3edd1e9`（最后一次改动代码的提交）· 同步状态以 `git status -sb` 为准
+updated: 2026-11-06 · code: `fa3fc45`（最后一次改动代码的提交）· 同步状态以 `git status -sb` 为准
 
 > 判断本文件是否过期：比较 `code` 与 `git log -1 --format=%h -- src Cargo.toml`。
 > 只改文档的提交不算过期。
@@ -23,8 +23,9 @@ updated: 2026-11-05 · code: `3edd1e9`（最后一次改动代码的提交）· 
   旧的 `new` provider / `Action::CreateFile` / `general.new_files_dir` 已删干净
 - **自绘 GUI 已能跑**：`src/gui/`（winit + cosmic-text + softbuffer），窗口 / 字体 / 键位 / 中文输入法（IME）/ daemon 接管都已实现；
   用 `--gui` 或在 `config.toml` 里设 `[daemon] panel = "gui"` 打开
-- **但默认仍是 `tui`**：`daemon::launch_panel` 按 `[daemon] panel` 分流，TUI 走 `wt -p tupa-launcher`；
-  GUI 尚未打磨到可以当默认
+- **但默认仍是 `tui`**：`daemon::launch_panel` 按 `[daemon] panel` 分流；
+  **自绘 GUI 已冷冻（2026-11-06）**：圆角 / 无边框 / 居中这些由现成终端 + Win11 DWM + GlazeWM 覆盖，
+  `src/gui/` 保留当资产，不再投时间（`docs/07-shell-handover.md` 文首已标停）
 - **`:pi:clean` 已加入（2026-10-25）**：清理视图挂在 `:pi` 上（`clean` 修饰符，
   实现在 `src/providers/clean.rs`）。时间窗口是前置条件（默认两周，
   `:pi:clean:week` / `:pi:clean:month`），窗口内与收藏的**不列出**；已总结或消息数 ≥ 8 →
@@ -44,7 +45,8 @@ updated: 2026-11-05 · code: `3edd1e9`（最后一次改动代码的提交）· 
   `all` 与 `app` 共用同一份 `Arc<Apps>`（不重复解析 55 个 `.lnk`）。`[general] default_provider`
   默认值 `app` → **`all`**；`@app code` 仍然只搜应用。配套把 `Apps::query` / `Hist::query`
   拆出 `ranked()`（返回 `(分数, Item)`）给混排用
-- 用户本机实际配置：`command_prefix = "@"`、`panel = "tui"`、热键 `alt+\``、`default_provider = "all"`
+- 用户本机实际配置：`command_prefix = "@"`、`panel = "tui"`、`terminal = "auto"`（=WezTerm）、
+  热键 `alt+\``、`default_provider = "all"`
 - **应用列表扩到 55 项（2026-11-01，只动本机配置，未改仓库代码）**：`[[apps]]` 18 → 55，
   按常用度分五组重排（天天用 12 / 工作沟通 9 / 桌面系统 10 / 网络 4 / 影音杂项 20）；
   `general.max_results` 30 → **60** —— `src/providers/apps.rs` 空查询走 `take(self.max)`，
@@ -112,12 +114,22 @@ updated: 2026-11-05 · code: `3edd1e9`（最后一次改动代码的提交）· 
   改了 `config.rs` 默认值与 `config.example.toml`（本机 `config.toml` 无 `[blog]` 段，靠默认值生效）
 - **`--help` 的 `:new <文件名>` 残留已删（2026-11-05）**：改为
   `:blog [new|manage|stop]`（i18n 中英两处）
+- **TUI 面板宿主改为 WezTerm（2026-11-06）**：新增 `[daemon] terminal = auto|wezterm|wt`（默认 auto）。
+  `launch_wezterm` 用 `wezterm-gui --config … start --always-new-process --class tupa-launcher -- <自身>`：
+  `--class` 在 Windows 上就是 win32 窗口类名（实测生效），`find_panel` 对 Tui 只认类名、不再猜标题
+  （WezTerm 的标题会跟着前台进程变，实测跑 ping 时是 `PING.EXE`）。`--config` 只作用于本实例、不动
+  `wezterm.lua`：`enable_tab_bar=false` / padding 全 0 / `opacity=1.0` / `win32_system_backdrop='Disable'`
+  （**没有 `None` 这个合法值**）。`wezterm_gui()` 按 PATH → `%LOCALAPPDATA%\Programs\WezTerm\wezterm-nightly`
+  → Program Files 探测；找不到就退回 `wt -p tupa-launcher`（`find_panel` 两种类名都认，退回后不会反复重启）。
+  实测：冷启动到窗口出现 698–918ms、热键显隐 63–69ms、`SW_HIDE`/`SW_SHOW` 连做三轮稳定。
+  GlazeWM 规则已加 `window_class = 'tupa-launcher'`（WT 那条降为第三顺位兜底，权威源在 my_dot，已同步）
 
 ## 下一步
 
-1. **GUI 打磨**（[`docs/07-shell-handover.md`](docs/07-shell-handover.md) §1「还没做的」）：
-   圆角 / 阴影 / 淡入、鼠标点击、滚动条、DPI 切换实测、窗口尺寸配置项
-2. 实机跑一段时间 GUI 后，再把 `[daemon] panel` 的默认值从 `tui` 改成 `gui`（保留 TUI 兜底）
+1. （**已冷冻，不做**）GUI 打磨 与「切默认 panel」：`src/gui/` 只当资产保留，
+   真要像素级布局 / 淡入动画时再解冻（理由见阶段节）
+2. WezTerm 面板的字体与底色现在来自用户的 `wezterm.lua`（不是 tupa 的 `theme.toml`；两边都是
+   Everforest 所以看不出差别）：要统一就在 `--config` 里补 `font` / `colors`，或并入下面第 3 条
 3. 主题并入 `~/Themes/generator/generate.py`（现在 `theme.toml` 是手改的，权威色板是
    `~/Themes/themes/everforest/tokens.yaml`）：让生成器直接产出 `~/.config/tupa-launcher/theme.toml`，
    跟博客 / pi / 终端主题同一个来源
@@ -135,9 +147,9 @@ updated: 2026-11-05 · code: `3edd1e9`（最后一次改动代码的提交）· 
 ## 待验证
 
 ```bash
-cargo test --release      # 全绿（2026-11-05 实测 130 passed，数字以输出为准）
-cargo clippy --release    # 零警告（2026-11-05 实测）
-tupa-launcher.exe --check # 55 项应用全部可解析、空输入列 55 条（2026-11-05 实测）
+cargo test --release      # 全绿（2026-11-06 实测 130 passed，数字以输出为准）
+cargo clippy --release    # 零警告（2026-11-06 实测）
+tupa-launcher.exe --check # 55 项应用全部可解析（2026-11-06 实测）
 ```
 
 改完代码必须**重启守护进程**，否则跑的还是旧 exe —— 步骤见 [`AGENTS.md`](AGENTS.md)。
@@ -157,8 +169,14 @@ tupa-launcher.exe --check # 55 项应用全部可解析、空输入列 55 条（
 - `@blog` → 本地预览：面板停留约 5–6 秒（不冻结），随后浏览器弹出；**再回车应秒开、不重复起进程**
 - `@blog` → 运行中的「停止管理页 / 停止本地预览」：应提示「已停止…（PID …）」且端口释放；
   `@blog:stop` 一次停掉在跑的全部
-- 事实记录：2026-11-05 收尾时 4000 / 5173 **都没有监听**（当天 5173 曾由「管理页」起过），
-  停止链路**尚未证实是手点通过的**
+- 事实记录：2026-11-06 收尾时 4000 / 5173 **仍没有监听**，停止链路**仍未手点通过**
+
+**2026-11-06 待手点确认（WezTerm 面板）**：
+
+- `alt+\`` 唤起后打中文（`@web <中文>`、`:blog:new 测试`）：IME 组合输入与候选框位置是否正常
+  —— **切宿主唯一没自动验过的点**（WT 一直是好的）。有问题把 `[daemon] terminal` 改回 `"wt"` 即可，不用改代码
+- 开屏在 WezTerm 12pt 下的列宽 / 行数是否顺眼（WT 与 WezTerm 字号未必一致）
+- `Esc` 隐藏 → 焦点在别的窗口时再按热键，应正常弹回前台
 
 ## 入口
 
