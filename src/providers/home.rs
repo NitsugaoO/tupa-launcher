@@ -4,12 +4,14 @@
 //! 一旦开始打字就回到正常的默认 provider，所以它不需要关键字补全，
 //! 也不会出现在命令列表里。
 
+use std::path::PathBuf;
+
 use fuzzy_matcher::FuzzyMatcher;
 use fuzzy_matcher::skim::SkimMatcherV2;
 
-use super::{Action, Column, Item, Kind, Provider};
+use super::{Action, Column, Item, Kind, Provider, go};
 use crate::config::Config;
-use crate::{favorites, history};
+use crate::{clipboard, favorites, history, i18n};
 
 /// 这个 provider 的关键字（只用于反查下标，不参与输入解析）
 pub const KEYWORD: &str = "home";
@@ -30,6 +32,8 @@ pub(crate) const COLUMNS: &[Column] = &[
 pub struct Home {
     max: usize,
     frecency: bool,
+    /// 剪贴板里是路径 / 网址时，开屏第一行给一条「跳过去」的条目
+    clipboard: bool,
 }
 
 impl Home {
@@ -37,8 +41,42 @@ impl Home {
         Home {
             max: cfg.general.max_results,
             frecency: cfg.general.frecency,
+            clipboard: cfg.general.clipboard,
         }
     }
+}
+
+/// 剪贴板内容 → 一条可以直接执行的条目。
+///
+/// 只认两种：**存在的路径**（目录 / 文件；`C:\a`、`C:/a`、`file:///…`、带引号、
+/// `~` 都行，和 `:go` 同一套规整）和 **http(s) 网址**。其余内容（代码片段、
+/// 一段普通文字）一律不显示 —— 否则开屏永远多一条不相干的行。
+fn clipboard_item(text: &str) -> Option<Item> {
+    let raw = text.trim();
+    if raw.is_empty() || raw.contains('\n') {
+        return None;
+    }
+
+    // 先看网址：`go::normalize` 会把 `/` 换成 `\`，对 URL 是毁灭性的
+    let lower = raw.to_lowercase();
+    if lower.starts_with("http://") || lower.starts_with("https://") {
+        if raw.chars().any(char::is_whitespace) {
+            return None; // 复制的是一段带链接的文字，不是链接本身
+        }
+        return Some(Item::new(
+            Kind::Clip,
+            vec![raw.to_string(), i18n::from_clipboard().to_string()],
+            Action::OpenUrl(raw.to_string()),
+        ));
+    }
+
+    let path = PathBuf::from(go::normalize(raw));
+    if !path.exists() {
+        return None;
+    }
+    let mut item = go::item_for_path(path);
+    item.kind = Kind::Clip;
+    Some(item)
 }
 
 /// 开屏最后一列 = 这个条目在启动器里被执行过几次。
@@ -136,6 +174,16 @@ impl Provider for Home {
                 matcher.fuzzy_match(item.title(), keyword).is_some()
                     || matcher.fuzzy_match(item.subtitle(), keyword).is_some()
             });
+        }
+
+        // 0) 剪贴板里的路径 / 网址：插在收藏前面，但**不抢默认选中**
+        //    （见 `app::default_selection`）—— 唤起后随手回车不会误跳到
+        //    很久以前复制的路径，想用它按一下 ↑ 就行。
+        if keyword.is_empty()
+            && self.clipboard
+            && let Some(item) = clipboard::text().as_deref().and_then(clipboard_item)
+        {
+            items.insert(0, item);
         }
 
         // 2) 最近执行的条目：有快照的（打开过的文件 / 网页）直接执行，
@@ -282,5 +330,35 @@ mod tests {
         let found = latest_for(&entries, &hit.action).expect("应该按 action 找到");
         assert_eq!(found.columns[0], "A");
         assert!(latest_for(&entries, &Action::OpenUrl("nope".into())).is_none());
+    }
+
+    #[test]
+    fn clipboard_item_accepts_existing_paths_and_urls() {
+        let dir = std::env::temp_dir();
+        let item = clipboard_item(&dir.display().to_string()).expect("存在的目录应该生成条目");
+        assert_eq!(item.kind, Kind::Clip, "徽标上要能看出它来自剪贴板");
+        assert!(matches!(item.action, Action::Open(_)));
+
+        // 带引号、正斜杠的写法（从资源管理器 / 别的程序复制出来常见）
+        let quoted = format!("\"{}\"", dir.display().to_string().replace('\\', "/"));
+        assert!(clipboard_item(&quoted).is_some(), "引号和 / 要能认：{quoted}");
+
+        let url = clipboard_item("https://example.com/x").unwrap();
+        assert_eq!(url.kind, Kind::Clip);
+        assert_eq!(
+            url.action,
+            Action::OpenUrl("https://example.com/x".to_string())
+        );
+    }
+
+    #[test]
+    fn clipboard_item_ignores_plain_text() {
+        // 剪贴板常驻一段文字时开屏不能因此多一行
+        assert!(clipboard_item("这是一段普通文字").is_none());
+        assert!(clipboard_item("   ").is_none());
+        assert!(clipboard_item(r"C:\绝对不存在的路径-xyz").is_none());
+        // 复制的是带链接的一段话，不是链接本身
+        assert!(clipboard_item("看这个 https://example.com 挺好").is_none());
+        assert!(clipboard_item("https://example.com\n第二行").is_none());
     }
 }

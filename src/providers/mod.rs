@@ -52,6 +52,8 @@ pub enum Kind {
     Clean,
     /// 最近执行过的命令（开屏列表用）
     History,
+    /// 剪贴板里的路径 / 网址（开屏第一行，顺手可用）
+    Clip,
 }
 
 impl Kind {
@@ -68,6 +70,7 @@ impl Kind {
             Kind::Pi => "pi",
             Kind::Clean => "clean",
             Kind::History => "rec",
+            Kind::Clip => "clip",
         }
     }
 
@@ -84,8 +87,8 @@ impl Kind {
             Kind::Pi => Some(pi::COLUMNS),
             Kind::Help | Kind::Command => Some(commands::COLUMNS),
             Kind::History => Some(home::COLUMNS),
-            // app / file / dir / clean：列表级默认（一般就是两列）
-            Kind::App | Kind::File | Kind::Dir | Kind::Clean => None,
+            // app / file / dir / clean / clip：列表级默认（一般就是两列）
+            Kind::App | Kind::File | Kind::Dir | Kind::Clean | Kind::Clip => None,
         }
     }
 
@@ -102,6 +105,7 @@ impl Kind {
             Kind::Switch,
             Kind::Pi,
             Kind::Clean,
+            Kind::Clip,
         ]
         .into_iter()
         .find(|kind| kind.badge() == badge)

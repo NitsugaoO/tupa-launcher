@@ -21,6 +21,8 @@ show_hints = true
 # 开屏与 @app 空查询是否按 frecency（使用频率 × 新鲜度）排序
 # 关掉后：开屏历史按时间、@app 按配置顺序
 frecency = true
+# 剪贴板里是存在的路径 / http(s) 网址时，开屏第一行多一条「跳过去」（默认不选中）
+clipboard = true
 language = "zh"
 command_prefix = ":"
 

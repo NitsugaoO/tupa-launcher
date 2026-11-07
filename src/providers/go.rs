@@ -71,7 +71,7 @@ impl Provider for Go {
 
         // 空输入时尝试用剪贴板里的内容（常用来“粘贴一个路径然后跳过去”）
         let raw = if args.trim().is_empty() {
-            clipboard_text().unwrap_or_default()
+            crate::clipboard::text().unwrap_or_default()
         } else {
             args.to_string()
         };
@@ -242,6 +242,13 @@ fn rank(input: &str, path: &Path, home: Option<&str>) -> i64 {
     score - full.chars().count() as i64
 }
 
+/// 按默认方式（目录直接打开 / 文件定位）构造一条路径条目。
+///
+/// 开屏的「剪贴板」行也用它，保证列布局与 `:go` 的结果一致。
+pub(crate) fn item_for_path(path: PathBuf) -> Item {
+    item_for(path, Opener::Default)
+}
+
 fn item_for(path: PathBuf, opener: Opener) -> Item {
     let is_dir = path.is_dir();
     let title = path
@@ -266,7 +273,9 @@ fn item_for(path: PathBuf, opener: Opener) -> Item {
 // ---------------------------------------------------------------------------
 
 /// 把各种写法统一成 Windows 路径。
-fn normalize(input: &str) -> String {
+///
+/// 开屏判断「剪贴板里是不是一个路径」也走这里，两边口径一致。
+pub(crate) fn normalize(input: &str) -> String {
     let mut s = input.trim().to_string();
 
     // 去掉成对的引号（`"C:\a b"` / `'C:\a b'`，也处理多层嵌套）
@@ -452,56 +461,6 @@ fn everything_tail(es: &Path, keyword: &str, limit: usize) -> Vec<PathBuf> {
         })
         // 不在这里截断：交给上层的 rank 排序来决定谁留下
         .collect()
-}
-
-// ---------------------------------------------------------------------------
-// 剪贴板
-// ---------------------------------------------------------------------------
-
-#[cfg(windows)]
-fn clipboard_text() -> Option<String> {
-    use windows_sys::Win32::System::DataExchange::{
-        CloseClipboard, GetClipboardData, IsClipboardFormatAvailable, OpenClipboard,
-    };
-    use windows_sys::Win32::System::Memory::{GlobalLock, GlobalUnlock};
-
-    const CF_UNICODETEXT: u32 = 13;
-
-    unsafe {
-        if IsClipboardFormatAvailable(CF_UNICODETEXT) == 0 {
-            return None;
-        }
-        if OpenClipboard(std::ptr::null_mut()) == 0 {
-            return None; // 剪贴板被别的程序占着，放弃
-        }
-
-        let handle = GetClipboardData(CF_UNICODETEXT);
-        if handle.is_null() {
-            CloseClipboard();
-            return None;
-        }
-
-        let ptr = GlobalLock(handle) as *const u16;
-        if ptr.is_null() {
-            CloseClipboard();
-            return None;
-        }
-
-        let mut len = 0usize;
-        while *ptr.add(len) != 0 {
-            len += 1;
-        }
-        let text = String::from_utf16_lossy(std::slice::from_raw_parts(ptr, len));
-
-        GlobalUnlock(handle);
-        CloseClipboard();
-        Some(text)
-    }
-}
-
-#[cfg(not(windows))]
-fn clipboard_text() -> Option<String> {
-    None
 }
 
 #[cfg(test)]

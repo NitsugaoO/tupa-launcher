@@ -9,6 +9,7 @@
 
 mod actions;
 mod app;
+mod clipboard;
 mod config;
 #[cfg(windows)]
 mod daemon;

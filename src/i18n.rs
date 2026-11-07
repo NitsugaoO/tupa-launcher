@@ -752,6 +752,11 @@ pub fn uses(count: u32) -> String {
     s(|| format!("{count} 次"), || format!("{count} uses"))
 }
 
+/// 开屏里「剪贴板」条目的来源列
+pub fn from_clipboard() -> &'static str {
+    t("剪贴板", "Clipboard")
+}
+
 pub fn config_line(line: Option<usize>) -> String {
     match line {
         Some(number) => s(|| format!("第 {number} 行"), || format!("line {number}")),

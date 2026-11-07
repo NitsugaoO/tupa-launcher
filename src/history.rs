@@ -167,21 +167,30 @@ pub fn bump(items: &mut Vec<Entry>, item: &Item) -> bool {
 /// 开屏里执行成功后的记账：先按 `action` 找旧记录累加，找不到就补一条。
 ///
 /// 补的那条需要一行 `line` 当去重键，用 `<前缀><provider> <完整标识>` 拼出来
-/// （见 [`synthetic_line`]）：既是唯一的，`Ctrl+↑` 回放时也能重跑。
+/// （见 [`line_for`]）：既是唯一的，`Ctrl+↑` 回放时也能重跑。
 /// 返回是否记上了（重放不了的动作不记）。
 pub fn record_open(items: &mut Vec<Entry>, item: &Item, prefix: char) -> bool {
     if bump(items, item) {
         return true;
     }
-    let Some(line) = synthetic_line(item, prefix) else {
+    let Some(line) = line_for(item, prefix, &[]) else {
         return false;
     };
     push(items, &line, Some(item.clone()));
     true
 }
 
-/// 给一条还没有历史的条目编一行输入（写文件的 / 改配置的 / 清理会话的不编）。
-fn synthetic_line(item: &Item, prefix: char) -> Option<String> {
+/// 给一条条目编一行「能重跑」的输入（写文件的 / 改配置的 / 清理会话的编不出来）。
+///
+/// 两个地方用：
+/// - 开屏（输入框空着）里执行成功，没有输入行可当去重键；
+/// - **空参数执行**（`:go` 读剪贴板 / `:pi` 列会话）：输入行只有关键字，
+///   拿它当键会把每一次执行压成同一条记录、快照互相覆盖，回放还会重新
+///   读当前剪贴板而不是当时那个目录。这里用条目自己的标识（完整路径 / 网址 /
+///   命令行）拼一行，每次执行都是独立记录。
+///
+/// `flags` 是本次输入的修饰符（`:go:yazi`），拼回关键字里保证回放行为一致。
+pub fn line_for(item: &Item, prefix: char, flags: &[String]) -> Option<String> {
     let (keyword, key) = match &item.action {
         Action::OpenUrl(url) => ("web", url.clone()),
         Action::Launch { command, args, .. } => (
@@ -192,7 +201,8 @@ fn synthetic_line(item: &Item, prefix: char) -> Option<String> {
                 format!("{command} {}", args.join(" "))
             },
         ),
-        Action::Open(path) | Action::Reveal(path) => ("ev", path.display().to_string()),
+        // `go` 遇到存在的路径直接跳（不依赖 Everything / zoxide），回放最稳
+        Action::Open(path) | Action::Reveal(path) => ("go", path.display().to_string()),
         Action::OpenInEditor { file, .. } => ("ev", file.display().to_string()),
         Action::RunCommand { command, .. } | Action::LaunchInTerminal { command, .. } => {
             ("run", command.clone())
@@ -202,7 +212,13 @@ fn synthetic_line(item: &Item, prefix: char) -> Option<String> {
     if key.trim().is_empty() {
         return None;
     }
-    Some(format!("{prefix}{keyword} {key}"))
+
+    let modifier = if flags.is_empty() {
+        String::new()
+    } else {
+        format!(":{}", flags.join(":"))
+    };
+    Some(format!("{prefix}{keyword}{modifier} {key}"))
 }
 
 // ---------------------------------------------------------------------------
@@ -344,6 +360,49 @@ mod tests {
         assert!(record_open(&mut items, &item, '@'));
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].hits, 2);
+    }
+
+    #[test]
+    fn line_for_sends_paths_through_go() {
+        // 空参数执行（`@go` 读剪贴板）：历史行必须带上实际跳的那个路径，
+        // 否则多次执行会互相覆盖，回放还会重读当前剪贴板
+        let dir = Item::new(
+            Kind::Dir,
+            vec!["Themes".to_string(), r"C:\Users\me".to_string()],
+            Action::Open(r"C:\Users\me\Themes".into()),
+        );
+        assert_eq!(
+            line_for(&dir, '@', &[]).as_deref(),
+            Some(r"@go C:\Users\me\Themes")
+        );
+
+        // 文件（Reveal）走同一条：`@go <文件>` 回放得到同样的「在资源管理器里选中」
+        let file = Item::new(
+            Kind::File,
+            vec!["a.pdf".to_string(), r"C:\docs".to_string()],
+            Action::Reveal(r"C:\docs\a.pdf".into()),
+        );
+        assert_eq!(
+            line_for(&file, '@', &[]).as_deref(),
+            Some(r"@go C:\docs\a.pdf")
+        );
+
+        // 修饰符要拼回去，回放行为才一致（`:go:yazi` 用 yazi 开）
+        assert_eq!(
+            line_for(&dir, '@', &["yazi".to_string()]).as_deref(),
+            Some(r"@go:yazi C:\Users\me\Themes")
+        );
+
+        // 编不出可重跑行的动作不编（不能让 `@blog` 这种无参执行被乱改）
+        let stop = Item::new(
+            Kind::Setting,
+            vec!["x".to_string()],
+            Action::ServeStop {
+                port: 4000,
+                name: "本地预览".to_string(),
+            },
+        );
+        assert!(line_for(&stop, '@', &[]).is_none());
     }
 
     #[test]

@@ -9,7 +9,7 @@ use crate::config::Config;
 use crate::exec;
 use crate::i18n;
 use crate::providers::{
-    self, Action, Cmd, Column, Control, DEFAULT_COLUMNS, Evt, Item, Parsed, ProviderInfo,
+    self, Action, Cmd, Column, Control, DEFAULT_COLUMNS, Evt, Item, Kind, Parsed, ProviderInfo,
     RowLayout, commands,
 };
 use crate::theme::Theme;
@@ -268,7 +268,9 @@ impl App {
                     let keep = self.pending_selection.take();
                     self.list_state = ListState::default();
                     if !self.items.is_empty() {
-                        let index = keep.filter(|index| *index < self.items.len()).unwrap_or(0);
+                        let index = keep
+                            .filter(|index| *index < self.items.len())
+                            .unwrap_or_else(|| default_selection(&self.items));
                         self.list_state.select(Some(index));
                     }
                 }
@@ -748,12 +750,13 @@ impl App {
     /// 动作执行成功后把当前输入（以及被执行的条目）记进历史。
     /// 失败的不记，免得污染历史。
     fn remember_input(&mut self, item: Option<Item>) {
-        let line = self.input.trim().to_string();
+        let typed = self.input.trim().to_string();
         self.history_cursor = None;
         self.draft.clear();
-        if line.is_empty() {
+        if typed.is_empty() {
             return;
         }
+        let line = history_line(&typed, &self.args, item.as_ref(), self.prefix, &self.flags);
         history::push(&mut self.history, &line, item);
         if let Err(e) = history::save(&self.history) {
             eprintln!("保存历史失败：{e:#}");
@@ -984,6 +987,41 @@ impl App {
         self.cursor = i;
         self.leave_history();
         self.refresh();
+    }
+}
+
+/// 执行成功后写进历史的那一行。
+///
+/// 正常输入直接用它自己（`@go D:\Archive` 就是 `@go D:\Archive`）。
+/// **空参数执行**（`@go` 读剪贴板、`@pi` 列会话、`@web` 空输入…）时输入行
+/// 只有关键字，拿它当去重键会把每一次执行压成同一条记录、快照互相覆盖，
+/// `Ctrl+↑` 回放还会重新读“当前”剪贴板而不是当时那个目录。
+/// 这时改用条目自己的标识（完整路径 / 网址 / 命令行），每次执行都独立。
+fn history_line(
+    typed: &str,
+    args: &str,
+    item: Option<&Item>,
+    prefix: char,
+    flags: &[String],
+) -> String {
+    if args.trim().is_empty()
+        && let Some(line) = item.and_then(|item| history::line_for(item, prefix, flags))
+    {
+        return line;
+    }
+    typed.to_string()
+}
+
+/// 刚拿到结果时的默认选中项。
+///
+/// 开屏第一行可能是「剪贴板」条目（剪贴板里恰好是个路径 / 网址），
+/// 那是顺手可用，但**不该抢默认选中** —— 否则唤出面板后随手一个回车
+/// 就会跳到很久以前复制的路径。所以从第二条开始选。
+fn default_selection(items: &[Item]) -> usize {
+    if items.len() > 1 && items[0].kind == Kind::Clip {
+        1
+    } else {
+        0
     }
 }
 
@@ -1277,5 +1315,66 @@ mod tests {
         assert!(!app.applying);
         assert!(app.status.as_ref().is_some_and(|(_, error)| *error));
         assert!(!app.should_hide);
+    }
+
+    #[test]
+    fn default_selection_skips_the_clipboard_row() {
+        // 开屏第一行是「剪贴板」时不能抢默认选中，否则唤起后随手回车就误跳
+        let clip = Item::new(
+            Kind::Clip,
+            vec!["Themes".to_string(), r"C:\Users\me".to_string()],
+            Action::Open(r"C:\Users\me\Themes".into()),
+        );
+        let favorite = Item::new(
+            Kind::App,
+            vec!["Code".to_string(), "code".to_string()],
+            Action::Launch {
+                command: "code".to_string(),
+                args: Vec::new(),
+                elevated: false,
+            },
+        );
+
+        assert_eq!(default_selection(&[clip.clone(), favorite.clone()]), 1);
+        assert_eq!(default_selection(&[favorite.clone()]), 0);
+        // 只有一条时不能选中不存在的下标
+        assert_eq!(default_selection(&[clip]), 0);
+    }
+
+    #[test]
+    fn empty_args_history_line_keeps_the_concrete_target() {
+        // `@go` 读剪贴板跳过去的目录：历史里得带上实际路径，
+        // 否则多次执行会互相覆盖、Ctrl+↑ 回放也没意义
+        let dir = Item::new(
+            Kind::Dir,
+            vec!["Themes".to_string(), r"C:\Users\me".to_string()],
+            Action::Open(r"C:\Users\me\Themes".into()),
+        );
+        assert_eq!(
+            history_line("@go", "", Some(&dir), '@', &[]),
+            r"@go C:\Users\me\Themes"
+        );
+        // 修饰符也要带上（`:go:yazi` 回放还得用 yazi 开）
+        assert_eq!(
+            history_line("@go:yazi", "", Some(&dir), '@', &["yazi".to_string()]),
+            r"@go:yazi C:\Users\me\Themes"
+        );
+
+        // 自己打了参数：原样保留用户的输入
+        assert_eq!(
+            history_line("@go theme", "theme", Some(&dir), '@', &[]),
+            "@go theme"
+        );
+
+        // 编不出可重放行的（`:blog` 停服务这类）保持原样，不凭空造历史
+        let stop = Item::new(
+            Kind::Setting,
+            Vec::new(),
+            Action::ServeStop {
+                port: 5173,
+                name: "管理页".to_string(),
+            },
+        );
+        assert_eq!(history_line("@blog", "", Some(&stop), '@', &[]), "@blog");
     }
 }

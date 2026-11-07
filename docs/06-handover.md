@@ -154,6 +154,8 @@ Control::{Run, Toggle{value}, Choice{options,index}, Number{value,min,max,step,s
 | 本地服务无条件 spawn | 旧 `blog_admin` 每次回车都起一个 `pnpm admin`：连点两次 = 第二个 node 端口冲突 → 管理页白屏。Hexo 实测 **5.2 秒**（2026-11-05）才监听 4000，固定 `sleep 1.5s` 后开浏览器就是错误页 |
 | 本地服务就绪判断 | 用 `src/serve.rs`：先探端口（**IPv4 与 IPv6 都试**，Node 不指定 host 时可能只绑 `::1`）→ 在跑就只开浏览器；没跑才 spawn 并轮询最多 `READY_TIMEOUT`（20s），超时**报错**而不是开空白页 |
 | 停静默后台 | 进程是 `Stdio::null` 起的（无窗口），只能从面板停：`netstat -ano -p tcp` 找 PID（`0.0.0.0:4000` 与 `[::]:4000` 是同一个进程，要去重；`ends_with(":4000")` 不会误中 `:14000`）+ `tasklist /FO CSV` 拿进程名 + `taskkill /PID x /T /F`。**只杀 node/pnpm/cmd**：端口被别的程序占着时 `is_listening` 也为真，顺手杀就是灾难 |
+| 空参数执行的历史键 | `history::push` 用输入行去重：`:go` / `:pi` 空参数回车时输入行只有关键字，**8 次跳转压成同一条、快照互相覆盖**，`Ctrl+↑` 回放还会重读“当前”剪贴板（2026-11-07 实测本机 `"@go"` hits=8 只留最后一个目录）。正确做法：`app::history_line` 在 `args` 为空时改用 `history::line_for`，按条目自己的标识拼行（`:go C:\…` / `:web https://…` / `:run …`），编不出可重放行的（`:blog` 停服务 / `:set`）保持原样 |
+| 开屏剪贴板条目 | 只在剪贴板内容是**存在的路径**或 **http(s) 网址**时出现（否则开屏永远多一条不相干的行）。识别顺序：**先判 URL 再走 `go::normalize`** —— 那个函数会把 `/` 换成 `\`，URL 会被毁掉。`Kind::Clip` 不抢默认选中（`app::default_selection`），否则唤起后随手回车就误跳到很久以前复制的路径 |
 
 ## 5. 开关引擎（v0.7 已完成）
 

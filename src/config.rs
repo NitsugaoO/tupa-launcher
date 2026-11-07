@@ -107,6 +107,9 @@ pub struct General {
     ///
     /// 关掉之后：开屏历史按时间、`@app` 按配置顺序。
     pub frecency: bool,
+    /// 剪贴板里是**存在的路径**或 **http(s) 网址**时，开屏第一行多一条
+    /// 「跳过去」的条目（默认不选中，按 `↑` 才选它）。
+    pub clipboard: bool,
 }
 
 impl Default for General {
@@ -120,6 +123,7 @@ impl Default for General {
             language: "zh".to_string(),
             show_hints: true,
             frecency: true,
+            clipboard: true,
         }
     }
 }
