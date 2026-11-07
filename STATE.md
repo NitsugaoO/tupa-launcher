@@ -1,6 +1,6 @@
 # tupa-launcher 状态
 
-updated: 2026-11-07 · code: `32d8fb4`（最后一次改动代码的提交）· main 与 origin/main 同步（已 push）
+updated: 2026-11-08 · code: `128f940`（最后一次改动代码的提交）· main 比 origin/main 多 2 个提交（待 push）
 
 > 判断本文件是否过期：比较 `code` 与 `git log -1 --format=%h -- src Cargo.toml`。
 > 只改文档的提交不算过期。
@@ -14,7 +14,7 @@ updated: 2026-11-07 · code: `32d8fb4`（最后一次改动代码的提交）· 
 ## 阶段
 
 - 版本 `Cargo.toml` **0.9.0**（`:blog` 删了旧 `:new`，升了一个次版本）
-- **TUI 面板稳定**：`app` `ev` `run` `pi` `go` `web` `blog` `fav` `cfg` `set` + 开屏 `home`（收藏 + 最近命令）
+- **TUI 面板稳定**：`app` `ev` `run` `pi` `go` `web` `blog` `fav` `cfg` `set` `exp` + 开屏 `home`（收藏 + 最近命令）
 - **`:blog` 取代了旧的 `:new`（2026-10-25）**：`src/providers/blog.rs`。不带参数列三个入口
   （本地 `localhost:4000` / GitHub Pages / Cloudflare），`:blog:new <标题>` 在
   `<blog>/source/_posts` 写 front matter 并用 VSCode 打开（同名不覆盖、空参数列最近文章），
@@ -135,9 +135,25 @@ updated: 2026-11-07 · code: `32d8fb4`（最后一次改动代码的提交）· 
   一条 `Kind::Clip`（徽标 `clip`）：路径回车载开/定位，网址回车载开浏览器。**不抢默认选中**
   （`app::default_selection` 遇到首条 clip 选第 1 条），想用按 `↑`。开关 `[general] clipboard`
   （默认 true）。识别顺序必须**先判 URL 再 `go::normalize`**（那函数会把 `/` 换成 `\`）
+- **`:exp` 已加入（2026-11-08）**：`src/providers/exp.rs`，「最近打开的文件夹」。两个数据源合并：
+  `src/destlist.rs` 自己解复合文档（CFB）读 `AutomaticDestinations\f01b4d95cf55d32a.…-ms`
+  的 `DestList` 流（覆盖几个月历史），加 `src/explorer_watch.rs` 记的当前窗口（秒级）；
+  同一路径取时间新的，按时间倒序，只留仍存在的目录，滤掉 Installer / Temp 噪音。
+  **不靠跳转列表准实时** —— 那个文件实测能连续 26 小时不写（开窗口 75 秒 / 关窗口 /
+  重启 explorer 都不变），所以实时数据只能自己盯：`SetWinEventHook` 监听 `CabinetWClass`
+  窗口的 `EVENT_OBJECT_NAMECHANGE` / `EVENT_SYSTEM_FOREGROUND` / `EVENT_OBJECT_SHOW`，
+  命中才枚举 `ShellWindows` 写到 `explorer.json`。**钩子区间必须窄** ——
+  `(EVENT_SYSTEM_FOREGROUND, EVENT_OBJECT_SHOW)` 实际是 0x0003–0x8002 的大区间，
+  等于把所有事件都订上，实测 2.6% CPU；改窄区间 + 只在命中时枚举后空闲 **0.05%**。
+  监听起在**守护进程**里（面板进程要等第一次热键才存在），钩子注册在 explorer_watch
+  自己的线程（`WINEVENT_OUTOFCONTEXT` 要靠 `DispatchMessage` 分发，主循环不干这个）
 
 ## 未完成
 
+0. **`@exp` 手点确认**（2026-11-08 记）：`--query "@exp"` 与单测都验过 —— 开新窗口、
+   同窗口内导航都在 2 秒内出现在第一行，空闲 CPU 0.05%。**但没在真面板里按过**。
+   要确认：`alt+\`` → `@exp` 能看到刚开过的目录、回车打开、`@exp <关键词>` 能筛；
+   顺带看时间列（`刚刚` / `1m`）与长路径截断顺不顺眼。
 1. **`@blog` 本地服务链路还差手点确认**（2026-11-05 记）：本地预览要停留约 5–6 秒且不冻结、
    随后浏览器弹出，**再回车应秒开、不重复起进程**；「停止管理页 / 停止本地预览」应提示
    「已停止…（PID …）」且端口释放；`:blog:stop` 一次停掉在跑的全部。
