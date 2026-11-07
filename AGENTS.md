@@ -60,6 +60,10 @@ tupa-launcher.exe --check # 所有 `[[apps]]` 都能解析
   是**当前焦点项**，而系统 UI 的按钮布局会因用户增删固定项而变——必然存在「焦点落错行
   → 切错开关」的窗口（实战里误关过蓝牙 / 误开过飞行模式）。要操作这类面板，一律
   **坐标点击 + 读回状态校验**；点击前用 `GetCursorPos` 记光标、`finally` 里复位。
+- **别一上来就想用 WindHawk 做实时事件**（2026-11-08 评估）：资源管理器导航这类需求，
+  纯 Win32 的 `SetWinEventHook` + `ShellWindows` 已经够（见 `src/explorer_watch.rs`）。
+  WindHawk mod 更精确（进程内 hook、零轮询、不漏事件），但要写 C++、要跨进程把数据
+  传给 tupa、依赖 WindHawk 常驻，而且 Windows 更新改了符号就静默失效 —— 收益不抵维护成本。
 
 ## 收尾清单
 
