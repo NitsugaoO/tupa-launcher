@@ -1,6 +1,6 @@
 # tupa-launcher 状态
 
-updated: 2026-11-07 · code: `fa3fc45`（最后一次改动代码的提交）· main 比 origin/main 领先 2 个提交（未 push）
+updated: 2026-11-07 · code: `32d8fb4`（最后一次改动代码的提交）· main 比 origin/main 领先 2 个提交（未 push）
 
 > 判断本文件是否过期：比较 `code` 与 `git log -1 --format=%h -- src Cargo.toml`。
 > 只改文档的提交不算过期。
@@ -123,6 +123,18 @@ updated: 2026-11-07 · code: `fa3fc45`（最后一次改动代码的提交）· 
   → Program Files 探测；找不到就退回 `wt -p tupa-launcher`（`find_panel` 两种类名都认，退回后不会反复重启）。
   实测：冷启动到窗口出现 698–918ms、热键显隐 63–69ms、`SW_HIDE`/`SW_SHOW` 连做三轮稳定。
   GlazeWM 规则已加 `window_class = 'tupa-launcher'`（WT 那条降为第三顺位兜底，权威源在 my_dot，已同步）
+- **空参数执行也有具体历史了（2026-11-07）**：`:go` 读剪贴板 / `:pi` 列会话这类**没打参数**的执行，
+  原来拿光秃秃的 `:go` 当 `history::push` 的去重键 —— 实测本机 `"@go"` hits=8
+  却只剩最后一次（`preview.md`）的快照，前面跳过的 7 个目录全被覆盖；`Ctrl+↑` 回放还会
+  **重读当前剪贴板**而不是当时那个目录。现在 `app::history_line`：`args` 为空时走
+  `history::line_for`，按条目自身标识拼行（Open/Reveal → `:go <完整路径>`，`OpenUrl` → `:web`，
+  `LaunchInTerminal`/`RunCommand` → `:run`），修饰符保留成 `:go:yazi`；编不出可重放行的
+  （`:blog` 停服务 / `:set`）保持原样。开屏走 `bump`/`record_open` 那条路不变
+- **开屏第一行「剪贴板」条目（2026-11-07）**：新增 `src/clipboard.rs`（Win32 `CF_UNICODETEXT`，
+  从 `go.rs` 抽出来给两处共用）。剪贴板里是**存在的路径**或 **http(s) 网址**时，`home` 在最前插
+  一条 `Kind::Clip`（徽标 `clip`）：路径回车载开/定位，网址回车载开浏览器。**不抢默认选中**
+  （`app::default_selection` 遇到首条 clip 选第 1 条），想用按 `↑`。开关 `[general] clipboard`
+  （默认 true）。识别顺序必须**先判 URL 再 `go::normalize`**（那函数会把 `/` 换成 `\`）
 
 ## 未完成
 
@@ -136,6 +148,12 @@ updated: 2026-11-07 · code: `fa3fc45`（最后一次改动代码的提交）· 
    `:blog:new 测试`）IME 组合输入与候选框位置是否正常 —— **切宿主唯一没自动验过的点**
    （WT 一直是好的；有问题把 `[daemon] terminal` 改回 `"wt"` 即可，不用改代码）；
    开屏在 WezTerm 12pt 下的列宽 / 行数；`Esc` 隐藏后焦点在别的窗口时再按热键应正常弹回前台。
+4. **剪贴板条目与空参数历史的手点确认**（2026-11-07 记）：识别逻辑已经用
+   `--query "@home"` 验过三种情况（存在的目录 → 首行 `clip`；`https://…` → 首行 `clip` + 「剪贴板」列；
+   普通文字 → 不出现），**但没跑真 TUI**。要确认：复制一个目录 → `alt+\`` 开屏首行是 `clip`
+   且**默认选中仍在收藏第一条**、`↑` 选到它回车能跳过去；`@go` + 回车（读剪贴板）之后
+   `history.json` 应新增一条 `@go <完整路径>`（不是又一条 `@go`），`Ctrl+↑` 回放直达该目录；
+   `[general] clipboard = false` 后重启，开屏不再出现该行。
 
 ## 入口
 
