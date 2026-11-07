@@ -46,6 +46,9 @@ tupa-launcher.exe --check # 所有 `[[apps]]` 都能解析
 - **所有用户可见文案走 `src/i18n.rs`**（`t("中文", "English")`），业务代码里不写裸字符串。
 - **加 `Action` 变体要同步 4 处**（漏了编译不过或行为不对）：`providers/mod.rs` 的 `Action`、
   `exec::run`、`app::reveal_selected`、`Item::detail_line`。
+- **加 `Kind` 变体要同步 3 处**（编译不会报，行为会错）：`providers/mod.rs` 的 `badge()`
+  （徽标）、`columns()`（漏了掉回默认两列，开屏混排里排版会歪）、`from_badge()`
+  （漏了 `fav:<徽标>` 解析不到）。
 - **加 provider**：`src/providers/xxx.rs` + `providers/mod.rs::build()` 里 push（顺序 = 命令列表顺序）。
 - 命令关键字是 **`set`**（历史上叫 switch，已改名）；文档示例写默认前缀 `:`，
   用户本机 `config.toml` 改成了 `@`，别把两者搞混。
