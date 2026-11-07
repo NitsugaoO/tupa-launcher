@@ -11,6 +11,8 @@ mod actions;
 mod app;
 mod clipboard;
 mod config;
+mod destlist;
+mod explorer_watch;
 #[cfg(windows)]
 mod daemon;
 mod exec;

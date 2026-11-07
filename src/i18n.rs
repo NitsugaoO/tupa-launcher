@@ -136,6 +136,10 @@ pub fn desc_hist() -> &'static str {
     t("命令历史", "Command history")
 }
 
+pub fn desc_exp() -> &'static str {
+    t("最近打开的文件夹", "Recently opened folders")
+}
+
 pub fn desc_blog() -> &'static str {
     t(
         "博客：新建文章 / 管理页 / 站点入口",
@@ -891,6 +895,7 @@ pub fn help() -> String {
   :go <路径>       跳转目录
   :web <关键词>    搜索浏览历史
   :hist <关键词>   搜索命令历史
+  :exp <关键词>    最近打开的文件夹
   :blog [new|manage|stop]  博客入口（预览 / 管理页 / 新建文章 / 停止本地服务）
   :fav [类型]      收藏
   :cfg [关键词]    查看配置
@@ -934,6 +939,7 @@ Commands (prefix defaults to :, configurable)
   :go <path>        jump to a folder
   :web <keyword>    search browser history
   :hist <keyword>   search command history
+  :exp <keyword>    recently opened folders
   :blog [new|manage|stop]  blog entries (preview / admin / new post / stop)
   :fav [kind]       favorites
   :cfg [keyword]    inspect config

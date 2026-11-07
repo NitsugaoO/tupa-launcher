@@ -13,6 +13,7 @@ pub mod clean;
 pub mod commands;
 pub mod config_items;
 pub mod everything;
+pub mod exp;
 pub mod favorites;
 pub mod go;
 pub mod hist;
@@ -492,6 +493,7 @@ pub fn build(cfg: &Config) -> Vec<Box<dyn Provider>> {
     list.push(Box::new(go::Go::new(cfg)));
     list.push(Box::new(web::Web::new(cfg)));
     list.push(Box::new(hist::Hist::new(cfg)));
+    list.push(Box::new(exp::Exp::new(cfg)));
     list.push(Box::new(blog::Blog::new(cfg)));
     list.push(Box::new(favorites::Favorites::new(cfg)));
     list.push(Box::new(config_items::ConfigItems));

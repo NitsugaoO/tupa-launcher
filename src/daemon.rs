@@ -166,6 +166,10 @@ pub fn run(hotkey: &Hotkey, copilot_key: bool, shell: Shell, debug: bool) -> Res
     spawn_logger();
     log("守护进程启动");
 
+    // 后台记「资源管理器最近打开过哪些目录」：系统的跳转列表是长时间批量 flush 的，
+    // 只能自己盯窗口。放守护进程里是因为它开机就在，面板进程要等第一次热键才起来。
+    crate::explorer_watch::start();
+
     // MOD_NOREPEAT：按住热键不会连续触发
     let modifiers = hotkey.modifiers | MOD_NOREPEAT;
     let registered =

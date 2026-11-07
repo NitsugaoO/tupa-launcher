@@ -156,6 +156,11 @@ Control::{Run, Toggle{value}, Choice{options,index}, Number{value,min,max,step,s
 | 停静默后台 | 进程是 `Stdio::null` 起的（无窗口），只能从面板停：`netstat -ano -p tcp` 找 PID（`0.0.0.0:4000` 与 `[::]:4000` 是同一个进程，要去重；`ends_with(":4000")` 不会误中 `:14000`）+ `tasklist /FO CSV` 拿进程名 + `taskkill /PID x /T /F`。**只杀 node/pnpm/cmd**：端口被别的程序占着时 `is_listening` 也为真，顺手杀就是灾难 |
 | 空参数执行的历史键 | `history::push` 用输入行去重：`:go` / `:pi` 空参数回车时输入行只有关键字，**8 次跳转压成同一条、快照互相覆盖**，`Ctrl+↑` 回放还会重读“当前”剪贴板（2026-11-07 实测本机 `"@go"` hits=8 只留最后一个目录）。正确做法：`app::history_line` 在 `args` 为空时改用 `history::line_for`，按条目自己的标识拼行（`:go C:\…` / `:web https://…` / `:run …`），编不出可重放行的（`:blog` 停服务 / `:set`）保持原样 |
 | 开屏剪贴板条目 | 只在剪贴板内容是**存在的路径**或 **http(s) 网址**时出现（否则开屏永远多一条不相干的行）。识别顺序：**先判 URL 再走 `go::normalize`** —— 那个函数会把 `/` 换成 `\`，URL 会被毁掉。`Kind::Clip` 不抢默认选中（`app::default_selection`），否则唤起后随手回车就误跳到很久以前复制的路径 |
+| 跳转列表不即时 | `%APPDATA%\Microsoft\Windows\Recent\AutomaticDestinations\f01b4d95cf55d32a.automaticDestinations-ms` 在 Win11 上是**长时间批量 flush** 的：实测开着窗口等 75 秒不变、关窗口不变、`taskkill explorer` 三次也不变，文件能连着 26 小时不动。不能当「最近打开」用。实时数据只能自己盯：`IShellWindows`（`ShellWindows` CLSID）+ `IWebBrowser2::LocationURL` 能**立刻**拿到当前打开的窗口目录，`src/explorer_watch.rs` 每 5 秒扫一次记到 `~/.config/tupa-launcher/explorer.json`。监听必须在**守护进程**里起，面板进程要等第一次热键才存在 |
+| 跳过打开时的记录 | `explorer.exe` 导航到文件夹**不写** `%APPDATA%\Microsoft\Windows\Recent\`（那里只有文件 / 截图的 `.lnk`），所以别指望 Recent 目录能补上文件夹历史 |
+| `SetWinEventHook` 的事件区间 | 写成 `SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_OBJECT_SHOW, …)` 看着像「监听两个事件」，实际是 **[0x0003, 0x8002] 区间**，几乎把所有事件都订上了：系统不停往注册线程推消息，循环里再无条件枚举一次 → 实测 **2.6% CPU**。要几个事件就注册几个窄区间（min == max） |
+| WinEventHook 必须在有消息循环的线程 | `WINEVENT_OUTOFCONTEXT` 的回调是**靠 `DispatchMessage` 分发**的。守护进程主循环只 `GetMessage` 不 `DispatchMessage`，所以 `explorer_watch` 自己开一条线程、自己 `PeekMessage` + `DispatchMessage`，不去动主循环 |
+| 事件回调不能太贵 | 回调里只置位 `AtomicBool`；`ShellWindows` 枚举（有窗口时 ~5 ms）放到监听线程里，并且**只在命中 `CabinetWClass` 或兑底超时才做** —— 终端 / 浏览器的标题变化也会把消息推进来 |
 
 ## 5. 开关引擎（v0.7 已完成）
 
