@@ -393,11 +393,13 @@ fn launch_terminal(terminal: TerminalKind, debug: bool) {
 ///
 /// 实测冷启动到窗口出现 ~700–900ms。热键唤出走 `ShowWindow`（实测 ~65ms），跟这个延迟无关。
 ///
-/// `front_end='OpenGL'` 是 2026-11-12 加的兜底。走 `detached_command`（`CREATE_NO_WINDOW`，
-/// stdin/stdout/stderr 全接 `NUL`）时，WezTerm nightly(20261026) 的默认 wgpu 后端**每次**都 panic
-/// （`wgpu_core.rs:3600 wgpu error: Validation Error`），窗口一闪就退；同一个 exe 从带控制台的父进程
-/// 手动启动却完全正常。OpenGL 与 Software 两种前端实测都不报错，这里选 OpenGL（还能用目录里
-/// 自带的 mesa 兜底）。
+/// `front_end` 的坎坷史：2026-11-12 曾加 `front_end='OpenGL'` 当兜底 —— 走 `detached_command`
+/// （`CREATE_NO_WINDOW`，stdin/stdout/stderr 全接 `NUL`）时，WezTerm nightly(20261026) 的默认 wgpu
+/// 后端**每次**都 panic（`wgpu_core.rs:3600 wgpu error: Validation Error`），窗口一闪就退；同一个
+/// exe 从带控制台的父进程手动启动却完全正常。
+/// **2026-11-12 晚暂时去掉这行**，回到 `wezterm.lua` 里的默认 `WebGpu`，用来验证 wgpu 崩溃是否
+/// 与 GlazeWM 给窗口挂 `WS_EX_LAYERED` 有关（同一晚发现腾讯会议被这条路径搞到不渲染）。
+/// 若 wgpu 又开始闪退，把这行加回去即可（OpenGL / Software 两种前端实测都不报错）。
 fn launch_wezterm(debug: bool) {
     let Some(gui) = crate::util::wezterm_gui() else {
         log("找不到 wezterm-gui.exe，退回 Windows Terminal");
@@ -411,8 +413,6 @@ fn launch_wezterm(debug: bool) {
 
     let mut command = crate::util::detached_command(&gui);
     command
-        .arg("--config")
-        .arg("front_end='OpenGL'")
         .arg("--config")
         .arg("enable_tab_bar=false")
         .arg("--config")
