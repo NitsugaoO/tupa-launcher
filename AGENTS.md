@@ -64,13 +64,15 @@ tupa-launcher.exe --check # 所有 `[[apps]]` 都能解析
   纯 Win32 的 `SetWinEventHook` + `ShellWindows` 已经够（见 `src/explorer_watch.rs`）。
   WindHawk mod 更精确（进程内 hook、零轮询、不漏事件），但要写 C++、要跨进程把数据
   传给 tupa、依赖 WindHawk 常驻，而且 Windows 更新改了符号就静默失效 —— 收益不抵维护成本。
-- **WezTerm 面板的 `front_end` 别改回默认（wgpu）**（2026-11-12 实测）：`launch_wezterm` 走
-  `detached_command`（`CREATE_NO_WINDOW` + stdio 全接 `NUL`）时，wgpu 后端**每次都** panic
-  （`wgpu_core.rs:3600 wgpu error: Validation Error`），窗口一闪就退；从带控制台的父进程手动
-  启动却正常。现用 `front_end='OpenGL'`。要改动先用「按热键冷启动 + 强杀 wezterm 再唤起」验一遍。
+- **WezTerm 面板的前端：默认（wgpu）可用，别再无条件加 `front_end='OpenGL'`**（2026-11-12 修正）：
+  上午的「wgpu 在 `detached_command` 下每次都 panic」只对了一半。真因是 **GlazeWM 的
+  `set_transparency` 给每个窗口无条件挂 `WS_EX_LAYERED`** —— wgpu 的 DX12 swapchain 在 layered
+  窗口上直接 `Validation Error`。已在 OhMyGlazeWM `ee149ae7` 修掉（不透明窗口不再动 layered），
+  `wezterm.lua` 的默认 `WebGpu` 冷启动 3/3 存活。以后再闪退，先 `glazewm query windows` 看该窗口
+  是不是又被挂了 layered，别急着切 OpenGL。验证方式不变：按热键冷启动 + 强杀 wezterm 再唤起。
 - **ElyTerminal 导致面板闪退 —— 已否决**（2026-11-12 查证）：装上时间与故障对得上，但默认终端
   GUID 仍是 Windows Terminal 的，注册表里没有任何 Ely 项，wgpu 崩也跟终端 delegate 无机制关联。
-  真因是上面的 wgpu 前端问题，别再从终端软件方向找。
+  真因是 GlazeWM 的 layered（见上一条），别再从终端软件方向找。
 
 ## 收尾清单
 
