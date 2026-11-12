@@ -1,6 +1,6 @@
 # tupa-launcher 状态
 
-updated: 2026-11-08 · code: `128f940`（最后一次改动代码的提交）· main 与 origin/main 同步（已 push）
+updated: 2026-11-12 · code: `afb8ce8`（WezTerm 面板切 OpenGL 前端；本机 config 66 → 72 未动 src）· main 与 origin/main 同步（已 push）
 
 > 判断本文件是否过期：比较 `code` 与 `git log -1 --format=%h -- src Cargo.toml`。
 > 只改文档的提交不算过期。
@@ -147,6 +147,20 @@ updated: 2026-11-08 · code: `128f940`（最后一次改动代码的提交）· 
   等于把所有事件都订上，实测 2.6% CPU；改窄区间 + 只在命中时枚举后空闲 **0.05%**。
   监听起在**守护进程**里（面板进程要等第一次热键才存在），钩子注册在 explorer_watch
   自己的线程（`WINEVENT_OUTOFCONTEXT` 要靠 `DispatchMessage` 分发，主循环不干这个）
+- **本机 `config.toml` 应用列表 66 → 72（2026-11-12，只改本机配置，未动代码）**：软件迁移到 scoop 后
+  4 条 lnk 失效（DeepSeek Harness / Windhawk / Clash Party / OBS Studio）已改向（Windhawk 无 lnk，写 PATH 里的
+  `windhawk`），`RBTray` 改 `D:\Softwares` 便携版（与开机 Run 键、实际进程一致），新增 6 条
+  `D:\Softwares` 便携软件（Kdenlive / UWPSpy / StartMenuPin / nosleep / Who Shit On My C / GenP）；
+  `--check` 72 项全通。备份 `config.toml.bak-20261112-005832`
+- **WezTerm 面板改用 OpenGL 前端（2026-11-12）**：`src/daemon.rs::launch_wezterm` 加了
+  `--config front_end='OpenGL'`。原因：默认 wgpu 后端在 `detached_command`（`CREATE_NO_WINDOW`
+  + stdin/stdout/stderr 全接 `NUL`）的 spawn 路径下**每次都 panic**（`wgpu_core.rs:3600
+  wgpu error: Validation Error`），窗口一闪就退，看着像「闪退」；同一个 exe 从带控制台的父进程
+  手动启动却正常。OpenGL / Software 两种前端实测都不报错，选 OpenGL（目录里自带 mesa 兜底）。
+  这台是 Intel Arc B390（驱动 `32.0.101.8356`），疑似驱动的 D3D12/wgpu 兼容问题；WezTerm 本体
+  没更新过（仍是 2026-11-06 那份 nightly）。**ElyTerminal（2026-11-11 装）已排除**。
+  已验证：`alt+\`` 唤起 → 可见（类名 `tupa-launcher`）→ 再按隐藏 → 再按显示 → 强杀 wezterm
+  后再唤起仍成功
 
 ## 未完成
 
@@ -164,6 +178,8 @@ updated: 2026-11-08 · code: `128f940`（最后一次改动代码的提交）· 
    `:blog:new 测试`）IME 组合输入与候选框位置是否正常 —— **切宿主唯一没自动验过的点**
    （WT 一直是好的；有问题把 `[daemon] terminal` 改回 `"wt"` 即可，不用改代码）；
    开屏在 WezTerm 12pt 下的列宽 / 行数；`Esc` 隐藏后焦点在别的窗口时再按热键应正常弹回前台。
+   **2026-11-12 补充**：已切到 OpenGL 前端（wgpu 崩，见「阶段」），显隐 / 冷启动 / 强杀重起已自动
+   验过；**IME 中文输入、字体渲染（Mesa GL 路径）、列宽行数仍未手点**，这三项要在 OpenGL 下重验
 4. **剪贴板条目与空参数历史的手点确认**（2026-11-07 记）：识别逻辑已经用
    `--query "@home"` 验过三种情况（存在的目录 → 首行 `clip`；`https://…` → 首行 `clip` + 「剪贴板」列；
    普通文字 → 不出现），**但没跑真 TUI**。要确认：复制一个目录 → `alt+\`` 开屏首行是 `clip`
