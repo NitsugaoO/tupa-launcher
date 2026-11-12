@@ -1,6 +1,6 @@
 # tupa-launcher 状态
 
-updated: 2026-11-12 · code: `afb8ce8`（WezTerm 面板切 OpenGL 前端；本机 config 66 → 72 未动 src）· main 与 origin/main 同步（已 push）
+updated: 2026-11-12 · code: `61b991c`（WezTerm 面板前端回到默认 wgpu；真因是 GlazeWM layered，已修）· main 与 origin/main 同步（已 push）
 
 > 判断本文件是否过期：比较 `code` 与 `git log -1 --format=%h -- src Cargo.toml`。
 > 只改文档的提交不算过期。
@@ -152,15 +152,15 @@ updated: 2026-11-12 · code: `afb8ce8`（WezTerm 面板切 OpenGL 前端；本�
   `windhawk`），`RBTray` 改 `D:\Softwares` 便携版（与开机 Run 键、实际进程一致），新增 6 条
   `D:\Softwares` 便携软件（Kdenlive / UWPSpy / StartMenuPin / nosleep / Who Shit On My C / GenP）；
   `--check` 72 项全通。备份 `config.toml.bak-20261112-005832`
-- **WezTerm 面板改用 OpenGL 前端（2026-11-12）**：`src/daemon.rs::launch_wezterm` 加了
-  `--config front_end='OpenGL'`。原因：默认 wgpu 后端在 `detached_command`（`CREATE_NO_WINDOW`
-  + stdin/stdout/stderr 全接 `NUL`）的 spawn 路径下**每次都 panic**（`wgpu_core.rs:3600
-  wgpu error: Validation Error`），窗口一闪就退，看着像「闪退」；同一个 exe 从带控制台的父进程
-  手动启动却正常。OpenGL / Software 两种前端实测都不报错，选 OpenGL（目录里自带 mesa 兜底）。
-  这台是 Intel Arc B390（驱动 `32.0.101.8356`），疑似驱动的 D3D12/wgpu 兼容问题；WezTerm 本体
-  没更新过（仍是 2026-11-06 那份 nightly）。**ElyTerminal（2026-11-11 装）已排除**。
-  已验证：`alt+\`` 唤起 → 可见（类名 `tupa-launcher`）→ 再按隐藏 → 再按显示 → 强杀 wezterm
-  后再唤起仍成功
+- **WezTerm 面板前端回到默认（wgpu）（2026-11-12 晚修正）**：`src/daemon.rs::launch_wezterm`
+  删掉了白天加的 `--config front_end='OpenGL'`。白天那个「wgpu 在 `detached_command`
+  （`CREATE_NO_WINDOW` + stdin/stdout/stderr 全接 `NUL`）下**每次都** panic」只是相关、不是因果 ——
+  真因是 **GlazeWM 的 `set_transparency` 给每个窗口无条件挂 `WS_EX_LAYERED`**，wgpu 的 DX12
+  swapchain 在 layered 窗口上直接 `Validation Error`。已在 OhMyGlazeWM `ee149ae7` 修掉
+  （不透明窗口不再动 layered），同一处修掉的还有腾讯会议「只剩一条标题栏 + 点击全穿透」。
+  实测：`Alt+\`` 冷启动 3/3 存活（每轮先强杀 wezterm-gui 再唤起），面板渲染 / 中文 / 列宽正常。
+  这台是 Intel Arc B390（驱动已从 `32.0.101.8356` 升到 `32.0.101.9150`，与本次故障无关）。
+  **ElyTerminal（2026-11-11 装）已排除**。
 
 ## 未完成
 
@@ -178,8 +178,8 @@ updated: 2026-11-12 · code: `afb8ce8`（WezTerm 面板切 OpenGL 前端；本�
    `:blog:new 测试`）IME 组合输入与候选框位置是否正常 —— **切宿主唯一没自动验过的点**
    （WT 一直是好的；有问题把 `[daemon] terminal` 改回 `"wt"` 即可，不用改代码）；
    开屏在 WezTerm 12pt 下的列宽 / 行数；`Esc` 隐藏后焦点在别的窗口时再按热键应正常弹回前台。
-   **2026-11-12 补充**：已切到 OpenGL 前端（wgpu 崩，见「阶段」），显隐 / 冷启动 / 强杀重起已自动
-   验过；**IME 中文输入、字体渲染（Mesa GL 路径）、列宽行数仍未手点**，这三项要在 OpenGL 下重验
+   **2026-11-12 补充**：前端已回到默认 wgpu（见「阶段」），显隐 / 冷启动 / 强杀重起已自动验过；
+   **IME 中文输入、字体渲染、列宽行数仍未手点**，这三项要在 wgpu 下重验（不再是 Mesa GL 路径）
 4. **剪贴板条目与空参数历史的手点确认**（2026-11-07 记）：识别逻辑已经用
    `--query "@home"` 验过三种情况（存在的目录 → 首行 `clip`；`https://…` → 首行 `clip` + 「剪贴板」列；
    普通文字 → 不出现），**但没跑真 TUI**。要确认：复制一个目录 → `alt+\`` 开屏首行是 `clip`
