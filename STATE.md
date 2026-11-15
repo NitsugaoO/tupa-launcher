@@ -1,6 +1,6 @@
 # tupa-launcher 状态
 
-updated: 2026-11-12 · code: `61b991c`（WezTerm 面板前端回到默认 wgpu；真因是 GlazeWM layered，已修）· main 与 origin/main 同步（已 push）
+updated: 2026-11-15 · code: `61b991c`（未动代码，只改本机配置：OBS 改向 + 新增 FilmCraft 条目）· main 与 origin/main 同步（已 push）
 
 > 判断本文件是否过期：比较 `code` 与 `git log -1 --format=%h -- src Cargo.toml`。
 > 只改文档的提交不算过期。
@@ -161,6 +161,20 @@ updated: 2026-11-12 · code: `61b991c`（WezTerm 面板前端回到默认 wgpu�
   实测：`Alt+\`` 冷启动 3/3 存活（每轮先强杀 wezterm-gui 再唤起），面板渲染 / 中文 / 列宽正常。
   这台是 Intel Arc B390（驱动已从 `32.0.101.8356` 升到 `32.0.101.9150`，与本次故障无关）。
   **ElyTerminal（2026-11-11 装）已排除**。
+- **本机配置 OBS 条目改向（2026-11-15，只改本机配置，未动代码）**：OBS 于当天 12:23 重装成官方版
+  （`C:\Program Files\obs-studio\bin\64bit\obs64.exe`，快捷方式在 ProgramData），scoop 那份没了；
+  `[[apps]]` 还指着 `…\Start Menu\Programs\Scoop Apps\OBS Studio.lnk`（已不存在）→ 点了打不开。
+  改向 `C:\ProgramData\…\Start Menu\Programs\OBS Studio.lnk`，已重启守护进程。
+  备份 `config.toml.bak-20261115-123804`。**注意 `--check` 的盲区**：路径不存在的条目会被当成
+  `shell:<路径>` 打到 `?` 里，末尾仍报「全部可解析」，查失效项要 `--check | grep 'shell:'` 看是不是
+  真 shell 命令（`ms-settings:` / `steam://`）。
+- **本机 `config.toml` 新增 FilmCraft（2026-11-15，只改本机配置，未动代码）**：`[[apps]]` 72 → 73，
+  插在 Kdenlive 与弹弹play 之间（影音组）。command 用 ArtCraft 安装器路径
+  `C:\Users\Agustin\AppData\Local\Programs\ArtCraft\FilmCraft\filmcraft.exe`（**PATH 里没有 `filmcraft`**，
+  scoop manifest 存在于 extras bucket 但本机没装，开始菜单的 `FilmCraft.lnk` 只是安装器产物）。
+  `--query "@app filmcraft"` 命中 1 条，`--check` **73 项全通**。备份 `config.toml.bak-20261115-142134`。
+  关联动作：右键「新建 → FilmCraft Project」的脚本在 `~/Projects/system-tweaks/context-menu/filmcraft-project/`
+  （HKCU ProgID `FilmCraft.Project` + `.fcproj\ShellNew\Data` 内嵌 735 字节空项目；本机原先没有 `.fcproj` 关联）。
 
 ## 未完成
 
@@ -188,6 +202,11 @@ updated: 2026-11-12 · code: `61b991c`（WezTerm 面板前端回到默认 wgpu�
    `[general] clipboard = false` 后重启，开屏不再出现该行。
    实测记录：旧的那种「`@go`」记录（本机 hits=8、快照是 `preview.md`）**不会自动消失**，
    开屏仍会显示一次；想清掉就删 `history.json` 里那一条，与逻辑无关。
+5. **`FilmCraft` 条目的手点确认（2026-11-15 记）**：`--query "@app filmcraft"` 命中 1 条、
+   `--check` 73 项全通，但**没在真面板里按过**：`alt+\`` → 搜 `filmcraft` 回车应直接开 FilmCraft。
+   右键新建那边已自动验过（`dump-new-menu.ps1` 能看到「FilmCraft Project」；用
+   `IContextMenu::InvokeCommand` 真建了一份，735 字节、`inspect` 通过、双击能起 FilmCraft），
+   只缺一次人手右键。菜单项位置在「Microsoft Word 文档」与「Markdown 源文件」之间（系统排序）。
 
 ## 入口
 
