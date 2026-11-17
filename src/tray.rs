@@ -23,11 +23,13 @@ const MENU_SHOW: usize = 1;
 const MENU_QUIT: usize = 2;
 
 /// 启动托盘（后台线程，立即返回）。热键注册失败只写日志，不影响面板本身。
-pub fn start(hotkey: Hotkey) {
+///
+/// `icon` 由 [`crate::gui::icon::draw`] 画好（背景色方块 + 草绿 ❯）。
+pub fn start(hotkey: Hotkey, icon: isize) {
     let spawned = thread::Builder::new()
         .name("tupa-tray".into())
         .spawn(move || {
-            if let Err(error) = run(hotkey) {
+            if let Err(error) = run(hotkey, icon) {
                 log(&format!("托盘线程退出：{error:#}"));
             }
         });
@@ -51,7 +53,7 @@ pub fn remove_icon() {
     unsafe { Shell_NotifyIconW(NIM_DELETE, &data) };
 }
 
-fn run(hotkey: Hotkey) -> Result<()> {
+fn run(hotkey: Hotkey, icon: isize) -> Result<()> {
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::{MOD_NOREPEAT, RegisterHotKey};
     use windows_sys::Win32::UI::WindowsAndMessaging::{GetMessageW, MSG};
 
@@ -66,7 +68,7 @@ fn run(hotkey: Hotkey) -> Result<()> {
         log(&format!("已注册热键 {}", hotkey.spec));
     }
 
-    add_icon(hwnd);
+    add_icon(hwnd, icon);
 
     let mut msg: MSG = unsafe { std::mem::zeroed() };
     loop {
@@ -126,11 +128,10 @@ fn create_window() -> Result<windows_sys::Win32::Foundation::HWND> {
     Ok(hwnd)
 }
 
-fn add_icon(hwnd: windows_sys::Win32::Foundation::HWND) {
+fn add_icon(hwnd: windows_sys::Win32::Foundation::HWND, icon: isize) {
     use windows_sys::Win32::UI::Shell::{
         NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NOTIFYICONDATAW, Shell_NotifyIconW,
     };
-    use windows_sys::Win32::UI::WindowsAndMessaging::{IDI_APPLICATION, LoadIconW};
 
     let mut data: NOTIFYICONDATAW = unsafe { std::mem::zeroed() };
     data.cbSize = std::mem::size_of::<NOTIFYICONDATAW>() as u32;
@@ -138,8 +139,8 @@ fn add_icon(hwnd: windows_sys::Win32::Foundation::HWND) {
     data.uID = TRAY_ID;
     data.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
     data.uCallbackMessage = WM_TRAY;
-    // 还没做图标资源，先借系统默认图标
-    data.hIcon = unsafe { LoadIconW(std::ptr::null_mut(), IDI_APPLICATION) };
+    // `HICON` 是裸指针，跨线程只能传整数
+    data.hIcon = icon as windows_sys::Win32::UI::WindowsAndMessaging::HICON;
     let tip: Vec<u16> = "tupa-gui"
         .encode_utf16()
         .take(data.szTip.len() - 1)

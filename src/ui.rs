@@ -597,7 +597,7 @@ fn cell(
 
 /// 滚动偏移：每 2 帧走 1 列；从左到右 → 停一下 → 再从右到左 → 停一下，
 /// 形成一个来回的周期（而不是从头"跳"回去）
-fn scroll_offset(total: usize, width: usize, tick: u64) -> usize {
+pub(crate) fn scroll_offset(total: usize, width: usize, tick: u64) -> usize {
     if total <= width {
         return 0;
     }

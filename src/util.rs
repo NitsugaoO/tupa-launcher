@@ -434,6 +434,41 @@ pub fn panel_visible(kind: PanelKind) -> bool {
     !hwnd.is_null() && unsafe { IsWindowVisible(hwnd) } != 0
 }
 
+/// 只改 GUI 面板的高度（物理像素），保持左上角不动。
+///
+/// 不用 `Window::resize`：那会在 `entity.update` 内部同步触发 relayout/render，
+/// GPUI 会报 "cannot update Panel while it is already being updated"。
+#[cfg(windows)]
+pub fn resize_panel_height(height: f32) {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        GetWindowRect, SWP_NOACTIVATE, SWP_NOZORDER, SetWindowPos,
+    };
+
+    let hwnd = find_panel(PanelKind::Gui);
+    if hwnd.is_null() {
+        return;
+    }
+    let mut rect = windows_sys::Win32::Foundation::RECT::default();
+    if unsafe { GetWindowRect(hwnd, &mut rect) } == 0 {
+        return;
+    }
+    let current = (rect.bottom - rect.top) as f32;
+    if (current - height).abs() <= 1.0 {
+        return;
+    }
+    unsafe {
+        SetWindowPos(
+            hwnd,
+            std::ptr::null_mut(),
+            rect.left,
+            rect.top,
+            rect.right - rect.left,
+            height as i32,
+            SWP_NOZORDER | SWP_NOACTIVATE,
+        );
+    }
+}
+
 /// 隐藏面板窗口（面板进程继续在后台运行）
 #[cfg(windows)]
 pub fn hide_panel(kind: PanelKind) {

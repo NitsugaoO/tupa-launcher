@@ -10,7 +10,26 @@ use anyhow::Result;
 
 use tupa_launcher::{config, daemon, gui, i18n, theme, tray, util};
 
+/// ratatui 的颜色 → 图标用的 `(r,g,b)`
+fn rgb(color: ratatui::style::Color) -> (u8, u8, u8) {
+    match color {
+        ratatui::style::Color::Rgb(r, g, b) => (r, g, b),
+        _ => (0x27, 0x2e, 0x33),
+    }
+}
+
 fn main() -> Result<()> {
+    // 不带黑控制台窗口：释放控制台（`#![windows_subsystem = "windows"]` 会让 GPUI 静默崩掉）
+    #[cfg(windows)]
+    unsafe {
+        windows_sys::Win32::System::Console::FreeConsole()
+    };
+
+    // panic 时写到日志（无控制台时 stderr 看不见）
+    std::panic::set_hook(Box::new(|info| {
+        tray::log(&format!("panic: {info}"));
+    }));
+
     let cfg = config::Config::load()?;
     i18n::apply(&cfg);
 
@@ -20,11 +39,13 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
+    let theme = theme::Theme::load(&cfg);
+
     if cfg.gui.tray {
         let hotkey = daemon::parse_hotkey(&cfg.gui.hotkey)?;
-        tray::start(hotkey);
+        let icon = gui::icon::draw(rgb(theme.background), rgb(theme.accent));
+        tray::start(hotkey, icon as isize);
     }
 
-    let theme = theme::Theme::load(&cfg);
     gui::run(cfg, theme)
 }

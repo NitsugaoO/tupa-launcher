@@ -14,6 +14,7 @@
 //! - GPUI 的窗口类名是全框架共用的 `Zed::Window`，所以 `find_panel` 只能靠
 //!   **进程名 + 窗口标题**认人
 
+pub mod icon;
 mod input;
 mod keys;
 mod style;
@@ -116,6 +117,10 @@ struct Panel {
     preedit: Option<(usize, String)>,
     /// 紧凑态下按 ↓ 手动展开的开屏列表（收藏 + 最近命令）
     hint_open: bool,
+    /// 上一帧算出来的行宽（左右滚动要用）
+    row_metrics: RowMetrics,
+    /// 窗口 DPI 缩放（改高度时要把逻辑像素换成物理像素）
+    scale: f32,
     /// 上一次写进调试日志的结果条数（`TUPA_GUI_LOG=<路径>` 时生效）
     logged_rows: usize,
     /// 上一次写进调试日志的输入框内容
@@ -150,16 +155,15 @@ impl Panel {
                     make_overlay_window();
                 }
 
-                // 高度跟内容走：空输入只有一条输入行，出结果后向下展开
-                let _ = this.update_in(cx, |panel, window, cx| {
-                    let current = f32::from(window.bounds().size.height);
-                    let wanted = panel.desired_height();
-                    if (current - wanted).abs() > 1.0 {
-                        let width = window.bounds().size.width;
-                        window.resize(size(width, px(wanted)));
-                        cx.notify();
-                    }
-                });
+                // 高度跟内容走：空输入只有一条输入行，出结果后向下展开。
+                // 用 Win32 改（不经 `Window::resize`），否则会在 update 内部同步 relayout 而重入。
+                if let Ok((wanted, scale)) =
+                    this.update(cx, |panel, _cx| (panel.desired_height(), panel.scale))
+                    && wanted > 0.0
+                {
+                    #[cfg(windows)]
+                    crate::util::resize_panel_height(wanted * scale);
+                }
 
                 match this.update(cx, |panel, cx| {
                     // 光标闪烁：到点就翻一次（移动光标后 `blink_at` 会被推后）
@@ -167,6 +171,13 @@ impl Panel {
                     if now >= panel.blink_at {
                         panel.cursor_on = !panel.cursor_on;
                         panel.blink_at = now + Duration::from_millis(500);
+                        cx.notify();
+                    }
+
+                    // 左右滚动：选中行超宽时每轮走一步（`App::tick` 驱动）
+                    panel.app.tick += 1;
+                    let scrolling = panel.needs_scroll();
+                    if scrolling {
                         cx.notify();
                     }
 
@@ -197,6 +208,8 @@ impl Panel {
             blink_at: std::time::Instant::now() + Duration::from_millis(500),
             preedit: None,
             hint_open: false,
+            row_metrics: RowMetrics { title: 0.0, note: 0.0 },
+            scale: 1.0,
             logged_rows: usize::MAX,
             logged_input: String::new(),
         }
@@ -401,11 +414,28 @@ impl Panel {
     }
 
     /// 输入框下面那块：紧凑模式下空输入时整块隐藏（只留一条输入行）
-    fn body(&self, window: &Window, cx: &mut Context<Self>, p: Palette) -> AnyElement {
+    fn body(&mut self, window: &Window, cx: &mut Context<Self>, p: Palette) -> AnyElement {
         if !self.help && self.compact() {
             return div().flex_1().into_any_element();
         }
         self.list_area(window, cx, p)
+    }
+
+    /// 选中的那行是不是宽到需要左右滚动（等宽字体估算）
+    fn needs_scroll(&self) -> bool {
+        if self.row_metrics.title <= 0.0 {
+            return false;
+        }
+        let Some(index) = self.app.list_state.selected() else {
+            return false;
+        };
+        let Some(item) = self.app.items.get(index) else {
+            return false;
+        };
+        let title = item.columns.first().map(String::as_str).unwrap_or("");
+        let advance = style::ROW_SIZE * 0.6;
+        let total = display_width(title) as f32 * advance;
+        total > self.row_metrics.title
     }
 
     /// 是否按「呼出只有输入框」的紧凑形态显示。
@@ -442,7 +472,7 @@ impl Panel {
     }
 
     /// 结果列表：`uniform_list` 虚拟化（`@hist` 200 条 / `@web` 上千条也不会全渲染）
-    fn list_area(&self, window: &Window, cx: &mut Context<Self>, p: Palette) -> AnyElement {
+    fn list_area(&mut self, window: &Window, cx: &mut Context<Self>, p: Palette) -> AnyElement {
         if self.app.items.is_empty() {
             let hint = if self.app.pending {
                 i18n::loading().to_string()
@@ -473,8 +503,9 @@ impl Panel {
             title: (total - fixed - note_width).max(80.0),
             note: note_width,
         };
+        self.row_metrics = metrics;
 
-        let rows = Arc::new(self.snapshot());
+        let rows = Arc::new(self.snapshot(metrics));
         let count = rows.len();
         let panel = cx.entity().downgrade();
 
@@ -517,9 +548,11 @@ impl Panel {
 
     /// 把当前结果快照成「一行一个结构体」，供 `uniform_list` 的闭包使用
     /// （闭包拿到的是 `&mut App`，碰不到 `self`）
-    fn snapshot(&self) -> Vec<RowSnapshot> {
+    fn snapshot(&self, metrics: RowMetrics) -> Vec<RowSnapshot> {
         let selected = self.app.list_state.selected();
         let select_mode = self.app.select_mode;
+        let advance = style::ROW_SIZE * 0.6;
+        let visible = (metrics.title / advance).max(1.0) as usize;
         self.app
             .items
             .iter()
@@ -533,6 +566,14 @@ impl Panel {
                 favorite: self.app.is_favorite(item),
                 unavailable: matches!(item.control, crate::providers::Control::Unavailable),
                 number: (select_mode && index < 9).then_some(index + 1),
+                // 只有选中行会左右滚动（跟 TUI 一样），其余行裁掉就裁掉
+                shift: if selected == Some(index) {
+                    let title = item.columns.first().map(String::as_str).unwrap_or("");
+                    let offset = crate::ui::scroll_offset(display_width(title), visible, self.app.tick);
+                    offset as f32 * advance
+                } else {
+                    0.0
+                },
             })
             .collect()
     }
@@ -623,6 +664,8 @@ struct RowSnapshot {
     unavailable: bool,
     /// 选择模式下的跳转序号（1–9）
     number: Option<usize>,
+    /// 超宽时向左移动的像素（负 margin，实现左右滚动）
+    shift: f32,
 }
 
 /// 行内固定列的宽度（`number` 只在选择模式下占位）
@@ -708,13 +751,20 @@ fn render_row(
                 .child(row.badge),
         )
         .child(
+            // 标题：外层定宽裁剪，内层用负 margin 左移 = 左右滚动
             div()
                 .w(px(metrics.title))
                 .flex_shrink_0()
-                .truncate()
-                .text_size(px(style::ROW_SIZE))
-                .text_color(fg)
-                .child(title),
+                .overflow_hidden()
+                .whitespace_nowrap()
+                .child(
+                    div()
+                        .ml(px(-row.shift))
+                        .whitespace_nowrap()
+                        .text_size(px(style::ROW_SIZE))
+                        .text_color(fg)
+                        .child(title),
+                ),
         )
         .child(
             div()
@@ -915,6 +965,7 @@ impl Render for Panel {
             ));
         }
 
+        self.scale = f32::from(window.scale_factor()).max(0.5);
         let p = self.palette;
         let compact = self.compact() && !self.help;
 
@@ -936,18 +987,25 @@ impl Render for Panel {
 
         // 紧凑形态（刚呼出、还没输入）：只有一条输入行，分隔线 / 列表 / 状态栏都不画
         if !compact {
+            let body = if self.help {
+                self.help_panel(p)
+            } else {
+                self.body(window, cx, p)
+            };
             root = root
                 .child(self.separator(p))
-                .child(if self.help {
-                    self.help_panel(p)
-                } else {
-                    self.body(window, cx, p)
-                })
+                .child(body)
                 .child(self.status_bar(p));
         }
 
         root
     }
+}
+
+/// 文本的「显示宽度」（宽字符算 2）
+fn display_width(text: &str) -> usize {
+    use unicode_width::UnicodeWidthChar;
+    text.chars().map(|c| c.width().unwrap_or(0)).sum()
 }
 
 /// 把 Panel 注册成窗口的输入处理器（IME 与普通字符都走它）
