@@ -361,6 +361,13 @@ impl Panel {
             }
         }
 
+        // 选框/滚动立即起步：`animate()` 平时在后台轮询里跑（空闲时 120ms 一轮），
+        // 按键后干等那一轮会明显「迟钝」。这里先把目标算好、立刻推一帧。
+        if let Some(index) = self.app.list_state.selected() {
+            self.marker_target = index as f32 * self.row_height();
+        }
+        self.animate();
+
         // 焦点别丢（Esc 清空输入、点列表之后都要能继续打字）
         window.focus(&self.focus);
         cx.notify();
@@ -545,6 +552,10 @@ impl Panel {
                 crossterm::event::KeyModifiers::NONE,
             ));
         }
+        if let Some(index) = self.app.list_state.selected() {
+            self.marker_target = index as f32 * self.row_height();
+        }
+        self.animate();
         window.focus(&self.focus);
         cx.notify();
     }
@@ -659,6 +670,29 @@ impl Panel {
             1.0 - (self.chip_fade_start.elapsed().as_secs_f32() / fade).clamp(0.0, 1.0)
         } else {
             0.0
+        }
+    }
+
+    /// 当前列表的行高（含行间距）。普通模式固定；detail 按最大列数算。
+    fn row_height(&self) -> f32 {
+        if self.app.detail {
+            let max_columns = self
+                .app
+                .items
+                .iter()
+                .map(|item| item.columns.len())
+                .max()
+                .unwrap_or(1)
+                .max(1);
+            let extra = (max_columns - 1) as f32;
+            (style::ROW_HEIGHT - 6.0
+                + extra * style::DETAIL_LINE
+                + style::DETAIL_PAD_Y * 2.0
+                + extra * 2.0)
+                .max(style::ROW_HEIGHT)
+                + style::ROW_GAP
+        } else {
+            style::ROW_HEIGHT + style::ROW_GAP
         }
     }
 
@@ -785,23 +819,7 @@ impl Panel {
         // 行高：普通模式固定；detail 模式按「最大列数」统一（所有行等高才能复用
         // 虚拟窗口 + 平滑滚动 + 选框滑动这套，多算的几像素对少列条目只是留白）
         let detail = self.app.detail;
-        let row_h = if detail {
-            let max_columns = rows
-                .iter()
-                .map(|row| row.columns.len())
-                .max()
-                .unwrap_or(1)
-                .max(1);
-            let extra = (max_columns - 1) as f32;
-            (style::ROW_HEIGHT - 6.0
-                + extra * style::DETAIL_LINE
-                + style::DETAIL_PAD_Y * 2.0
-                + extra * 2.0)
-                .max(style::ROW_HEIGHT)
-                + style::ROW_GAP
-        } else {
-            style::ROW_HEIGHT + style::ROW_GAP
-        };
+        let row_h = self.row_height();
 
         // 自己算「可视窗口 + 垂直偏移」，这样才能做平滑滚动
         // （GPUI 的 `uniform_list` 只能瞬间 scroll_to_item，没法插值）
