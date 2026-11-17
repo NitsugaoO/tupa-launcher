@@ -35,6 +35,11 @@ pub const BADGE_WIDTH: f32 = 50.0;
 pub const BADGE_HEIGHT: f32 = 18.0;
 pub const BADGE_RADIUS: f32 = 9.0;
 pub const BADGE_SIZE: f32 = 10.0;
+/// 选择模式下的序号列 / 收藏星标列
+pub const NUMBER_WIDTH: f32 = 18.0;
+pub const STAR_WIDTH: f32 = 16.0;
+/// detail 模式每一行的行高
+pub const DETAIL_LINE: f32 = 20.0;
 /// 附注（副标题 / 末列）
 pub const NOTE_SIZE: f32 = 11.0;
 /// 状态栏：高 24、字号 11
@@ -67,6 +72,7 @@ pub struct Palette {
     pub faint: Rgba,
     pub accent: Rgba,
     pub good: Rgba,
+    pub warn: Rgba,
     pub bad: Rgba,
 }
 
@@ -84,6 +90,7 @@ impl Palette {
             faint: rgba(theme.faint, theme.background),
             accent: rgba(theme.accent, theme.background),
             good: rgba(theme.good, theme.background),
+            warn: rgba(theme.warn, theme.background),
             bad: rgba(theme.bad, theme.background),
         }
     }

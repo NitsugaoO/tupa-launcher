@@ -456,6 +456,10 @@ pub fn elevate_windows_only() -> &'static str {
 
 #[allow(dead_code)] // 只在无 gui feature 的构建里用到
 /// GPUI 面板里 `?` 打开的键位表（`(按键, 说明)`）
+pub fn loading() -> &'static str {
+    t("加载中…", "Loading…")
+}
+
 pub fn gui_help() -> Vec<(&'static str, &'static str)> {
     match lang() {
         Lang::Zh => vec![

@@ -23,7 +23,7 @@ use std::time::Duration;
 use anyhow::Result;
 use gpui::{
     AnyElement, AppContext as _, Bounds, Context, FocusHandle, KeyDownEvent, Render, Rgba,
-    ScrollStrategy, TitlebarOptions, UniformListScrollHandle, WeakEntity, Window,
+    ScrollHandle, ScrollStrategy, TitlebarOptions, UniformListScrollHandle, WeakEntity, Window,
     WindowBackgroundAppearance, WindowBounds, WindowKind, WindowOptions, div, prelude::*, px, size,
     uniform_list,
 };
@@ -89,6 +89,8 @@ struct Panel {
     focus: FocusHandle,
     /// 结果列表的滚动状态（`uniform_list` 虚拟化）
     scroll: UniformListScrollHandle,
+    /// detail 模式用的是非等高行，走普通滚动
+    detail_scroll: ScrollHandle,
     /// 上一帧的选中项，用来判断要不要跟随滚动
     last_selected: Option<usize>,
     /// `?` 打开的快捷键帮助浮层
@@ -157,6 +159,7 @@ impl Panel {
             palette,
             focus,
             scroll: UniformListScrollHandle::new(),
+            detail_scroll: ScrollHandle::new(),
             last_selected: None,
             help: false,
             cursor_on: true,
@@ -267,7 +270,9 @@ impl Panel {
     /// 结果列表：`uniform_list` 虚拟化（`@hist` 200 条 / `@web` 上千条也不会全渲染）
     fn list_area(&self, window: &Window, cx: &mut Context<Self>, p: Palette) -> AnyElement {
         if self.app.items.is_empty() {
-            let hint = if self.app.loaded {
+            let hint = if self.app.pending {
+                i18n::loading().to_string()
+            } else if self.app.loaded {
                 self.app.empty_hint()
             } else {
                 String::new()
@@ -285,16 +290,37 @@ impl Panel {
         // 列宽按真实窗口宽度算（等宽字体 + truncate 由 GPUI 按像素裁）
         let total = f32::from(window.bounds().size.width) - style::PADDING * 2.0;
         let note_width = (total * 0.32).clamp(80.0, 240.0);
-        let title_width = (total
-            - style::ACCENT_BAR
-            - 8.0 * 3.0
-            - style::BADGE_WIDTH
-            - note_width)
-            .max(80.0);
+        let fixed = style::ACCENT_BAR
+            + 8.0 * 3.0
+            + style::NUMBER_WIDTH
+            + style::STAR_WIDTH
+            + style::BADGE_WIDTH;
+        let metrics = RowMetrics {
+            title: (total - fixed - note_width).max(80.0),
+            note: note_width,
+        };
 
         let rows = Arc::new(self.snapshot());
         let count = rows.len();
         let panel = cx.entity().downgrade();
+
+        // detail 模式行高不等，退化成普通滚动容器（条目数一般不多）
+        if self.app.detail {
+            let mut block = div()
+                .id("detail-list")
+                .flex_1()
+                .w_full()
+                .flex()
+                .flex_col()
+                .gap(px(2.))
+                .py(px(6.))
+                .overflow_y_scroll()
+                .track_scroll(&self.detail_scroll);
+            for row in rows.iter() {
+                block = block.child(render_detail_row(row, p, metrics, &panel));
+            }
+            return block.into_any_element();
+        }
 
         div()
             .flex_1()
@@ -305,7 +331,7 @@ impl Panel {
             .child(
                 uniform_list("results", count, move |range, _window, _cx| {
                     range
-                        .map(|index| render_row(&rows[index], p, title_width, note_width, &panel))
+                        .map(|index| render_row(&rows[index], p, metrics, &panel))
                         .collect()
                 })
                 .flex_1()
@@ -319,21 +345,20 @@ impl Panel {
     /// （闭包拿到的是 `&mut App`，碰不到 `self`）
     fn snapshot(&self) -> Vec<RowSnapshot> {
         let selected = self.app.list_state.selected();
+        let select_mode = self.app.select_mode;
         self.app
             .items
             .iter()
             .enumerate()
             .map(|(index, item)| RowSnapshot {
                 index,
-                title: item.columns.first().cloned().unwrap_or_default(),
-                note: if item.columns.len() > 1 {
-                    item.columns[item.columns.len() - 1].clone()
-                } else {
-                    String::new()
-                },
+                columns: item.columns.clone(),
                 badge: item.kind.badge(),
                 color: style::badge_color(item.kind),
                 selected: selected == Some(index),
+                favorite: self.app.is_favorite(item),
+                unavailable: matches!(item.control, crate::providers::Control::Unavailable),
+                number: (select_mode && index < 9).then_some(index + 1),
             })
             .collect()
     }
@@ -415,24 +440,42 @@ impl Panel {
 
 struct RowSnapshot {
     index: usize,
-    title: String,
-    note: String,
+    columns: Vec<String>,
     badge: &'static str,
     color: Rgba,
     selected: bool,
+    favorite: bool,
+    /// 开关类条目不可用（灰掉，提示是死项）
+    unavailable: bool,
+    /// 选择模式下的跳转序号（1–9）
+    number: Option<usize>,
 }
 
-/// 画一行结果卡片。
+/// 行内固定列的宽度（`number` 只在选择模式下占位）
+#[derive(Clone, Copy)]
+struct RowMetrics {
+    title: f32,
+    note: f32,
+}
+
+/// 画一行结果卡片（普通模式）。
 ///
 /// 宽度必须显式给（`w(px(n))`）——GPUI 的 `truncate()` 只对确定宽度的元素生效，
 /// `flex_1` 的容器会被内容撑开、文字画到窗口外。
 fn render_row(
     row: &RowSnapshot,
     p: Palette,
-    title_width: f32,
-    note_width: f32,
+    metrics: RowMetrics,
     panel: &WeakEntity<Panel>,
 ) -> AnyElement {
+    let title = row.columns.first().cloned().unwrap_or_default();
+    let note = if row.columns.len() > 1 {
+        row.columns[row.columns.len() - 1].clone()
+    } else {
+        String::new()
+    };
+    let fg = if row.unavailable { p.faint } else { p.fg };
+
     let mut card = div()
         .id(("row", row.index))
         .h(px(style::ROW_HEIGHT))
@@ -450,56 +493,74 @@ fn render_row(
         card = card.bg(p.overlay);
     }
 
-    let card = card.child(
-        // 选中行左侧的强调条；未选中时留同样宽度占位，避免文字左右跳
-        div()
-            .w(px(style::ACCENT_BAR))
-            .h_full()
-            .bg(if row.selected { p.accent } else { p.background }),
-    )
-    .child(
-        // chip：胶囊底；未选中灰底 + 类型色字，选中行反白成类型色底 + 深色字
-        div()
-            .w(px(style::BADGE_WIDTH))
-            .h(px(style::BADGE_HEIGHT))
-            .flex_shrink_0()
-            .flex()
-            .items_center()
-            .justify_center()
-            .rounded(px(style::BADGE_RADIUS))
-            .bg(if row.selected { row.color } else { p.panel })
-            .text_size(px(style::BADGE_SIZE))
-            .text_color(if row.selected { p.background } else { row.color })
-            .child(row.badge),
-    )
-    .child(
-        div()
-            .w(px(title_width))
-            .flex_shrink_0()
-            .truncate()
-            .text_size(px(style::ROW_SIZE))
-            .text_color(p.fg)
-            .child(row.title.clone()),
-    )
-    .child(
-        div()
-            .w(px(note_width))
-            .flex_shrink_0()
-            .truncate()
-            .text_size(px(style::NOTE_SIZE))
-            .text_color(p.dim)
-            .child(row.note.clone()),
-    )
-    .on_click({
-        let panel = panel.clone();
-        let index = row.index;
-        move |_event, _window, cx| {
-            let _ = panel.update(cx, |panel, cx| {
-                panel.app.list_state.select(Some(index));
-                cx.notify();
-            });
-        }
-    });
+    let card = card
+        .child(
+            // 选中行左侧的强调条；未选中时留同样宽度占位，避免文字左右跳
+            div()
+                .w(px(style::ACCENT_BAR))
+                .h_full()
+                .bg(if row.selected { p.accent } else { p.background }),
+        )
+        .child(
+            // 选择模式（Shift+Tab）下的 1-9 跳转序号
+            div()
+                .w(px(style::NUMBER_WIDTH))
+                .flex_shrink_0()
+                .text_size(px(style::NOTE_SIZE))
+                .text_color(p.dim)
+                .child(row.number.map(|n| n.to_string()).unwrap_or_default()),
+        )
+        .child(
+            // 收藏星标（未收藏也占位，保证列对齐）
+            div()
+                .w(px(style::STAR_WIDTH))
+                .flex_shrink_0()
+                .text_color(p.warn)
+                .child(if row.favorite { "\u{2605}" } else { "" }),
+        )
+        .child(
+            // chip：胶囊底；未选中灰底 + 类型色字，选中行反白成类型色底 + 深色字
+            div()
+                .w(px(style::BADGE_WIDTH))
+                .h(px(style::BADGE_HEIGHT))
+                .flex_shrink_0()
+                .flex()
+                .items_center()
+                .justify_center()
+                .rounded(px(style::BADGE_RADIUS))
+                .bg(if row.selected { row.color } else { p.panel })
+                .text_size(px(style::BADGE_SIZE))
+                .text_color(if row.selected { p.background } else { row.color })
+                .child(row.badge),
+        )
+        .child(
+            div()
+                .w(px(metrics.title))
+                .flex_shrink_0()
+                .truncate()
+                .text_size(px(style::ROW_SIZE))
+                .text_color(fg)
+                .child(title),
+        )
+        .child(
+            div()
+                .w(px(metrics.note))
+                .flex_shrink_0()
+                .truncate()
+                .text_size(px(style::NOTE_SIZE))
+                .text_color(p.dim)
+                .child(note),
+        )
+        .on_click({
+            let panel = panel.clone();
+            let index = row.index;
+            move |_event, _window, cx| {
+                let _ = panel.update(cx, |panel, cx| {
+                    panel.app.list_state.select(Some(index));
+                    cx.notify();
+                });
+            }
+        });
 
     // `uniform_list` 的行高 = 第一项高度，间距只能塞进行高里
     div()
@@ -508,6 +569,108 @@ fn render_row(
         .flex()
         .items_center()
         .child(card)
+        .into_any_element()
+}
+
+/// detail 模式（`Ctrl+Tab`）：第一列作标题，其余列竖排
+fn render_detail_row(
+    row: &RowSnapshot,
+    p: Palette,
+    metrics: RowMetrics,
+    panel: &WeakEntity<Panel>,
+) -> AnyElement {
+    let head = row.columns.first().cloned().unwrap_or_default();
+    let fg = if row.unavailable { p.faint } else { p.fg };
+    let indent = style::ACCENT_BAR
+        + 8.0 * 2.0
+        + style::STAR_WIDTH
+        + style::BADGE_WIDTH
+        + 8.0;
+
+    let mut block = div()
+        .id(("detail", row.index))
+        .w_full()
+        .flex()
+        .flex_col()
+        .gap(px(2.))
+        .py(px(4.))
+        .px(px(8.))
+        .rounded(px(style::ROW_RADIUS))
+        .whitespace_nowrap()
+        .hover(|style| style.bg(p.panel));
+
+    if row.selected {
+        block = block.bg(p.overlay);
+    }
+
+    let mut block = block.child(
+        div()
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap(px(8.))
+            .child(
+                div()
+                    .w(px(style::ACCENT_BAR))
+                    .h(px(style::ROW_HEIGHT - 6.0))
+                    .bg(if row.selected { p.accent } else { p.background }),
+            )
+            .child(
+                div()
+                    .w(px(style::STAR_WIDTH))
+                    .flex_shrink_0()
+                    .text_color(p.warn)
+                    .child(if row.favorite { "\u{2605}" } else { "" }),
+            )
+            .child(
+                div()
+                    .w(px(style::BADGE_WIDTH))
+                    .h(px(style::BADGE_HEIGHT))
+                    .flex_shrink_0()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .rounded(px(style::BADGE_RADIUS))
+                    .bg(if row.selected { row.color } else { p.panel })
+                    .text_size(px(style::BADGE_SIZE))
+                    .text_color(if row.selected { p.background } else { row.color })
+                    .child(row.badge),
+            )
+            .child(
+                div()
+                    .w(px(metrics.title))
+                    .flex_shrink_0()
+                    .truncate()
+                    .text_size(px(style::ROW_SIZE))
+                    .text_color(fg)
+                    .child(head),
+            ),
+    );
+
+    for value in row.columns.iter().skip(1) {
+        block = block.child(
+            div()
+                .pl(px(indent))
+                .w_full()
+                .truncate()
+                .h(px(style::DETAIL_LINE))
+                .text_size(px(style::NOTE_SIZE))
+                .text_color(p.dim)
+                .child(value.clone()),
+        );
+    }
+
+    block
+        .on_click({
+            let panel = panel.clone();
+            let index = row.index;
+            move |_event, _window, cx| {
+                let _ = panel.update(cx, |panel, cx| {
+                    panel.app.list_state.select(Some(index));
+                    cx.notify();
+                });
+            }
+        })
         .into_any_element()
 }
 
@@ -521,7 +684,11 @@ impl Render for Panel {
         if selected != self.last_selected {
             self.last_selected = selected;
             if let Some(index) = selected {
-                self.scroll.scroll_to_item(index, ScrollStrategy::Center);
+                if self.app.detail {
+                    self.detail_scroll.scroll_to_item(index);
+                } else {
+                    self.scroll.scroll_to_item(index, ScrollStrategy::Center);
+                }
             }
         }
 
