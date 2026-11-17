@@ -26,7 +26,7 @@ use anyhow::Result;
 use gpui::{
     AnyElement, AppContext as _, Bounds, Context, FocusHandle, KeyDownEvent, Render, Rgba,
     ScrollDelta, ScrollWheelEvent, TitlebarOptions, WeakEntity, Window,
-    WindowBackgroundAppearance, WindowBounds, WindowKind, WindowOptions, div, prelude::*, px,
+    WindowBackgroundAppearance, WindowBounds, WindowKind, WindowOptions, div, point, prelude::*, px,
     relative, size,
 };
 
@@ -57,17 +57,31 @@ pub fn run(cfg: Config, theme: Theme) -> Result<()> {
         // GlazeWM 那边这条规则是 `ignore`（面板是浮层，不该进 tiling / 不归 workspace 管），
         // 所以位置和大小由这里说了算。
         let display = cx.primary_display();
-        let bounds = match &display {
+        let (bounds, max_height) = match &display {
             Some(display) => {
                 let area = display.bounds();
-                let width = px(f32::from(area.size.width) * style::WIDTH_RATIO);
-                let height = px(f32::from(area.size.height) * style::HEIGHT_RATIO);
-                Bounds::centered(Some(display.id()), size(width, height), cx)
+                let screen_w = f32::from(area.size.width);
+                let screen_h = f32::from(area.size.height);
+                let width = screen_w * style::WIDTH_RATIO;
+                let height = screen_h * style::HEIGHT_RATIO;
+                // 不居中：像命令面板那样靠上（居中时窗口一展开就滑到屏幕中间，
+                // 与鼠标/视线焦点差得远）。水平居中，顶部留 12% 屏高。
+                let origin = point(
+                    area.origin.x + px((screen_w - width) / 2.0),
+                    area.origin.y + px(screen_h * style::TOP_RATIO),
+                );
+                (
+                    Bounds::new(origin, size(px(width), px(height))),
+                    screen_h * style::MAX_HEIGHT_RATIO,
+                )
             }
-            None => Bounds::centered(
-                None,
-                size(px(style::DEFAULT_WIDTH), px(style::DEFAULT_HEIGHT)),
-                cx,
+            None => (
+                Bounds::centered(
+                    None,
+                    size(px(style::DEFAULT_WIDTH), px(style::DEFAULT_HEIGHT)),
+                    cx,
+                ),
+                style::DEFAULT_HEIGHT,
             ),
         };
         let result = cx.open_window(
@@ -93,7 +107,9 @@ pub fn run(cfg: Config, theme: Theme) -> Result<()> {
                 },
                 ..Default::default()
             },
-            move |window, cx| cx.new(|cx| Panel::new(app, opacity, animations, window, cx)),
+            move |window, cx| {
+                cx.new(|cx| Panel::new(app, opacity, animations, max_height, window, cx))
+            },
         );
         if let Err(error) = result {
             eprintln!("[tupa-launcher] 创建 GPUI 窗口失败：{error:#}");
@@ -160,6 +176,8 @@ struct Panel {
     scale: f32,
     /// 面板背景不透明度（来自 `[gui] opacity`）
     opacity: f32,
+    /// 窗口高度上限（逻辑像素；屏幕的 55%，再高就顶到任务栏了）
+    max_height: f32,
     /// 选中行变化的时间点（驱动左右滚动）
     scroll_started: std::time::Instant,
     /// 列表展开的时间点（驱动淡入）
@@ -173,7 +191,14 @@ struct Panel {
 }
 
 impl Panel {
-    fn new(mut app: App, opacity: f32, animations: bool, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    fn new(
+        mut app: App,
+        opacity: f32,
+        animations: bool,
+        max_height: f32,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
         // 开屏（收藏 + 最近命令）要一次查询，provider 在工作线程里跑
         app.refresh();
 
@@ -261,6 +286,7 @@ impl Panel {
             },
             scale: 1.0,
             opacity,
+            max_height,
             scroll_started: std::time::Instant::now(),
             reveal_started: std::time::Instant::now(),
             was_compact: true,
@@ -655,6 +681,16 @@ impl Panel {
 
         let mut moving = false;
 
+        // 大跳（典型场景：最后一条按 ↓ 循环回第一条）：直接瞬移，
+        // 否则选框会从列表底端扫到顶端，看着像「跳出可见范围」。
+        let jump = self.scroll_viewport.max(1.0);
+        if (self.marker_target - self.marker_y).abs() > jump {
+            self.marker_y = self.marker_target;
+        }
+        if (self.scroll_target - self.scroll_y).abs() > jump {
+            self.scroll_y = self.scroll_target;
+        }
+
         let diff = self.scroll_target - self.scroll_y;
         if diff.abs() > style::SCROLL_SNAP {
             self.scroll_y += diff * style::SCROLL_EASE;
@@ -857,7 +893,8 @@ impl Panel {
         let visible = self.app.items.len().min(self.max_visible_rows()) as f32;
         let rows = visible.max(1.0);
 
-        base + style::LIST_TOP + rows * self.row_height() + style::STATUS_HEIGHT
+        // 底部多留一截：滚到底时最后一行不贴着状态栏（看着像「没有底边」）
+        base + style::LIST_TOP * 2.0 + rows * self.row_height() + style::STATUS_HEIGHT
     }
 
     /// 结果列表：`uniform_list` 虚拟化（`@hist` 200 条 / `@web` 上千条也不会全渲染）
@@ -1043,6 +1080,7 @@ impl Panel {
             .flex_1()
             .w_full()
             .overflow_hidden()
+            .pb(px(style::LIST_TOP))
             .on_scroll_wheel(cx.listener(Self::on_scroll))
             .child(inner);
 
@@ -1520,11 +1558,13 @@ fn render_card_row(
         .rounded(px(style::ROW_RADIUS))
         .whitespace_nowrap();
 
-    // 选中底色与左侧绿条由 marker 统一画，这里只给未选中行挂 hover
+    // 选中行的底色由 marker 统一画（行画在 marker 之后，自带背景会把 marker 盖住），
+    // 未选中行给一层很淡的卡片底，把一条条分开；hover 再亮一档。
     let card = if row.selected {
         card
     } else {
-        card.hover(|style| style.bg(p.panel))
+        card.bg(style::with_alpha(p.panel, style::CARD_ALPHA))
+            .hover(|style| style.bg(style::with_alpha(p.panel, style::CARD_ALPHA * 2.0)))
     };
 
     div()
@@ -1625,7 +1665,7 @@ impl Render for Panel {
         // 同步 relayout/render → "cannot update Panel while it is already being updated"。
         // 尺寸是**逻辑像素**，GPUI 自己会处理 DPI（Win32 SetWindowPos 那条路走不通：
         // 请求 132px 实际窗口还是 66px，说明系统按 DPI 又缩了一次）。
-        let wanted = self.desired_height();
+        let wanted = self.desired_height().min(self.max_height);
         let current = f32::from(window.bounds().size.height);
         if (current - wanted).abs() > 1.0 {
             let width = window.bounds().size.width;

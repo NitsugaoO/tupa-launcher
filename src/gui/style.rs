@@ -14,6 +14,10 @@ pub const DEFAULT_HEIGHT: f32 = 520.0;
 /// 面板占主屏的比例（和 TUI 面板的 GlazeWM 规则保持一致：62% × 55%）
 pub const WIDTH_RATIO: f32 = 0.62;
 pub const HEIGHT_RATIO: f32 = 0.55;
+/// 面板顶部距屏幕顶边的比例（像命令面板那样靠上，不居中）
+pub const TOP_RATIO: f32 = 0.12;
+/// 窗口最多长到屏幕的多少（展开后的硬上限，别顶到任务栏）
+pub const MAX_HEIGHT_RATIO: f32 = 0.62;
 
 pub const RADIUS: f32 = 12.0;
 pub const PADDING: f32 = 12.0;
@@ -88,6 +92,9 @@ pub const SCROLLBAR_ALPHA: f32 = 0.25;
 pub const CARD_HEIGHT: f32 = 46.0;
 /// 卡片模式下最多显示多少条（一条两行，再高就装不下了）
 pub const CARD_VISIBLE_ROWS: usize = 7;
+
+/// 卡片模式下未选中行的底色透明度（选中行不画，交给 marker）
+pub const CARD_ALPHA: f32 = 0.45;
 
 /// 两色插值：`t` = 0 取 `a`，1 取 `b`（chip 灰 ↔ 彩的渐变就用它）
 pub fn mix(a: Rgba, b: Rgba, t: f32) -> Rgba {
