@@ -342,19 +342,23 @@ fn launch_panel(shell: Shell, debug: bool) {
     }
 }
 
-/// 自绘窗口：直接 spawn 同目录的 `tupa-launcher.exe --gui`
+/// GPUI 面板：spawn 同目录的 `tupa-gui.exe`（独立进程，自带托盘与热键）
 fn launch_gui(debug: bool) {
     let Ok(exe) = std::env::current_exe() else {
         log("启动面板失败：拿不到自身路径");
         return;
     };
+    let Some(dir) = exe.parent() else {
+        log("启动面板失败：拿不到自身目录");
+        return;
+    };
+    let gui = dir.join(crate::util::PANEL_EXE);
 
-    let mut command = crate::util::detached_command(&exe);
-    command.arg("--gui");
+    let mut command = crate::util::detached_command(&gui);
     match command.spawn() {
         Ok(_) => {
             if debug {
-                log(&format!("已启动自绘面板 {}", exe.display()));
+                log(&format!("已启动 GPUI 面板 {}", gui.display()));
             }
         }
         Err(error) => log(&format!("启动面板失败：{error}")),

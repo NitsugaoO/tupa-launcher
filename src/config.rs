@@ -14,10 +14,33 @@ use crate::theme::ThemeOverrides;
 pub struct Config {
     pub general: General,
     pub daemon: Daemon,
+    pub gui: Gui,
     pub glazewm: Glazewm,
     pub blog: Blog,
     pub theme: ThemeOverrides,
     pub apps: Vec<AppEntry>,
+}
+
+/// `[gui]` —— GPUI 面板（`tupa-gui.exe`）自己的设置。
+///
+/// 与 `[daemon]` 完全独立：`tupa-gui.exe` 自带托盘和热键，不经过守护进程。
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct Gui {
+    /// 唤起 / 隐藏 GPUI 面板的全局热键（和 `[daemon] hotkey` 互不干扰）
+    pub hotkey: String,
+
+    /// 是否显示托盘图标（关掉就只剩热键 + 窗口）
+    pub tray: bool,
+}
+
+impl Default for Gui {
+    fn default() -> Self {
+        Gui {
+            hotkey: "alt+0".to_string(),
+            tray: true,
+        }
+    }
 }
 
 /// `[daemon]` —— 常驻守护进程的设置

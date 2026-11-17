@@ -261,7 +261,7 @@ pub fn wezterm_gui() -> Option<PathBuf> {
 pub const PANEL_TITLE: &str = "tupa-launcher";
 /// 自绘面板的进程名
 #[cfg(windows)]
-pub const PANEL_EXE: &str = "tupa-launcher.exe";
+pub const PANEL_EXE: &str = "tupa-gui.exe";
 /// Windows Terminal 的窗口类名（TUI 面板藏在它里面）
 #[cfg(windows)]
 pub const WT_CLASS: &str = "CASCADIA_HOSTING_WINDOW_CLASS";
