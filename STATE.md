@@ -1,6 +1,6 @@
 # tupa-launcher 状态
 
-updated: 2026-11-17 · code: `dea44eb`（Ctrl+E 定位收尾统一；Clash 订阅更新的动作类条目不再 5s 超时）· main 领先 origin/main（未 push）
+updated: 2026-11-17 · code: `dea44eb`（Ctrl+E 定位收尾统一；Clash 订阅更新的动作类条目不再 5s 超时）· main 与 origin/main 同步（已 push）
 
 > 判断本文件是否过期：比较 `code` 与 `git log -1 --format=%h -- src Cargo.toml`。
 > 只改文档的提交不算过期。
