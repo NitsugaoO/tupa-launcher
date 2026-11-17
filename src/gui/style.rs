@@ -144,5 +144,8 @@ pub fn badge_color(kind: crate::providers::Kind) -> Rgba {
 
 /// 输入行左侧的提示符
 pub const PROMPT: &str = "❯ ";
-/// 提示符占几个「显示格」（`❯` + 空格）——IME 候选窗定位要用
-pub const PROMPT_CHARS: f32 = 2.0;
+/// 提示符占几个「显示格」——`❯` 在 JetBrains Maple Mono 里按全角渲染（2 格）+ 空格 1 格。
+///
+/// 光标和 IME 候选窗都靠它算横坐标，**换字体后要重量一次**（拿不准就临时设个明显偏的
+/// 值看光标落点，反推格数）。
+pub const PROMPT_CHARS: f32 = 3.0;

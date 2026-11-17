@@ -81,10 +81,12 @@ pub fn run(cfg: Config, theme: Theme) -> Result<()> {
                 is_resizable: true,
                 is_minimizable: true,
                 focus: true,
-                // `Blurred` 在 Windows 平台就是 `SetWindowCompositionAttribute(ACCENT_ENABLE_ACRYLICBLURBEHIND)`
-                // —— GPUI 已经内建了亚克力，不需要 fork；配合半透明底色就是真的毛玻璃。
+                // 只用 Transparent（纯 alpha）。`Blurred` 走的是
+                // `SetWindowCompositionAttribute(ACCENT_ENABLE_ACRYLICBLURBEHIND)`，
+                // 但 GPUI 的窗口是 DirectComposition 合成，DWM 的 accent 会把整个窗口
+                // 涂成黑玻璃（实测四角发黑、底色全黑），看不到模糊。
                 window_background: if opacity < 1.0 {
-                    WindowBackgroundAppearance::Blurred
+                    WindowBackgroundAppearance::Transparent
                 } else {
                     WindowBackgroundAppearance::Opaque
                 },
