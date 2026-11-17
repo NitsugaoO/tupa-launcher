@@ -14,6 +14,7 @@
 //! - GPUI 的窗口类名是全框架共用的 `Zed::Window`，所以 `find_panel` 只能靠
 //!   **进程名 + 窗口标题**认人
 
+mod input;
 mod keys;
 mod style;
 
@@ -97,8 +98,12 @@ struct Panel {
     help: bool,
     /// 光标是否显示（500ms 翻转一次，模拟闪烁）
     cursor_on: bool,
+    /// 输入法预编辑：`(起始字符下标, 文本)`，还没上屏的拼音
+    preedit: Option<(usize, String)>,
     /// 上一次写进调试日志的结果条数（`TUPA_GUI_LOG=<路径>` 时生效）
     logged_rows: usize,
+    /// 上一次写进调试日志的输入框内容
+    logged_input: String,
 }
 
 impl Panel {
@@ -163,7 +168,9 @@ impl Panel {
             last_selected: None,
             help: false,
             cursor_on: true,
+            preedit: None,
             logged_rows: usize::MAX,
+            logged_input: String::new(),
         }
     }
 
@@ -194,7 +201,20 @@ impl Panel {
         }
 
         if let Some(key) = key {
-            self.app.on_key(key);
+            // 普通字符由 IME / input handler 通过 `replace_text_in_range` 送进来，
+            // 这里再 insert 一次就成双份了。只有选择模式的 1–9 要自己处理。
+            let select_digit = self.app.select_mode
+                && matches!(
+                    key.code,
+                    crossterm::event::KeyCode::Char('1'..='9')
+                );
+            let plain_text = matches!(key.code, crossterm::event::KeyCode::Char(_))
+                && !key
+                    .modifiers
+                    .intersects(crossterm::event::KeyModifiers::CONTROL | crossterm::event::KeyModifiers::ALT);
+            if !plain_text || select_digit {
+                self.app.on_key(key);
+            }
         }
 
         if self.app.should_hide {
@@ -214,7 +234,7 @@ impl Panel {
     }
 
     /// 输入行：`❯ ` + 输入内容 + 光标（Step 3 换成真光标 + 水平滚动）
-    fn input_row(&self, p: Palette) -> AnyElement {
+    fn input_row(&self, p: Palette, cx: &mut Context<Self>) -> AnyElement {
         // 光标按 `app.cursor` 拆开，前后各画一段，中间是竖线
         let at = self
             .app
@@ -230,7 +250,28 @@ impl Panel {
             .flex()
             .flex_row()
             .items_center()
+            .relative()
             .overflow_hidden()
+            .child(
+                // 文本输入 / IME 的注册点：`handle_input` 只能在 paint 阶段调用。
+                // 用 1×1 的绝对定位块贴在行首——0×0 的元素不会 paint，
+                // handler 就永远注册不上。
+                gpui::canvas(
+                    |bounds, _window, _cx| bounds,
+                    {
+                        let focus = self.focus.clone();
+                        let entity = cx.entity();
+                        move |bounds, _prepainted, window, cx| {
+                            register_input_handler(bounds, &focus, entity.clone(), window, cx);
+                        }
+                    },
+                )
+                .absolute()
+                .top(px(0.))
+                .left(px(0.))
+                .w(px(1.))
+                .h(px(1.)),
+            )
             .child(
                 div()
                     .text_size(px(style::INPUT_SIZE))
@@ -251,6 +292,19 @@ impl Panel {
                     .h(px(style::CURSOR_HEIGHT))
                     .flex_shrink_0()
                     .bg(p.accent),
+            );
+        }
+
+        // 输入法预编辑（拼音还没上屏）：插在光标处，画成带底色的临时文本
+        if let Some((_, text)) = &self.preedit {
+            row = row.child(
+                div()
+                    .px(px(1.))
+                    .rounded(px(2.))
+                    .bg(p.panel)
+                    .text_size(px(style::INPUT_SIZE))
+                    .text_color(p.fg)
+                    .child(text.clone()),
             );
         }
 
@@ -692,6 +746,15 @@ impl Render for Panel {
             }
         }
 
+        // 输入框内容变了就记一行（排查 IME 提交 / 双插入）
+        if self.app.input != self.logged_input {
+            self.logged_input = self.app.input.clone();
+            debug_log(&format!(
+                "input={:?} cursor={} preedit={:?}",
+                self.app.input, self.app.cursor, self.preedit
+            ));
+        }
+
         // 结果条数变了就记一行（`TUPA_GUI_LOG` 只用于开发期排查）
         if self.app.items.len() != self.logged_rows {
             self.logged_rows = self.app.items.len();
@@ -722,7 +785,7 @@ impl Render for Panel {
             .text_color(p.fg)
             .track_focus(&self.focus)
             .on_key_down(cx.listener(Self::handle_key))
-            .child(self.input_row(p))
+            .child(self.input_row(p, cx))
             .child(self.separator(p))
             .child(if self.help {
                 self.help_panel(p)
@@ -731,6 +794,21 @@ impl Render for Panel {
             })
             .child(self.status_bar(p))
     }
+}
+
+/// 把 Panel 注册成窗口的输入处理器（IME 与普通字符都走它）
+fn register_input_handler(
+    bounds: Bounds<gpui::Pixels>,
+    focus: &FocusHandle,
+    entity: gpui::Entity<Panel>,
+    window: &mut Window,
+    cx: &mut gpui::App,
+) {
+    window.handle_input(
+        focus,
+        gpui::ElementInputHandler::new(bounds, entity),
+        cx,
+    );
 }
 
 /// 把一行写进 `TUPA_GUI_LOG` 指向的文件（不设这个环境变量就什么都不做）

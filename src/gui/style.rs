@@ -114,3 +114,5 @@ pub fn badge_color(kind: crate::providers::Kind) -> Rgba {
 
 /// 输入行左侧的提示符
 pub const PROMPT: &str = "❯ ";
+/// 提示符占几个「显示格」（`❯` + 空格）——IME 候选窗定位要用
+pub const PROMPT_CHARS: f32 = 2.0;
