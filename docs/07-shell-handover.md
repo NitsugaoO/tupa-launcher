@@ -1,6 +1,12 @@
 # 套壳交接（自建无边框窗口）
 
-> **这份文档是给下一个会话的开工说明。** 设计取舍看
+> **本文件是历史记录 + GPUI 重写的复用点参考。**
+> **（2026-11-17）旧的 winit 实现（`src/gui/`）已整体删除**，`[features] gui` 与
+> winit / cosmic-text / softbuffer / unicode-script 四个依赖一并移除；现在正在用 **GPUI**
+> 重写渲染层（`App` / provider / `exec` 不动）。下面的实现细节保留作“别再踩一次”的记录，
+> 新的接入方式以 `STATE.md` 与新的 `src/gui/` 为准。
+>
+> 设计取舍看
 > [`docs/05-native-window.md`](05-native-window.md)；**当前进度看 [`../STATE.md`](../STATE.md)**；
 > 项目整体约定与坑表看 [`docs/06-handover.md`](06-handover.md)。
 >

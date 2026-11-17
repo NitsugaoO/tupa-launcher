@@ -518,7 +518,7 @@ src/
 - [x] **v0.7** `:set` 应用内开关 / 选项 / 数值（`actions.toml` 驱动 + 内置深色模式 / 亮度 / 电池养护 / 节能 / 保持唤醒 / 更新订阅）
 - [x] **v0.9** `:blog`（新建文章 / 本地预览 / 管理页 / 站点入口，配置在 `[blog]` 段；取代旧的 `:new`）
 - [x] **v0.8** 自建无边框窗口，脱离 Windows Terminal（设计见 [`docs/05-native-window.md`](docs/05-native-window.md))
-      —— GUI 已能显示与输入，但**已停止打磨**，且已从默认构建中剔除（要编译它：
-      `cargo build --release --features gui`，之后 `--gui` / `[daemon] panel = "gui"` 才可用）：
-      默认宿主改为 WezTerm（`[daemon] terminal`），`WindowsTerminal` 只在找不到 WezTerm 时兜底
+      —— 旧 winit 实现**已于 2026-11-17 整体删除**（依赖重、能力天花板低），
+      正在用 GPUI 重写；这期间 `--gui` / `[daemon] panel = "gui"` 直接报不可用，TUI 不受影响。
+      面板默认宿主是 WezTerm（`[daemon] terminal`），`WindowsTerminal` 只在找不到 WezTerm 时兜底
       （开工说明见 [`docs/07-shell-handover.md`](docs/07-shell-handover.md)，当前进度见 [`STATE.md`](STATE.md)）

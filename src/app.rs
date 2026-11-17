@@ -931,20 +931,6 @@ impl App {
         self.refresh();
     }
 
-    /// 光标处插入一段文本（输入法上屏用），只刷新一次
-    /// （只有自绘 GUI 的 IME commit 会调；TUI 里终端自己画预编辑）
-    #[cfg(feature = "gui")]
-    pub fn insert_str(&mut self, text: &str) {
-        if text.is_empty() {
-            return;
-        }
-        let at = self.byte_index(self.cursor);
-        self.input.insert_str(at, text);
-        self.cursor += text.chars().count();
-        self.leave_history();
-        self.refresh();
-    }
-
     fn backspace(&mut self) {
         if self.cursor == 0 {
             return;

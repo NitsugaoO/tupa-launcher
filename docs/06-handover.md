@@ -182,30 +182,23 @@ Clash 订阅更新就是后者，下载 + 重启应用固定开销就 ~3s，5 �
 真正需要管理员的功能（BIOS 写入、GameZone Win 键锁）在这台 ThinkBook 上 WMI 不可用，
 要做得先解决驱动/提权。
 
-## 6. 套壳（GUI）：进行中
+## 6. 套壳（GUI）：重写中
 
 设计取舍见 [`05-native-window.md`](05-native-window.md)，具体步骤 / 待确认决策见
 [`07-shell-handover.md`](07-shell-handover.md)，**当前进度见 [`../STATE.md`](../STATE.md)**。
 
-现状：`src/gui/` 已能显示与输入（`--gui` 或 `[daemon] panel = "gui"`），默认仍是
-`wt -p tupa-launcher` 拉起的 Windows Terminal 窗口。
+**2026-11-17：旧的 winit 自绘实现（`src/gui/`，1266 行）已整体删除**，`[features] gui`
+与 winit / cosmic-text / softbuffer / unicode-script 四个依赖一并移除。原因是那条路线
+把 ratatui 的字符网格逐像素贴到窗口里，拿不到真圆角/动效，排版能力也被 `Span` 限死。
 
-**2026-11-17 起 GUI 用 feature gate 隔离**（`[features] gui`，默认不编译）：
-winit / cosmic-text / softbuffer / unicode-script 四个重依赖只被它用，全量构建
-70s → 33–44s、二进制 6.8MB → 4.1MB。要跑 `--gui`：`cargo build --release --features gui`。
-代码保留当资产，不随 feature 删除。
+现在换成 **GPUI**（Zed 的 GPU UI 框架）重写渲染层：`App` 状态机、provider、`exec`
+全不动，只换「把结果画成像素」这一层。本机实测：全新 release 构建 151s、二进制
++6.7MB、冷启动到出窗口 545–562ms（比 WezTerm 面板 698–918ms 更快），无边框 /
+圆角 / 中文 / `SW_HIDE`→`SW_SHOW` 唤回均验证通过。调研结论见会话记录，实施计划
+跟着 `STATE.md` 走。
 
-选的是 **winit + cosmic-text + softbuffer**（保留 ratatui 的 layout/render 代码）。
-
-关键复用点：
-
-- `ui::draw(&mut App)` 只依赖 `ratatui::Frame`，换成自己把 `Buffer` 画成像素即可
-- 输入层只要把 `winit::event::KeyEvent` 映射成 `crossterm::event::KeyEvent` 喂给 `App::on_key`
-- 面板本身是个 Windows Terminal 窗口，做不到无边框浮层，`--gui` 才是出路
-
-剩下的主要都是打磨项（圆角 / 阴影 / 淡入、鼠标点击、滚动条、DPI 实测、窗口尺寸配置）。
-**中文输入法（IME）已接入**：`Ime::Preedit` 画预编辑、`Ime::Commit` 插入、
-`set_ime_cursor_area` 定位候选窗 —— 要改就先读 `src/gui/mod.rs` 的 `ime()`。
+重写期间 `--gui` 与 `[daemon] panel = "gui"` 直接报不可用（`i18n::gui_disabled`），
+TUI 照常。
 
 ## 7. 调试入口
 

@@ -56,8 +56,12 @@ tupa-launcher.exe --check # 所有 `[[apps]]` 都能解析
 - 命令关键字是 **`set`**（历史上叫 switch，已改名）；文档示例写默认前缀 `:`，
   用户本机 `config.toml` 改成了 `@`，别把两者搞混。
 - **面板渲染只走 `ui::draw`**（TUI 与 GUI 共用），别在 GUI 里另写一套布局。
-- **自绘 GUI（`src/gui/`）已冷冻（2026-11-06）**：圆角 / 无边框 / 居中已由现成终端 +
-  Win11 DWM + GlazeWM 覆盖，只当资产保留，不要再投时间（除非用户明确要求像素级布局 / 淡入动画）。
+- **自绘 GUI 已删除，正在用 GPUI 重写（2026-11-17）**：旧的 winit + cosmic-text +
+  softbuffer 实现（`src/gui/`，1266 行）与 `[features] gui` 一并移除，因为它把 ratatui
+  字符网格逐像素贴到窗口，拿不到真圆角/动效。现在 `--gui` / `[daemon] panel = "gui"`
+  直接报 `i18n::gui_disabled()`。重写时的复用点：`App` 状态机（吃 `crossterm::event::KeyEvent`
+  + mpsc）、`ui::layout_columns` / `item_lines` 等纯函数；GPUI 的窗口类名固定是
+  `Zed::Window`（所有 GPUI 应用共用），认面板窗口只能靠**进程名 + 窗口标题**。
 - **`config.example.toml` 保持精简示例（2026-11-03 决定）**：只教语法，不同步本机 55 项应用。
 - **不要用「方向键 + `Space`」操作 Windows 系统 UI**（快速设置 / 通知中心）：`Space` 切的
   是**当前焦点项**，而系统 UI 的按钮布局会因用户增删固定项而变——必然存在「焦点落错行

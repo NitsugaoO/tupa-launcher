@@ -448,8 +448,8 @@ pub fn elevate_windows_only() -> &'static str {
 #[allow(dead_code)] // 只在无 gui feature 的构建里用到
 pub fn gui_disabled() -> &'static str {
     t(
-        "本构建未编译自绘 GUI：cargo build --release --features gui",
-        "This build has no GUI: cargo build --release --features gui",
+        "自绘 GUI 正在用 GPUI 重写，暂时不可用（TUI 正常）",
+        "The self-drawn GUI is being rewritten with GPUI and is unavailable for now (TUI still works)",
     )
 }
 
