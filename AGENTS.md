@@ -73,6 +73,14 @@ tupa-launcher.exe --check # 所有 `[[apps]]` 都能解析
 - **ElyTerminal 导致面板闪退 —— 已否决**（2026-11-12 查证）：装上时间与故障对得上，但默认终端
   GUID 仍是 Windows Terminal 的，注册表里没有任何 Ely 项，wgpu 崩也跟终端 delegate 无机制关联。
   真因是 GlazeWM 的 layered（见上一条），别再从终端软件方向找。
+- **脚本超时是分层的，别调大全局 `TIMEOUT`**（2026-11-17）：普通条目（`get` / 开关）5 秒，
+  `kind = "action"` 默认 60 秒，`actions.toml` 可用 `timeout = <秒>` 覆盖。`get` 在每次打开
+  `:set` 时都要跑一遍，全局放宽会拖死面板；「下载 / 重启应用」这类动作 5 秒必然误报
+  （Clash 订阅更新实测 5.2s）。超时必须杀进程树（`serve::kill_pid` → `taskkill /T /F`），
+  只 `TerminateProcess` 会让 powershell 的子进程继续把 yaml 写到一半。
+- **单测不要落盘到真实配置目录**（2026-11-17）：`~/.config/tupa-launcher/{history,favorites}.json`
+  是用户真数据，跑一次 `cargo test` 就能被覆盖。要写盘的操作抽成可关闭的 helper
+  （`App::save_history` 用 `#[cfg(not(test))]`），别在测试里直接调落盘路径。
 
 ## 收尾清单
 

@@ -209,6 +209,10 @@ IdeaNotebookAddin.BatteryAgent.GetInstance()
   一起带回来；`Apply` 请求**不会被 worker 丢弃**（查询才会）。
 - 脚本执行：`cmd /C` + 5 秒超时 + stdout/stderr 两个读线程（防止管道写满卡死）；
   写命令额外设置环境变量 `TUPA_VALUE`，内置脚本靠它取参数。
+  ← 那句「5 秒」已被取代（2026-11-17）：普通条目（`get` / 开关）仍 5 秒，
+  `kind = "action"` 默认 60 秒、`actions.toml` 可用 `timeout = <秒>` 覆盖 ——
+  Clash 订阅更新（下载 + 重启应用）实测 5.2s，就是被 5s 线砍断的；
+  超时改杀进程树（`serve::kill_pid`），详见 `docs/06-handover.md` §5。
 - 内置 PowerShell 用 `-EncodedCommand`（UTF-16LE + base64，自己编码），
   绕开 `cmd /C` 对引号 / 管道符的转义。
 - 内置项：深色模式（Toggle）、屏幕亮度（Number 0~100 step 10）、
