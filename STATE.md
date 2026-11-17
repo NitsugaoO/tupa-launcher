@@ -230,12 +230,13 @@ updated: 2026-11-17 · code: `f40b08f`（GPUI 面板全线打通：独立 exe + 
 
 ## 未完成
 
-- **真亚克力（模糊）**：目前做不到。Windhawk 的 `translucent-windows` v1.8.2 已经注入
-  `tupa-gui`（`@include *`）但无效 —— 它靠 `DwmEnableBlurBehindWindow` /
-  `SetWindowCompositionAttribute`，而 GPUI 窗口是 `WS_EX_NOREDIRECTIONBITMAP` +
-  DirectComposition 自绘，DWM 不给这种窗口合成背景。要模糊只能 fork gpui 关掉
-  NOREDIRECTIONBITMAP、改走 `DWMWA_SYSTEMBACKDROP_TYPE`（风险大，待评估）。
-  `[gui] opacity` 现在只是半透明，不模糊。
+- **真亚克力（模糊）**：GPUI 0.2.2 上做不到。三条路都试过了：
+  ① `WindowBackgroundAppearance::Blurred`（`ACCENT_ENABLE_ACRYLICBLURBEHIND`）→ 整窗变黑玻璃；
+  ② Windhawk 的 `translucent-windows` v1.8.2（`@include *` 已注入）→ 无效；
+  ③ `DWMWA_SYSTEMBACKDROP_TYPE` → DComp 窗口上 DWM frame 会被 DComp 输出盖住，社区实测同样无效
+  （nowledge-co/con-terminal#55）。
+  要模糊只有两条：往 GPUI 的 DComp 树插 `IDCompositionBackdropBrush`（上游改动 / vendored fork），
+  或者应用层「截图 + 模糊」。`[gui] opacity` 目前只是半透明。
 - **窗口宽度记忆**：面板宽度固定按主屏 62%（高度随内容），拖边改过的宽度还没写回
   `gui.json`（`config.toml` 手写带注释，不能程序回写）。
 - **TUI 侧没跟进的新交互**：紧凑形态、双击执行、chip 配色只在 GUI 有；TUI 仍是对齐表。

@@ -86,10 +86,13 @@ tupa-launcher.exe --check # 所有 `[[apps]]` 都能解析
      排查"进程莫名消失"先看这个文件。
   6. **托盘图标**是运行时用 GDI 画的（`gui::icon::draw`，背景色方块 + 草绿 ❯），不依赖
      `.ico` 资源、也没有 `build.rs`；`HICON` 是裸指针，跨线程只能传 `isize`。
-  7. **半透明**：`[gui] opacity` < 1.0 时窗口切 `WindowBackgroundAppearance::Transparent`。
-     **没有模糊**，也别去接 Windhawk 的 translucent-windows —— 它靠 `DwmEnableBlurBehindWindow` /
-     `SetWindowCompositionAttribute`，而 GPUI 的 `WS_EX_NOREDIRECTIONBITMAP` + DirectComposition
-     窗口没有 DWM 背景可合成，实测无效。
+  7. **半透明能用，模糊不行**（2026-11-17 实测过三条路）：
+     - `Transparent`：纯 alpha，`[gui] opacity` 就是它，效果正常
+     - `Blurred`（GPUI 内建的 `ACCENT_ENABLE_ACRYLICBLURBEHIND`）：**会把整窗涂成黑玻璃**
+       （四角发黑、底色全黑、看不到模糊）——DComp 合成窗口上 DWM 的 accent 就是这个表现
+     - Windhawk 的 translucent-windows（`@include *` 确实注入进来了）同样无效
+     真模糊要往 GPUI 的 DComp 树里插 `IDCompositionBackdropBrush`（社区 issue
+     nowledge-co/con-terminal#55 的结论），属于上游改动；或者自己在应用里「截图 + 模糊」。
 - **输入框的文本入口是 `EntityInputHandler`，不是 `on_key_down`**：GPUI 在 `WM_CHAR`
   时调 `replace_text_in_range`、输入法组字时调 `replace_and_mark_text_in_range`，
   `bounds_for_range` 决定候选窗位置（Windows 端 GPUI 会 `ImmSetCandidateWindow`）。
