@@ -71,7 +71,7 @@ tupa-launcher.exe --check # 所有 `[[apps]]` 都能解析
      —— `util::find_panel` 的 GUI 分支只能按**进程名 + 有尺寸的顶层窗口**认人。
   3. `truncate()` **只对「有确定宽度」的元素生效**（`w(px(n))` / `max_w(px(n))`）；
      `flex_1` 的容器宽度由内容撑出来，截不了，文字会照画到父元素外（实测 A/B/C 三行对照）。
-     列表列宽要给显式像素宽度再 `truncate()`；`gui::style::fit` 只在拿不到布局宽度时兜底。
+     列表列宽要给显式像素宽度再 `truncate()`（现在按 `window.bounds()` 宽度算）。
   4. GPUI 没有 channel 唤醒，后台结果靠 `cx.spawn` 轮询 `App::drain_events()`
      （查询中 16ms / 空闲 120ms），拿到结果再 `cx.notify()`。
 - **托盘/热键在后台线程，别塞进 GPUI**：`Application::run` 占住主线程，所以 `src/tray.rs`

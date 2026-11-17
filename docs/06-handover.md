@@ -217,8 +217,8 @@ cargo build --release --features gui     # 产出 tupa-gui.exe + tupa-launcher.e
    的 GUI 分支改成「进程名 + 有尺寸的顶层窗口」。
 3. **`truncate()` 只认「确定宽度」**：`w(px(n))` / `max_w(px(n))` 的元素会正常出省略号；
    `flex_1` 的容器宽度被内容撑开，截不了，文字照画到窗口外；`overflow_hidden` 只换行不裁。
-   所以列表列宽必须给显式像素宽度再 `truncate()`。`gui::style::fit`（按显示宽度在 Rust 侧
-   截断，中文算 2 格）只在拿不到布局宽度时兜底。
+   所以列表列宽必须给显式像素宽度再 `truncate()`（现在按 `window.bounds()` 的宽度算，
+   窗口 resize 会自动跟随）。
 4. **MAKE_OVERLAY 的时机**：`open_window` 返回时窗口还没真正上屏，此时改 EXSTYLE 无效；
    放在 `cx.spawn` 的第一轮（120ms 后）才稳定生效。
 

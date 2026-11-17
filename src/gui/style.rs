@@ -97,66 +97,8 @@ pub fn badge_color(kind: crate::providers::Kind) -> Rgba {
     }
 }
 
-/// 列表标题列 / 附注列大约能显示多少个「显示格」（等宽字体，1 中文 = 2 格）。
-///
-/// Step 1 先按固定字符数截断——GPUI 0.2.2 的 `truncate()` 对文本元素实测不裁剪
-/// （文字照样画到父元素外面），等宽字体下自己截反而可控。Step 3 再按真实窗口宽度算。
-pub const TITLE_COLS: usize = 56;
-pub const NOTE_COLS: usize = 22;
-
-/// 按「显示宽度」截断到 `max_cols` 格，超出补 `…`。
-pub fn fit(text: &str, max_cols: usize) -> String {
-    use unicode_width::UnicodeWidthChar;
-
-    let mut width = 0;
-    let mut out = String::new();
-    for ch in text.chars() {
-        let w = ch.width().unwrap_or(0);
-        if width + w > max_cols {
-            // 给省略号留一格
-            while width + 1 > max_cols {
-                let Some(prev) = out.pop() else { break };
-                width -= prev.width().unwrap_or(0);
-            }
-            out.push('…');
-            return out;
-        }
-        width += w;
-        out.push(ch);
-    }
-    out
-}
-
 /// 输入行左侧的提示符
 pub const PROMPT: &str = "❯ ";
 
 /// 光标：等宽字的一格宽（Step 1 先用静态竖线，Step 3 换成动画块）
 pub const CURSOR: &str = "▏";
-
-#[cfg(test)]
-mod tests {
-    use super::fit;
-
-    #[test]
-    fn short_text_is_untouched() {
-        assert_eq!(fit("hello", 10), "hello");
-    }
-
-    #[test]
-    fn ascii_is_cut_with_ellipsis() {
-        let out = fit("abcdefghij", 5);
-        assert_eq!(out, "abcd…");
-        assert_eq!(out.chars().count(), 5);
-    }
-
-    #[test]
-    fn wide_chars_count_as_two() {
-        // 4 个汉字 = 8 格；第 5 个放不下（要 10 格 > 9）
-        assert_eq!(fit("中文测试中文", 9), "中文测试…");
-    }
-
-    #[test]
-    fn exact_fit_has_no_ellipsis() {
-        assert_eq!(fit("abcdef", 6), "abcdef");
-    }
-}

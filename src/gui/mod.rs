@@ -17,18 +17,19 @@
 mod keys;
 mod style;
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
 use gpui::{
-    AnyElement, AppContext as _, Bounds, Context, FocusHandle, KeyDownEvent, Render, TitlebarOptions,
-    Window, WindowBackgroundAppearance, WindowBounds, WindowKind, WindowOptions, div, prelude::*,
-    px, size,
+    AnyElement, AppContext as _, Bounds, Context, FocusHandle, KeyDownEvent, Render, Rgba,
+    ScrollStrategy, TitlebarOptions, UniformListScrollHandle, WeakEntity, Window,
+    WindowBackgroundAppearance, WindowBounds, WindowKind, WindowOptions, div, prelude::*, px, size,
+    uniform_list,
 };
 
 use crate::app::App;
 use crate::config::Config;
-use crate::providers::Item;
 use crate::theme::Theme;
 use crate::util::PanelKind;
 
@@ -36,9 +37,6 @@ use style::Palette;
 
 /// 窗口标题：`find_panel` / `is_panel_title` 都认它，别随便改。
 const WINDOW_TITLE: &str = "tupa-launcher";
-
-/// Step 1 的列表只画前这么多条（Step 2 换成虚拟列表 + 滚动）
-const MAX_ROWS: usize = 12;
 
 pub fn run(cfg: Config, theme: Theme) -> Result<()> {
     // 已经开着就叫到前面，别开第二个
@@ -88,8 +86,12 @@ struct Panel {
     app: App,
     palette: Palette,
     focus: FocusHandle,
-    /// 调试日志只写一次（`TUPA_GUI_LOG=<路径>` 时生效）
-    logged: bool,
+    /// 结果列表的滚动状态（`uniform_list` 虚拟化）
+    scroll: UniformListScrollHandle,
+    /// 上一帧的选中项，用来判断要不要跟随滚动
+    last_selected: Option<usize>,
+    /// 上一次写进调试日志的结果条数（`TUPA_GUI_LOG=<路径>` 时生效）
+    logged_rows: usize,
 }
 
 impl Panel {
@@ -139,7 +141,9 @@ impl Panel {
             app,
             palette,
             focus,
-            logged: false,
+            scroll: UniformListScrollHandle::new(),
+            last_selected: None,
+            logged_rows: usize::MAX,
         }
     }
 
@@ -198,19 +202,9 @@ impl Panel {
         div().h(px(1.)).w_full().bg(p.border).into_any_element()
     }
 
-    /// 结果列表（Step 1：纯文本行；Step 2 换虚拟列表，Step 3 上卡片样式）
-    fn list_area(&self, p: Palette) -> AnyElement {
-        let selected = self.app.list_state.selected();
-        let rows: Vec<AnyElement> = self
-            .app
-            .items
-            .iter()
-            .take(MAX_ROWS)
-            .enumerate()
-            .map(|(index, item)| self.row(index, item, selected == Some(index), p))
-            .collect();
-
-        if rows.is_empty() {
+    /// 结果列表：`uniform_list` 虚拟化（`@hist` 200 条 / `@web` 上千条也不会全渲染）
+    fn list_area(&self, window: &Window, cx: &mut Context<Self>, p: Palette) -> AnyElement {
+        if self.app.items.is_empty() {
             let hint = if self.app.loaded {
                 self.app.empty_hint()
             } else {
@@ -218,6 +212,7 @@ impl Panel {
             };
             return div()
                 .flex_1()
+                .w_full()
                 .px(px(8.))
                 .py(px(6.))
                 .text_color(p.dim)
@@ -225,78 +220,52 @@ impl Panel {
                 .into_any_element();
         }
 
-        div()
-            .flex_1()
-            .w_full()
-            .flex()
-            .flex_col()
-            .gap(px(style::ROW_GAP))
-            .py(px(6.))
-            .overflow_hidden()
-            .children(rows)
-            .into_any_element()
+        // 列宽按真实窗口宽度算（等宽字体 + truncate 由 GPUI 按像素裁）
+        let total = f32::from(window.bounds().size.width) - style::PADDING * 2.0;
+        let note_width = (total * 0.32).clamp(80.0, 240.0);
+        let title_width = (total
+            - style::ACCENT_BAR
+            - 8.0 * 3.0
+            - style::BADGE_WIDTH
+            - note_width)
+            .max(80.0);
+
+        let rows = Arc::new(self.snapshot());
+        let count = rows.len();
+        let panel = cx.entity().downgrade();
+
+        uniform_list("results", count, move |range, _window, _cx| {
+            range
+                .map(|index| render_row(&rows[index], p, title_width, note_width, &panel))
+                .collect()
+        })
+        .flex_1()
+        .w_full()
+        .track_scroll(self.scroll.clone())
+        .into_any_element()
     }
 
-    fn row(&self, index: usize, item: &Item, selected: bool, p: Palette) -> AnyElement {
-        let title = item.columns.first().cloned().unwrap_or_default();
-        let note = if item.columns.len() > 1 {
-            item.columns[item.columns.len() - 1].clone()
-        } else {
-            String::new()
-        };
-
-        let mut row = div()
-            .id(("row", index))
-            .h(px(style::ROW_HEIGHT))
-            .w_full()
-            .flex()
-            .flex_row()
-            .items_center()
-            .gap(px(8.))
-            .px(px(8.))
-            .rounded(px(style::ROW_RADIUS));
-
-        if selected {
-            row = row.bg(p.overlay);
-        }
-
-        row.child(
-            // 选中行左侧的强调条；未选中时留同样宽度占位，避免文字左右跳
-            div()
-                .w(px(style::ACCENT_BAR))
-                .h_full()
-                .bg(if selected { p.accent } else { p.background }),
-        )
-        .child(
-            div()
-                .w(px(style::BADGE_WIDTH))
-                .h(px(style::BADGE_HEIGHT))
-                .flex()
-                .items_center()
-                .justify_center()
-                .rounded(px(style::BADGE_RADIUS))
-                .bg(p.background)
-                .text_size(px(style::BADGE_SIZE))
-                .text_color(style::badge_color(item.kind))
-                .child(item.kind.badge()),
-        )
-        .child(
-            div()
-                .flex_1()
-                .min_w_0()
-                .whitespace_nowrap()
-                .text_size(px(style::ROW_SIZE))
-                .text_color(p.fg)
-                .child(style::fit(&title, style::TITLE_COLS)),
-        )
-        .child(
-            div()
-                .whitespace_nowrap()
-                .text_size(px(style::NOTE_SIZE))
-                .text_color(p.dim)
-                .child(style::fit(&note, style::NOTE_COLS)),
-        )
-        .into_any_element()
+    /// 把当前结果快照成「一行一个结构体」，供 `uniform_list` 的闭包使用
+    /// （闭包拿到的是 `&mut App`，碰不到 `self`）
+    fn snapshot(&self) -> Vec<RowSnapshot> {
+        let selected = self.app.list_state.selected();
+        self.app
+            .items
+            .iter()
+            .enumerate()
+            .map(|(index, item)| RowSnapshot {
+                index,
+                title: item.columns.first().cloned().unwrap_or_default(),
+                note: if item.columns.len() > 1 {
+                    item.columns[item.columns.len() - 1].clone()
+                } else {
+                    String::new()
+                },
+                badge: item.kind.badge(),
+                color: style::badge_color(item.kind),
+                selected: selected == Some(index),
+            })
+            .collect()
     }
 
     /// 状态栏：左 = 状态消息 / provider 说明，右 = 选中位置
@@ -323,21 +292,131 @@ impl Panel {
     }
 }
 
+struct RowSnapshot {
+    index: usize,
+    title: String,
+    note: String,
+    badge: &'static str,
+    color: Rgba,
+    selected: bool,
+}
+
+/// 画一行结果卡片。
+///
+/// 宽度必须显式给（`w(px(n))`）——GPUI 的 `truncate()` 只对确定宽度的元素生效，
+/// `flex_1` 的容器会被内容撑开、文字画到窗口外。
+fn render_row(
+    row: &RowSnapshot,
+    p: Palette,
+    title_width: f32,
+    note_width: f32,
+    panel: &WeakEntity<Panel>,
+) -> AnyElement {
+    let mut card = div()
+        .id(("row", row.index))
+        .h(px(style::ROW_HEIGHT))
+        .w_full()
+        .flex()
+        .flex_row()
+        .items_center()
+        .gap(px(8.))
+        .px(px(8.))
+        .rounded(px(style::ROW_RADIUS))
+        .whitespace_nowrap()
+        .hover(|style| style.bg(p.overlay));
+
+    if row.selected {
+        card = card.bg(p.overlay);
+    }
+
+    let card = card.child(
+        // 选中行左侧的强调条；未选中时留同样宽度占位，避免文字左右跳
+        div()
+            .w(px(style::ACCENT_BAR))
+            .h_full()
+            .bg(if row.selected { p.accent } else { p.background }),
+    )
+    .child(
+        div()
+            .w(px(style::BADGE_WIDTH))
+            .h(px(style::BADGE_HEIGHT))
+            .flex_shrink_0()
+            .flex()
+            .items_center()
+            .justify_center()
+            .rounded(px(style::BADGE_RADIUS))
+            .bg(p.background)
+            .text_size(px(style::BADGE_SIZE))
+            .text_color(row.color)
+            .child(row.badge),
+    )
+    .child(
+        div()
+            .w(px(title_width))
+            .flex_shrink_0()
+            .truncate()
+            .text_size(px(style::ROW_SIZE))
+            .text_color(p.fg)
+            .child(row.title.clone()),
+    )
+    .child(
+        div()
+            .w(px(note_width))
+            .flex_shrink_0()
+            .truncate()
+            .text_size(px(style::NOTE_SIZE))
+            .text_color(p.dim)
+            .child(row.note.clone()),
+    )
+    .on_click({
+        let panel = panel.clone();
+        let index = row.index;
+        move |_event, _window, cx| {
+            let _ = panel.update(cx, |panel, cx| {
+                panel.app.list_state.select(Some(index));
+                cx.notify();
+            });
+        }
+    });
+
+    // `uniform_list` 的行高 = 第一项高度，间距只能塞进行高里
+    div()
+        .w_full()
+        .h(px(style::ROW_HEIGHT + style::ROW_GAP))
+        .flex()
+        .items_center()
+        .child(card)
+        .into_any_element()
+}
+
 impl Render for Panel {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // 后台查询结果（provider 在工作线程里跑，走 mpsc）
         self.app.drain_events();
 
-        if !self.logged && !self.app.items.is_empty() {
-            self.logged = true;
-            let first = &self.app.items[0];
-            let raw = first.columns.first().map(String::as_str).unwrap_or("");
+        // 选中项跟手滚动（键盘 ↑↓ / 鼠标点击都走这里）
+        let selected = self.app.list_state.selected();
+        if selected != self.last_selected {
+            self.last_selected = selected;
+            if let Some(index) = selected {
+                self.scroll.scroll_to_item(index, ScrollStrategy::Center);
+            }
+        }
+
+        // 结果条数变了就记一行（`TUPA_GUI_LOG` 只用于开发期排查）
+        if self.app.items.len() != self.logged_rows {
+            self.logged_rows = self.app.items.len();
+            let head = self
+                .app
+                .items
+                .first()
+                .and_then(|item| item.columns.first())
+                .cloned()
+                .unwrap_or_default();
             debug_log(&format!(
-                "rows={} cols={:?} first_raw={:?} first_fit={:?}",
+                "rows={} sel={:?} first={head:?}",
                 self.app.items.len(),
-                first.columns,
-                raw,
-                style::fit(raw, style::TITLE_COLS),
+                self.app.list_state.selected(),
             ));
         }
 
@@ -356,7 +435,7 @@ impl Render for Panel {
             .on_key_down(cx.listener(Self::handle_key))
             .child(self.input_row(p))
             .child(self.separator(p))
-            .child(self.list_area(p))
+            .child(self.list_area(window, cx, p))
             .child(self.status_bar(p))
     }
 }
