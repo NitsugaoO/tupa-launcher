@@ -25,9 +25,8 @@ use std::time::Duration;
 use anyhow::Result;
 use gpui::{
     AnyElement, AppContext as _, Bounds, Context, FocusHandle, KeyDownEvent, Render, Rgba,
-    ScrollHandle, ScrollStrategy, TitlebarOptions, UniformListScrollHandle, WeakEntity, Window,
-    WindowBackgroundAppearance, WindowBounds, WindowKind, WindowOptions, div, prelude::*, px, size,
-    uniform_list,
+    ScrollHandle, TitlebarOptions, WeakEntity, Window, WindowBackgroundAppearance, WindowBounds,
+    WindowKind, WindowOptions, div, prelude::*, px, size,
 };
 
 use crate::app::App;
@@ -49,6 +48,7 @@ pub fn run(cfg: Config, theme: Theme) -> Result<()> {
     }
 
     let opacity = cfg.gui.opacity.clamp(0.3, 1.0);
+    let animations = cfg.gui.animations;
     let app = App::new(cfg, theme);
 
     gpui::Application::new().run(move |cx| {
@@ -88,7 +88,7 @@ pub fn run(cfg: Config, theme: Theme) -> Result<()> {
                 },
                 ..Default::default()
             },
-            move |window, cx| cx.new(|cx| Panel::new(app, opacity, window, cx)),
+            move |window, cx| cx.new(|cx| Panel::new(app, opacity, animations, window, cx)),
         );
         if let Err(error) = result {
             eprintln!("[tupa-launcher] 创建 GPUI 窗口失败：{error:#}");
@@ -106,8 +106,20 @@ struct Panel {
     app: App,
     palette: Palette,
     focus: FocusHandle,
-    /// 结果列表的滚动状态（`uniform_list` 虚拟化）
-    scroll: UniformListScrollHandle,
+    /// 垂直滚动：当前位置 / 目标位置（逻辑像素，自己插值才算平滑）
+    scroll_y: f32,
+    scroll_target: f32,
+    /// 列表可视区高度与最大滚动量（每帧由 list_area 算好）
+    scroll_viewport: f32,
+    scroll_max: f32,
+    /// 是否开动画（`[gui] animations`）
+    animations: bool,
+    /// 选框滑动的当前 y / 目标 y（像素）
+    marker_y: f32,
+    marker_target: f32,
+    /// 光标滑动的当前 x / 目标 x（像素）
+    caret_x: f32,
+    caret_target: f32,
     /// detail 模式用的是非等高行，走普通滚动
     detail_scroll: ScrollHandle,
     /// 上一帧的选中项，用来判断要不要跟随滚动
@@ -141,7 +153,7 @@ struct Panel {
 }
 
 impl Panel {
-    fn new(mut app: App, opacity: f32, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    fn new(mut app: App, opacity: f32, animations: bool, window: &mut Window, cx: &mut Context<Self>) -> Self {
         // 开屏（收藏 + 最近命令）要一次查询，provider 在工作线程里跑
         app.refresh();
 
@@ -189,10 +201,13 @@ impl Panel {
                         cx.notify();
                     }
 
-                    // 滚动 / 淡入进行中？
+                    // 推进垂直滚动 / 选框 / 光标动画；再叠加左右滚动与展开淡入，
+                    // 任一还在动就按 60fps 重绘
+                    let moving = panel.animate();
                     let scrolling = panel.needs_scroll();
-                    let revealing = panel.reveal_started.elapsed().as_secs_f32() < style::REVEAL_SECS;
-                    let animating = scrolling || revealing;
+                    let revealing =
+                        panel.reveal_started.elapsed().as_secs_f32() < style::REVEAL_SECS;
+                    let animating = moving || scrolling || revealing;
                     if animating {
                         cx.notify();
                     }
@@ -220,7 +235,15 @@ impl Panel {
             app,
             palette,
             focus,
-            scroll: UniformListScrollHandle::new(),
+            scroll_y: 0.0,
+            scroll_target: 0.0,
+            scroll_viewport: 0.0,
+            scroll_max: 0.0,
+            animations,
+            marker_y: 0.0,
+            marker_target: 0.0,
+            caret_x: 0.0,
+            caret_target: 0.0,
             detail_scroll: ScrollHandle::new(),
             last_selected: None,
             help: false,
@@ -350,8 +373,8 @@ impl Panel {
     }
 
     /// 输入行：`❯ ` + 输入内容 + 光标（Step 3 换成真光标 + 水平滚动）
-    fn input_row(&self, p: Palette, cx: &mut Context<Self>) -> AnyElement {
-        // 光标按 `app.cursor` 拆开，前后各画一段，中间是竖线
+    fn input_row(&mut self, p: Palette, cx: &mut Context<Self>) -> AnyElement {
+        // 光标按 `app.cursor` 拆开，前后各画一段
         let at = self
             .app
             .input
@@ -361,17 +384,28 @@ impl Panel {
             .unwrap_or(self.app.input.len());
         let (before, after) = self.app.input.split_at(at);
 
+        // 光标的目标位置：提示符 + 已输入 + 预编辑（中文预编辑时光标要跟着拼音走）
+        let advance = style::INPUT_SIZE * 0.6;
+        let preedit = self.preedit.as_ref().map(|(_, text)| text.clone());
+        let preedit_width = preedit
+            .as_ref()
+            .map(|text| display_width(text) as f32 * advance)
+            .unwrap_or(0.0);
+        self.caret_target = style::PROMPT_CHARS * advance
+            + display_width(before) as f32 * advance
+            + preedit_width;
+
         let mut row = div()
+            .relative()
             .h(px(style::INPUT_HEIGHT))
+            .w_full()
             .flex()
             .flex_row()
             .items_center()
-            .relative()
             .overflow_hidden()
             .child(
                 // 文本输入 / IME 的注册点：`handle_input` 只能在 paint 阶段调用。
-                // 用 1×1 的绝对定位块贴在行首——0×0 的元素不会 paint，
-                // handler 就永远注册不上。
+                // 用 1×1 的绝对定位块贴在行首——0×0 的元素不会 paint，handler 就注册不上。
                 gpui::canvas(
                     |bounds, _window, _cx| bounds,
                     {
@@ -401,20 +435,7 @@ impl Panel {
                     .child(before.to_owned()),
             );
 
-        let cursor = |p: Palette| {
-            div()
-                .w(px(style::CURSOR_WIDTH))
-                .h(px(style::CURSOR_HEIGHT))
-                .flex_shrink_0()
-                .bg(p.accent)
-        };
-
-        // 光标位置：没有预编辑时在光标处；有预编辑（拼音未上屏）时挪到拼音**后面**，
-        // 这样打字/选词时光标跟着组合串走，而不是死在拼音左边。
-        let preedit = self.preedit.as_ref().map(|(_, text)| text.clone());
-        if self.cursor_on && preedit.is_none() {
-            row = row.child(cursor(p));
-        }
+        // 输入法预编辑（拼音还没上屏）：画在光标处、带底色
         if let Some(text) = preedit {
             row = row.child(
                 div()
@@ -425,9 +446,6 @@ impl Panel {
                     .text_color(p.fg)
                     .child(text),
             );
-            if self.cursor_on {
-                row = row.child(cursor(p));
-            }
         }
 
         row.child(
@@ -435,6 +453,16 @@ impl Panel {
                 .text_size(px(style::INPUT_SIZE))
                 .text_color(p.fg)
                 .child(after.to_owned()),
+        )
+        // 光标：绝对定位（位置由动画插值驱动，所以不能占布局）
+        .child(
+            div()
+                .absolute()
+                .left(px(self.caret_x))
+                .top(px((style::INPUT_HEIGHT - style::CURSOR_HEIGHT) / 2.0))
+                .w(px(style::CURSOR_WIDTH))
+                .h(px(style::CURSOR_HEIGHT))
+                .bg(if self.cursor_on { p.accent } else { p.background }),
         )
         .into_any_element()
     }
@@ -449,6 +477,47 @@ impl Panel {
             return div().flex_1().into_any_element();
         }
         self.list_area(window, cx, p)
+    }
+
+    /// 每帧推进动画：垂直滚动、选框滑动、光标滑动。
+    ///
+    /// 返回「是否还在动」——调用方据此决定要不要按 60fps 继续重绘。
+    /// `[gui] animations = false` 时全部瞬移（不做插值）。
+    fn animate(&mut self) -> bool {
+        if !self.animations {
+            self.scroll_y = self.scroll_target;
+            self.marker_y = self.marker_target;
+            self.caret_x = self.caret_target;
+            return false;
+        }
+
+        let mut moving = false;
+
+        let diff = self.scroll_target - self.scroll_y;
+        if diff.abs() > style::SCROLL_SNAP {
+            self.scroll_y += diff * style::SCROLL_EASE;
+            moving = true;
+        } else if self.scroll_y != self.scroll_target {
+            self.scroll_y = self.scroll_target;
+        }
+
+        let diff = self.marker_target - self.marker_y;
+        if diff.abs() > style::SCROLL_SNAP {
+            self.marker_y += diff * style::MOVE_EASE;
+            moving = true;
+        } else if self.marker_y != self.marker_target {
+            self.marker_y = self.marker_target;
+        }
+
+        let diff = self.caret_target - self.caret_x;
+        if diff.abs() > style::SCROLL_SNAP {
+            self.caret_x += diff * style::MOVE_EASE;
+            moving = true;
+        } else if self.caret_x != self.caret_target {
+            self.caret_x = self.caret_target;
+        }
+
+        moving
     }
 
     /// 选中的那行是不是宽到需要左右滚动（等宽字体估算）
@@ -536,7 +605,6 @@ impl Panel {
         self.row_metrics = metrics;
 
         let rows = Arc::new(self.snapshot(metrics));
-        let count = rows.len();
         let panel = cx.entity().downgrade();
 
         // detail 模式行高不等，退化成普通滚动容器（条目数一般不多）
@@ -557,22 +625,81 @@ impl Panel {
             return block.into_any_element();
         }
 
-        div()
-            .flex_1()
+        // 普通模式：自己算「可视窗口 + 垂直偏移」，这样才能做平滑滚动
+        // （GPUI 的 `uniform_list` 只能瞬间 scroll_to_item，没法插值）
+        let row_h = style::ROW_HEIGHT + style::ROW_GAP;
+        let visible_rows = rows.len().min(style::MAX_VISIBLE_ROWS);
+        self.scroll_viewport = visible_rows as f32 * row_h;
+        self.scroll_max = (rows.len() as f32 * row_h - self.scroll_viewport).max(0.0);
+
+        // 选中项保持在可视区内（上下各留一行余量）
+        if let Some(index) = self.app.list_state.selected() {
+            let top = index as f32 * row_h;
+            let bottom = top + row_h;
+            let margin = row_h;
+            if top < self.scroll_target {
+                self.scroll_target = (top - margin).max(0.0);
+            } else if bottom > self.scroll_target + self.scroll_viewport {
+                self.scroll_target =
+                    (bottom - self.scroll_viewport + margin).min(self.scroll_max);
+            }
+        }
+        self.scroll_target = self.scroll_target.clamp(0.0, self.scroll_max);
+        self.scroll_y = self.scroll_y.clamp(0.0, self.scroll_max);
+
+        // 选框滑动的目标位置
+        self.marker_target = self
+            .app
+            .list_state
+            .selected()
+            .map(|index| index as f32 * row_h)
+            .unwrap_or(0.0);
+
+        // 只渲染可视区附近的行
+        let first = ((self.scroll_y / row_h).floor() as usize).saturating_sub(1);
+        let count = (self.scroll_viewport / row_h).ceil() as usize + 3;
+        let last = (first + count).min(rows.len()).max(first);
+        let mut inner = div()
+            .absolute()
+            .top(px(-self.scroll_y))
+            .left(px(0.))
             .w_full()
             .flex()
-            .flex_col()
-            .child(div().h(px(style::LIST_TOP)).flex_shrink_0())
-            .child(
-                uniform_list("results", count, move |range, _window, _cx| {
-                    range
-                        .map(|index| render_row(&rows[index], p, metrics, &panel))
-                        .collect()
-                })
-                .flex_1()
-                .w_full()
-                .track_scroll(self.scroll.clone()),
-            )
+            .flex_col();
+
+        // 选框：一个独立的绝对定位块，位置由 `marker_y` 插值 —— 这样换行时是滑过去的
+        if self.app.list_state.selected().is_some() {
+            inner = inner.child(
+                div()
+                    .absolute()
+                    .top(px(self.marker_y))
+                    .left(px(0.))
+                    .w_full()
+                    .h(px(style::ROW_HEIGHT))
+                    .rounded(px(style::ROW_RADIUS))
+                    .bg(p.overlay)
+                    .child(
+                        // 左侧强调条
+                        div()
+                            .w(px(style::ACCENT_BAR))
+                            .h_full()
+                            .rounded_tl(px(style::ROW_RADIUS))
+                            .rounded_bl(px(style::ROW_RADIUS))
+                            .bg(p.accent),
+                    ),
+            );
+        }
+
+        for row in &rows[first..last] {
+            inner = inner.child(render_row(row, p, metrics, &panel));
+        }
+
+        div()
+            .relative()
+            .flex_1()
+            .w_full()
+            .overflow_hidden()
+            .child(inner)
             .into_any_element()
     }
 
@@ -968,12 +1095,11 @@ impl Render for Panel {
             self.last_selected = selected;
             // 滚动动画从头开始（每换一行都从「贴左边」开始走）
             self.scroll_started = std::time::Instant::now();
-            if let Some(index) = selected {
-                if self.app.detail {
-                    self.detail_scroll.scroll_to_item(index);
-                } else {
-                    self.scroll.scroll_to_item(index, ScrollStrategy::Center);
-                }
+            if let Some(index) = selected
+                && self.app.detail
+            {
+                // detail 模式行高不等，保持立即到位；普通模式的平滑滚动在 `animate_scroll`
+                self.detail_scroll.scroll_to_item(index);
             }
         }
 

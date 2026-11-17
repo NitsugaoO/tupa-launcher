@@ -18,8 +18,15 @@ pub const HEIGHT_RATIO: f32 = 0.55;
 pub const RADIUS: f32 = 12.0;
 pub const PADDING: f32 = 12.0;
 /// 超宽行的左右滚动：像素速度、两端停顿、单程的最短时长
-pub const SCROLL_SPEED: f32 = 90.0; // px/s
-pub const SCROLL_PAUSE: f32 = 0.9; // 两端各停多久（秒）
+pub const SCROLL_SPEED: f32 = 240.0; // px/s
+pub const SCROLL_PAUSE: f32 = 0.6; // 两端各停多久（秒）
+/// 列表上下滚动：每帧向目标偏移逼近的比例（0..1，越大越快）
+pub const SCROLL_EASE: f32 = 0.28;
+/// 选框 / 光标滑动的缓动系数（比滚动稍快，跟手一点）
+pub const MOVE_EASE: f32 = 0.35;
+/// 位移小于这个像素数就吸附到目标
+pub const SCROLL_SNAP: f32 = 0.4;
+
 /// 列表展开时的淡入时长（秒）
 pub const REVEAL_SECS: f32 = 0.12;
 /// 动画帧间隔（毫秒）：需要滚动/淡入时按这个频率重绘
