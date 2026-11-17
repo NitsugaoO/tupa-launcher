@@ -1,6 +1,6 @@
 # tupa-launcher 状态
 
-updated: 2026-11-15 · code: `61b991c`（未动代码，只改本机配置：OBS 改向 + 新增 FilmCraft 条目）· main 与 origin/main 同步（已 push）
+updated: 2026-11-17 · code: `e532dad`（Ctrl+E 定位后的收尾与回车统一；本机 config 新增 CeleClip）· main 领先 origin/main（未 push）
 
 > 判断本文件是否过期：比较 `code` 与 `git log -1 --format=%h -- src Cargo.toml`。
 > 只改文档的提交不算过期。
@@ -175,38 +175,23 @@ updated: 2026-11-15 · code: `61b991c`（未动代码，只改本机配置：OBS
   `--query "@app filmcraft"` 命中 1 条，`--check` **73 项全通**。备份 `config.toml.bak-20261115-142134`。
   关联动作：右键「新建 → FilmCraft Project」的脚本在 `~/Projects/system-tweaks/context-menu/filmcraft-project/`
   （HKCU ProgID `FilmCraft.Project` + `.fcproj\ShellNew\Data` 内嵌 735 字节空项目；本机原先没有 `.fcproj` 关联）。
+- **本机 `config.toml` 新增 CeleClip（2026-11-16 00:55，只改本机配置，未动代码）**：`[[apps]]` 73 → 74，
+  `--check` 74 项全通。command 是 `wt` + `-d …\CeleClip` + `celeclip-tui.exe` —— **必须经真终端**：
+  `celeclip-tui` 是控制台 TUI，tupa 直接 spawn 会走 `detached_command` 的 `CREATE_NO_WINDOW` + `stdout=null`，
+  拿不到 tty 就静默退出。备份 `config.toml.bak-20261116-005523`
+- **`Ctrl+E` 定位后的收尾与回车统一（2026-11-17）**：`app.rs::reveal_selected` 成功后原来只设一条
+  status —— 面板不关、历史也不记，`@ev` 里定位过的东西永远进不了 `Ctrl+↑`。现在统一走
+  `App::finish_open`（从 `execute` 成功分支抽出）：记历史 + `should_hide`，开屏时按条目累加次数。
+  没有可定位路径的条目（`:web` 行 / 命令列表 / `:set` 控件）原来静默 `return`，现在给
+  `i18n::cannot_reveal()` 红提示。`Ctrl+Enter` / `Alt+Enter` 是同一条路径，行为一并变化。
+  顺带把历史落盘抽成 `App::save_history`（`#[cfg(not(test))]` 才写），单测不再覆盖真实 `history.json`
 
 ## 未完成
 
-0. **`@exp` 手点确认**（2026-11-08 记）：`--query "@exp"` 与单测都验过 —— 开新窗口、
-   同窗口内导航都在 2 秒内出现在第一行，空闲 CPU 0.05%。**但没在真面板里按过**。
-   要确认：`alt+\`` → `@exp` 能看到刚开过的目录、回车打开、`@exp <关键词>` 能筛；
-   顺带看时间列（`刚刚` / `1m`）与长路径截断顺不顺眼。
-1. **`@blog` 本地服务链路还差手点确认**（2026-11-05 记）：本地预览要停留约 5–6 秒且不冻结、
-   随后浏览器弹出，**再回车应秒开、不重复起进程**；「停止管理页 / 停止本地预览」应提示
-   「已停止…（PID …）」且端口释放；`:blog:stop` 一次停掉在跑的全部。
-   事实记录：2026-11-06 收尾时 4000 / 5173 **仍没有监听**，停止链路**仍未手点通过**。
-2. **开屏与 `@set` / `@cfg` 的手点确认**（2026-11-04 记）：`alt+\`` 开屏 web 行 URL 宽度、
-   最后一列是不是「用过几次」、点一条收藏后是否上浮；`@set` / `@cfg` 开关是否仍上下对齐。
-3. **WezTerm 宿主的三项手点确认**（2026-11-06 记）：`alt+\`` 唤起后打中文（`@web <中文>`、
-   `:blog:new 测试`）IME 组合输入与候选框位置是否正常 —— **切宿主唯一没自动验过的点**
-   （WT 一直是好的；有问题把 `[daemon] terminal` 改回 `"wt"` 即可，不用改代码）；
-   开屏在 WezTerm 12pt 下的列宽 / 行数；`Esc` 隐藏后焦点在别的窗口时再按热键应正常弹回前台。
-   **2026-11-12 补充**：前端已回到默认 wgpu（见「阶段」），显隐 / 冷启动 / 强杀重起已自动验过；
-   **IME 中文输入、字体渲染、列宽行数仍未手点**，这三项要在 wgpu 下重验（不再是 Mesa GL 路径）
-4. **剪贴板条目与空参数历史的手点确认**（2026-11-07 记）：识别逻辑已经用
-   `--query "@home"` 验过三种情况（存在的目录 → 首行 `clip`；`https://…` → 首行 `clip` + 「剪贴板」列；
-   普通文字 → 不出现），**但没跑真 TUI**。要确认：复制一个目录 → `alt+\`` 开屏首行是 `clip`
-   且**默认选中仍在收藏第一条**、`↑` 选到它回车能跳过去；`@go` + 回车（读剪贴板）之后
-   `history.json` 应新增一条 `@go <完整路径>`（不是又一条 `@go`），`Ctrl+↑` 回放直达该目录；
-   `[general] clipboard = false` 后重启，开屏不再出现该行。
-   实测记录：旧的那种「`@go`」记录（本机 hits=8、快照是 `preview.md`）**不会自动消失**，
-   开屏仍会显示一次；想清掉就删 `history.json` 里那一条，与逻辑无关。
-5. **`FilmCraft` 条目的手点确认（2026-11-15 记）**：`--query "@app filmcraft"` 命中 1 条、
-   `--check` 73 项全通，但**没在真面板里按过**：`alt+\`` → 搜 `filmcraft` 回车应直接开 FilmCraft。
-   右键新建那边已自动验过（`dump-new-menu.ps1` 能看到「FilmCraft Project」；用
-   `IContextMenu::InvokeCommand` 真建了一份，735 字节、`inspect` 通过、双击能起 FilmCraft），
-   只缺一次人手右键。菜单项位置在「Microsoft Word 文档」与「Markdown 源文件」之间（系统排序）。
+（无）
+
+> 2026-11-17 清理：原 6 条全部是「自动验过、只缺手点」的验收项（`@exp`、`@blog` 本地链路、
+> 开屏 / `@set` 对齐、WezTerm IME、剪贴板条目、FilmCraft 条目），按新规矩不算未完成，已删。
 
 ## 入口
 
