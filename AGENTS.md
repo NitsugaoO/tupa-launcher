@@ -74,6 +74,13 @@ tupa-launcher.exe --check # 所有 `[[apps]]` 都能解析
      列表列宽要给显式像素宽度再 `truncate()`（现在按 `window.bounds()` 宽度算）。
   4. GPUI 没有 channel 唤醒，后台结果靠 `cx.spawn` 轮询 `App::drain_events()`
      （查询中 16ms / 空闲 120ms），拿到结果再 `cx.notify()`。
+- **输入框的文本入口是 `EntityInputHandler`，不是 `on_key_down`**：GPUI 在 `WM_CHAR`
+  时调 `replace_text_in_range`、输入法组字时调 `replace_and_mark_text_in_range`，
+  `bounds_for_range` 决定候选窗位置（Windows 端 GPUI 会 `ImmSetCandidateWindow`）。
+  所以 `handle_key` 要**跳过无修饰键的字符键**，否则和 handler 重复插入；
+  例外是选择模式的 `1`–`9`（走私有的 `App::on_key`）。
+  注册点在 `gui::input_row` 里那个 **1×1 绝对定位 `canvas`**：`window.handle_input` 只能在
+  paint 阶段调，而 0×0 的元素不会 paint（踩过，handler 就永远注册不上）。
 - **托盘/热键在后台线程，别塞进 GPUI**：`Application::run` 占住主线程，所以 `src/tray.rs`
   自己开线程跑 message-only 窗口 + `Shell_NotifyIconW` + `RegisterHotKey`，面板显隐直接用
   `ShowWindow` 操作 HWND（`util::find_panel`），不碰 GPUI 状态。托盘菜单用

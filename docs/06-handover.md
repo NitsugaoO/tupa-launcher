@@ -222,6 +222,22 @@ cargo build --release --features gui     # 产出 tupa-gui.exe + tupa-launcher.e
 4. **MAKE_OVERLAY 的时机**：`open_window` 返回时窗口还没真正上屏，此时改 EXSTYLE 无效；
    放在 `cx.spawn` 的第一轮（120ms 后）才稳定生效。
 
+### IME（2026-11-17 落地）
+
+输入框走 GPUI 的 `EntityInputHandler`（`src/gui/input.rs`）：
+
+- 提交的文字 → `replace_text_in_range` → 直接改 `App::input` + `cursor`，再 `App::refresh()`
+- 输入法组字（拼音未上屏）→ `replace_and_mark_text_in_range` → 存进 `Panel::preedit`，
+  渲染时画在光标处（面板灰底），`unmark_text` 清掉
+- 候选窗 → `bounds_for_range` 返回光标矩形：行首 canvas 的 `left/top` +
+  `字符数 × INPUT_SIZE × 0.6`（等宽字体近似，拿不到 `FontId`）
+- 注册 → `input_row` 里 1×1 绝对定位的 `canvas` 调 `window.handle_input`
+  （必须 paint 阶段；0×0 元素不 paint，注册不上）
+- `handle_key` 跳过无修饰键的字符键，避免双插入
+
+实测：微软拼音可正常上屏。**英文/数字输入**走同一条 `WM_CHAR` 路径，如果出现
+"打一个字出两个"，先查 `handle_key` 的 `plain_text` 判断是不是被改坏了。
+
 ## 7. 调试入口
 
 ```bash
