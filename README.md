@@ -249,7 +249,8 @@ Copilot 键是个例外（它的原样组合被 shell 占着），但用钩子**
   只有它自己会重新生成 `work/config.yaml`，单靠内核 API reload 会丢端口 / TUN / 规则集）
 
 选中一行后：`←/→` 改本地值，`Enter` 写出去；状态显示在行尾（`开` / `关` / `80%`）。
-写操作在后台 worker 里跑（带 5 秒超时），完成后自动重读状态并留在原来那一行。
+写操作在后台 worker 里跑（普通条目 5 秒超时；`kind = "action"` 60 秒，`timeout` 可覆盖），
+完成后自动重读状态并留在原来那一行。
 
 #### 自己的开关：`actions.toml`
 
@@ -263,6 +264,7 @@ kind = "toggle"
 title = "风扇全速"
 subtitle = "Legion"
 group = "性能"
+timeout = 5                     # 可选：这一条最长跑几秒（默认 5；action 类默认 60）
 get = 'powershell -NoProfile -File C:\Users\me\.config\tupa-launcher\scripts\fan-get.ps1'
 on  = 'powershell -NoProfile -File C:\Users\me\.config\tupa-launcher\scripts\fan-set.ps1 -Value 1'
 off = 'powershell -NoProfile -File C:\Users\me\.config\tupa-launcher\scripts\fan-set.ps1 -Value 0'
@@ -288,7 +290,10 @@ get = '...'
 set = '... -Value {value}'
 ```
 
-- 命令统一走 `cmd /C`，在 worker 线程执行，**5 秒超时**；失败时状态栏显示 stderr 第一行。
+- 命令统一走 `cmd /C`，在 worker 线程执行，**普通条目 5 秒超时**；
+  下载 / 重启应用这类「真干活」的条目用 `kind = "action"`（默认 60 秒），
+  也可以用 `timeout = <秒>` 单独调；失败时状态栏显示 stderr 第一行。
+  超时会 `taskkill /T` 连子进程一起收，不会留半截下载在后台继续写文件。
 - `{value}` 会替换成实际值（选项是文本，数值是数字）；也可以直接读环境变量 `TUPA_VALUE`。
 - `get` 失败（脚本报错 / 设备不支持）→ 该行在 `:set:all` 里显示「不可用」。
 

@@ -25,8 +25,17 @@ use crate::providers::Control;
 /// 写命令能读到的环境变量名
 pub const ENV_VALUE: &str = "TUPA_VALUE";
 
-/// 单条脚本的最长执行时间
+/// 单条脚本的默认最长执行时间。
+///
+/// 只够「读一下状态」的：`get` 在每次打开 `:set` 时都要跑一遍，
+/// 卡住的条目不能把面板拖着一起等。
 const TIMEOUT: Duration = Duration::from_secs(5);
+
+/// `kind = "action"` 的默认上限：这类条目是「真的干一件事」，本来就慢。
+///
+/// Clash 订阅更新 = 下载 + 覆盖两个 yaml + 停进程 + 等 800ms + 起进程 + 等 2s，
+/// 固定开销就 ~3s，碰上慢网 5s 必然报「执行超时」。
+const ACTION_TIMEOUT: Duration = Duration::from_secs(60);
 
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(default)]
@@ -60,8 +69,12 @@ pub struct Spec {
     pub options: Vec<String>,
     pub min: Option<i64>,
     pub max: Option<i64>,
+    /// 数值型条目的步长
     pub step: Option<i64>,
     pub suffix: String,
+    /// 最长执行时间（秒）。不写就按类型默认：
+    /// 普通条目 5s、`kind = "action"` 60s（见 [`TIMEOUT`] / [`ACTION_TIMEOUT`]）
+    pub timeout: Option<u64>,
 }
 
 impl Default for Spec {
@@ -82,6 +95,7 @@ impl Default for Spec {
             max: None,
             step: None,
             suffix: String::new(),
+            timeout: None,
         }
     }
 }
@@ -108,6 +122,16 @@ impl Spec {
             self.max.unwrap_or(100),
             self.step.unwrap_or(1),
         )
+    }
+
+    /// 这个条目一次最长跑多久（`timeout` 优先，否则按类型）
+    fn limit(&self) -> Duration {
+        self.timeout
+            .map(Duration::from_secs)
+            .unwrap_or(match self.kind {
+                SpecKind::Action => ACTION_TIMEOUT,
+                _ => TIMEOUT,
+            })
     }
 }
 
@@ -142,7 +166,7 @@ fn merge(list: &mut Vec<Spec>, user: Vec<Spec>) {
 
 /// 读一个条目当前的状态（失败 = [`Control::Unavailable`]）
 pub fn get_control(spec: &Spec) -> Control {
-    let Ok(output) = run_script(&spec.get, None) else {
+    let Ok(output) = run_script(&spec.get, None, spec.limit()) else {
         return Control::Unavailable;
     };
     let raw = output.lines().next().unwrap_or("").trim().to_string();
@@ -207,7 +231,7 @@ pub fn apply(id: &str, value: &str) -> Result<String> {
         bail!("{}", i18n::action_no_set(&spec.title));
     };
 
-    let output = run_script(&command, Some(value))?;
+    let output = run_script(&command, Some(value), spec.limit())?;
     // 动作类条目直接用脚本最后一行当提示（例如「已更新并重启 Clash Party」）
     if spec.kind == SpecKind::Action {
         let message = output.lines().last().unwrap_or("").trim().to_string();
@@ -273,7 +297,19 @@ fn encoded_command(command: &str) -> Option<&str> {
     Some(encoded)
 }
 
-pub fn run_script(command: &str, value: Option<&str>) -> Result<String> {
+/// 报错里显示的命令。`-EncodedCommand` 的 base64 一屏装不下，
+/// 直接甩给用户只能看到 `powershell -NoProfile -NonInteract ...`，看不出是哪个条目。
+fn display_command(command: &str) -> &str {
+    if encoded_command(command).is_some() {
+        "powershell -NoProfile -NonInteractive -EncodedCommand …"
+    } else {
+        command
+    }
+}
+
+/// 跑一条脚本并等它结束。`limit` 是这条脚本的最长执行时间
+/// （默认值见 [`Spec::limit`]：普通条目 5s、动作类 60s）。
+pub fn run_script(command: &str, value: Option<&str>, limit: Duration) -> Result<String> {
     if command.trim().is_empty() {
         bail!("{}", i18n::action_empty_command());
     }
@@ -302,7 +338,7 @@ pub fn run_script(command: &str, value: Option<&str>) -> Result<String> {
 
     let mut child = cmd
         .spawn()
-        .with_context(|| i18n::cannot("执行", "run", command))?;
+        .with_context(|| i18n::cannot("执行", "run", display_command(command)))?;
 
     // 管道必须同时读：输出多了会写满管道把子进程卡住
     let stdout = child.stdout.take();
@@ -324,7 +360,7 @@ pub fn run_script(command: &str, value: Option<&str>) -> Result<String> {
         buffer
     });
 
-    let deadline = Instant::now() + TIMEOUT;
+    let deadline = Instant::now() + limit;
     let status = loop {
         match child.try_wait() {
             Ok(Some(status)) => break status,
@@ -332,13 +368,20 @@ pub fn run_script(command: &str, value: Option<&str>) -> Result<String> {
             Err(error) => {
                 let _ = child.kill();
                 let _ = child.wait();
-                return Err(error).with_context(|| i18n::cannot("执行", "run", command));
+                return Err(error)
+                    .with_context(|| i18n::cannot("执行", "run", display_command(command)));
             }
         }
         if Instant::now() >= deadline {
+            // 只 TerminateProcess 靠不住：powershell 底下的下载、
+            // 它刚拉起的应用会留下来继续跑（甚至接着写 yaml）—— `taskkill /T` 连子孙一起收
+            let _ = crate::serve::kill_pid(child.id());
             let _ = child.kill();
             let _ = child.wait();
-            bail!("{}", i18n::script_timeout(command, TIMEOUT.as_secs()));
+            bail!(
+                "{}",
+                i18n::script_timeout(display_command(command), limit.as_secs())
+            );
         }
         std::thread::sleep(Duration::from_millis(30));
     };
@@ -349,7 +392,7 @@ pub fn run_script(command: &str, value: Option<&str>) -> Result<String> {
     if !status.success() {
         let text = crate::util::decode_output(&stderr);
         let first = text.lines().next().unwrap_or("").trim();
-        bail!("{}", i18n::script_failed(command, first));
+        bail!("{}", i18n::script_failed(display_command(command), first));
     }
 
     Ok(crate::util::decode_output(&stdout).trim().to_string())
@@ -946,8 +989,7 @@ set = "perf {value}"
     }
 
     #[test]
-    fn user_specs_override_builtin_by_id() {
-        let mut list = vec![
+    fn user_specs_override_builtin_by_id() {        let mut list = vec![
             Spec {
                 id: Some("dark-mode".to_string()),
                 title: "内置".to_string(),
@@ -970,5 +1012,36 @@ set = "perf {value}"
         assert_eq!(list.len(), 2);
         assert_eq!(list[0].title, "别的");
         assert_eq!(list[1].title, "用户");
+    }
+
+    #[test]
+    fn action_entries_get_a_longer_timeout() {
+        // 「干活」的条目（下载 / 重启应用）固定开销就 3s 起步，5s 必然误报超时
+        let action = Spec {
+            kind: SpecKind::Action,
+            ..Spec::default()
+        };
+        assert_eq!(action.limit(), ACTION_TIMEOUT);
+        // 读状态的开关仍然只能卡 5s：它们每次打开 `:set` 都要跑一遍
+        assert_eq!(Spec::default().limit(), TIMEOUT);
+
+        // 用户 `actions.toml` 里写了 timeout 就以它为准
+        let custom = Spec {
+            timeout: Some(120),
+            ..Spec::default()
+        };
+        assert_eq!(custom.limit(), Duration::from_secs(120));
+    }
+
+    #[test]
+    fn encoded_commands_are_shortened_in_errors() {
+        // 报错里别把整段 base64 刷到状态栏（用户只能看到 `... -NonInteract` 被截掉）
+        let command = "powershell -NoProfile -NonInteractive -EncodedCommand QQBCAA==";
+        assert_eq!(
+            display_command(command),
+            "powershell -NoProfile -NonInteractive -EncodedCommand …"
+        );
+        // 用户自己的 cmd 命令原样显示
+        assert_eq!(display_command("echo 1"), "echo 1");
     }
 }

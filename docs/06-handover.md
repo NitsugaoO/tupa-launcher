@@ -168,7 +168,10 @@ Control::{Run, Toggle{value}, Choice{options,index}, Number{value,min,max,step,s
 
 设计见 [`04-switch-engine.md`](04-switch-engine.md)。机制一句话：`Item.control` +
 `Action::SetControl` + `Cmd::Apply` / `Evt::Applied`；`actions.toml` 驱动（toggle / choice /
-number，5 秒超时）；内置项免提权（深色模式 / 亮度 / 电池养护 / 节能 / 保持唤醒 / 更新订阅）。
+number，5 秒超时；`kind = "action"` 的「干活」条目默认 60 秒，`timeout = <秒>` 可覆盖 ——
+Clash 订阅更新就是后者，下载 + 重启应用固定开销就 ~3s，5 秒必然误报）；内置项免提权
+（深色模式 / 亮度 / 电池养护 / 节能 / 保持唤醒 / 更新订阅）。
+超时用 `taskkill /T /F` 杀进程树（只 TerminateProcess 会留下子进程继续写文件）。
 节能模式只用鼠标点击快速设置（不用方向键，避开误切蓝牙/飞行模式）。
 
 **没做**：计划任务提权。本来打算用它做电池养护，后来发现直接调 Vantage 的
