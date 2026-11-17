@@ -876,13 +876,17 @@ impl Panel {
             .flex()
             .flex_col();
 
-        // 选框：一个独立的绝对定位块，位置由 `marker_y` 插值 —— 这样换行时是滑过去的
+        // 选框：一个独立的绝对定位块，位置由 `marker_y` 插值 —— 这样换行时是滑过去的。
+        //
+        // 注意坐标基准：inner 里只渲染 `first..last` 这几行，**第一行落在 y=0**，
+        // 而 `marker_y` 是「整个列表的内容坐标」= index × row_h。滚动到下面（first > 0）时
+        // 必须减掉 `first × row_h`，否则选框会一路往下漂（越按越偏）。
         if self.app.list_state.selected().is_some() {
             inner = inner.child(
                 div()
                     .absolute()
                     // 行高 31 而卡片 28，卡片是居中的（上下各 ROW_GAP/2），marker 要跟着偏
-                    .top(px(self.marker_y + style::ROW_GAP / 2.0))
+                    .top(px(self.marker_y - first as f32 * row_h + style::ROW_GAP / 2.0))
                     .left(px(0.))
                     .w_full()
                     .h(px(row_h - style::ROW_GAP))
