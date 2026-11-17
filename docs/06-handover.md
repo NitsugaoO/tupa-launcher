@@ -22,8 +22,9 @@ src/
 ├── main.rs        入口 / 事件循环 / --query --check --resolve --reveal --apply --daemon --gui
 ├── app.rs         状态机：解析、键位、补全、选择、历史、收藏、与 worker 通信
 ├── ui.rs          纯渲染：分列布局、详细信息、滚动、状态栏
-├── exec.rs        执行动作（打开/启动/定位/提权/新窗口/新建文章/
-│                  用指定程序打开/开关写入）
+├── exec.rs        执行动作（打开/启动/定位/提权/新窗口/本地服务编排/
+│                  开关分发；文章创建在 providers/blog，会话清理在 providers/clean）
+├── scripts/       内置 PowerShell 脚本（actions.rs 用 include_str! 嵌入，单个文件对应一个常量）
 ├── glazewm.rs     GlazeWM 集成（打开网页后切到浏览器所在 workspace）
 ├── actions.rs     actions.toml 解析 + 脚本执行（超时）+ 内置开关
 ├── config.rs      config.toml
@@ -44,10 +45,10 @@ src/
     ├── pi.rs      pi（pi 会话列表 + 关键词搜索 + -session 打开）
     ├── web.rs     web（Edge 历史，rusqlite）
     ├── hist.rs    hist（搜 history.json：输入行 + 执行快照，可带关键词）
-    ├── blog.rs      blog（新建文章 / 管理页 / 站点入口）
+    ├── blog.rs      blog（新建文章 / 管理页 / 站点入口；文章创建的执行也在这）
     ├── favorites.rs   fav
     ├── config_items.rs cfg
-    ├── clean.rs     :pi:clean 的实现（时间窗口 + 归档 / 回收站 / 恢复）
+    ├── clean.rs     :pi:clean 的实现（时间窗口 + 归档 / 回收站 / 恢复，含执行）
     ├── switch.rs     set（actions.toml 的开关/选项/数值；命令名 2026-10 从 switch 改成 set）
     ├── home.rs       home（开屏：收藏 + 最近命令；无关键字、不进命令列表）
     └── commands.rs    命令列表（keyword 是 `:`，不参与匹配）
@@ -96,14 +97,16 @@ Control::{Run, Toggle{value}, Choice{options,index}, Number{value,min,max,step,s
 3. `providers/mod.rs::build()` 里 push（顺序 = 命令列表顺序）
 4. 需要新参数：把词加进 `KNOWN_FLAGS`，在 `query()` 里读 `flags`
 
-### 加一个动作（**4 处要同步，漏了会编译不过/行为不对**）
+### 加一个动作（**3 处要同步，漏了会编译不过/行为不对**）
 
-1. `providers/mod.rs` 的 `Action` 加变体
-2. `exec.rs::run` 加分支
-3. `app.rs::reveal_selected` 加分支（**不支持的走 `_` 分支给 `i18n::cannot_reveal()` 提示**，
-   不要静默 `return` —— 按下去没反应会被当成 bug）；支持定位的动作成功后由
-   `App::finish_open` 统一收尾（记历史 + 隐藏面板，和回车一致）
-4. `providers/mod.rs::Item::detail_line` 加分支（详情模式显示什么）
+1. `providers/mod.rs` 的 `Action` 加变体，并在同文件的 `Action::reveal_target`
+   （2026-11-17 收拢，以前散在 `app::reveal_selected`）里给定位行为：
+   无可定位路径的变体走 `_` 分支给 `i18n::cannot_reveal()` 提示（**不要静默** ——
+   按下去没反应会被当成 bug）；支持定位的动作成功后由 `App::finish_open` 统一收尾
+   （记历史 + 隐藏面板，和回车一致）
+2. `exec.rs::run` 加分支（业务实现放各自的模块，`exec` 只留通用进程/窗口层，
+   参考 `CreateBlogPost` → `providers::blog::create_post`）
+3. `providers/mod.rs::Item::detail_line` 加分支（详情模式显示什么）
 
 ### 加一句用户可见文案
 
@@ -186,6 +189,11 @@ Clash 订阅更新就是后者，下载 + 重启应用固定开销就 ~3s，5 �
 
 现状：`src/gui/` 已能显示与输入（`--gui` 或 `[daemon] panel = "gui"`），默认仍是
 `wt -p tupa-launcher` 拉起的 Windows Terminal 窗口。
+
+**2026-11-17 起 GUI 用 feature gate 隔离**（`[features] gui`，默认不编译）：
+winit / cosmic-text / softbuffer / unicode-script 四个重依赖只被它用，全量构建
+70s → 33–44s、二进制 6.8MB → 4.1MB。要跑 `--gui`：`cargo build --release --features gui`。
+代码保留当资产，不随 feature 删除。
 
 选的是 **winit + cosmic-text + softbuffer**（保留 ratatui 的 layout/render 代码）。
 

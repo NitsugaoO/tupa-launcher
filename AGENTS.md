@@ -44,8 +44,11 @@ tupa-launcher.exe --check # 所有 `[[apps]]` 都能解析
 ## 硬约定
 
 - **所有用户可见文案走 `src/i18n.rs`**（`t("中文", "English")`），业务代码里不写裸字符串。
-- **加 `Action` 变体要同步 4 处**（漏了编译不过或行为不对）：`providers/mod.rs` 的 `Action`、
-  `exec::run`、`app::reveal_selected`、`Item::detail_line`。
+- **加 `Action` 变体要同步 3 处**（2026-11-17 从 4 处收拢：定位知识移进
+  `Action::reveal_target`，`app::reveal_selected` 不再枚举）：
+  `providers/mod.rs` 的 `Action` + `Action::reveal_target`（无可定位路径的走 `_` 分支给
+  `i18n::cannot_reveal()` 提示）+ `Item::detail_line`（后两者与 Action 同文件），
+  再加 `exec.rs::run` 的执行分支（业务实现放各自的模块，别都堆进 exec）。
 - **加 `Kind` 变体要同步 3 处**（编译不会报，行为会错）：`providers/mod.rs` 的 `badge()`
   （徽标）、`columns()`（漏了掉回默认两列，开屏混排里排版会歪）、`from_badge()`
   （漏了 `fav:<徽标>` 解析不到）。

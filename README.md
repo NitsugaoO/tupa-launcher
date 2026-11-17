@@ -444,11 +444,11 @@ src/
 ├── main.rs              入口 + 事件循环 + --query/--check 调试模式
 ├── app.rs               状态机：输入解析、键位、补全、选择、与 worker 通信
 ├── ui.rs                纯渲染：分列布局 / 详细信息 / 选中行滚动 / 状态列
-├── exec.rs              执行动作：打开文件 / 启动程序 / 定位 / 打开网址
+├── exec.rs              执行动作：打开文件 / 启动程序 / 定位 / 打开网址 + 本地服务编排
 ├── glazewm.rs           GlazeWM 集成：打开网页后把浏览器窗口切到前台
 ├── destlist.rs         「最近打开的文件夹」数据源：解复合文档 + DestList 流
 ├── explorer_watch.rs   实时记录资源管理器当前打开的目录（WinEventHook 事件驱动）
-├── actions.rs           actions.toml 解析 + 脚本执行（超时）+ 内置开关
+├── actions.rs           actions.toml 解析 + 脚本执行（超时）+ 内置开关（脚本在 scripts/*.ps1）
 ├── daemon.rs            常驻守护进程：低级键盘钩子 + 面板窗口管理（Windows）
 ├── config.rs            config.toml 加载
 ├── favorites.rs         收藏：favorites.json 读写 + toggle
@@ -466,10 +466,10 @@ src/
     ├── exp.rs           exp  —— 资源管理器最近打开过的文件夹（读跳转列表）
     ├── favorites.rs     fav  —— 列出收藏 + 按类型过滤
     ├── commands.rs      `:`  —— 命令列表（也是补全的数据源）
-    ├── blog.rs           blog —— 新建文章 / 本地预览 / 管理页 / 站点入口
+    ├── blog.rs           blog —— 新建文章 / 本地预览 / 管理页 / 站点入口（文章创建的执行也在这）
     ├── go.rs            go   —— zoxide + Everything + 剪贴板
     ├── run.rs           run  —— 执行命令
-    ├── clean.rs         :pi:clean 的实现（清理 pi 会话：归档 / 回收站 / 恢复）
+    ├── clean.rs         :pi:clean 的实现（清理 pi 会话：归档 / 回收站 / 恢复，含执行）
     ├── switch.rs        set —— 开关 / 选项 / 数值（actions.toml）
     ├── config_items.rs  cfg  —— 列出配置项
     └── home.rs          home —— 开屏内容（收藏 + 最近命令；无关键字，不进命令列表）
@@ -518,6 +518,7 @@ src/
 - [x] **v0.7** `:set` 应用内开关 / 选项 / 数值（`actions.toml` 驱动 + 内置深色模式 / 亮度 / 电池养护 / 节能 / 保持唤醒 / 更新订阅）
 - [x] **v0.9** `:blog`（新建文章 / 本地预览 / 管理页 / 站点入口，配置在 `[blog]` 段；取代旧的 `:new`）
 - [x] **v0.8** 自建无边框窗口，脱离 Windows Terminal（设计见 [`docs/05-native-window.md`](docs/05-native-window.md))
-      —— GUI 已能显示与输入（`--gui` / `[daemon] panel = "gui"`），但**已停止打磨**：
+      —— GUI 已能显示与输入，但**已停止打磨**，且已从默认构建中剔除（要编译它：
+      `cargo build --release --features gui`，之后 `--gui` / `[daemon] panel = "gui"` 才可用）：
       默认宿主改为 WezTerm（`[daemon] terminal`），`WindowsTerminal` 只在找不到 WezTerm 时兜底
       （开工说明见 [`docs/07-shell-handover.md`](docs/07-shell-handover.md)，当前进度见 [`STATE.md`](STATE.md)）

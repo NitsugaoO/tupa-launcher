@@ -6,6 +6,8 @@
 >
 > 阶段 1–5 均已实现（`--gui` 可用、IME 已接入、daemon 支持拉起自绘窗口）；
 > 但 `[daemon] panel` 默认仍是 `tui`，剩下的都是打磨项（见 §1）。
+> **（2026-11-17 起）GUI 从默认构建中剔除**（`[features] gui`，默认不编译，
+> 要跑 `--gui` 用 `cargo build --release --features gui`），理由见 [`06-handover.md`](06-handover.md) §6。
 >
 > **（2026-11 起冷冻）**：面板的默认宿主改成 **WezTerm**（`[daemon] terminal`，见
 > [`06-handover.md`](06-handover.md) §4），圆角/无边框/居中这些原来要靠自绘才能得到的效果，

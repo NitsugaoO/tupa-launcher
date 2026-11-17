@@ -1,6 +1,6 @@
 # tupa-launcher 状态
 
-updated: 2026-11-17 · code: `dea44eb`（Ctrl+E 定位收尾统一；Clash 订阅更新的动作类条目不再 5s 超时）· main 与 origin/main 同步（已 push）
+updated: 2026-11-17 · code: `e260b62`（结构优化四连：GUI feature gate / exec 按域拆 / Action 收拢 / 脚本抽 .ps1）· 未推送
 
 > 判断本文件是否过期：比较 `code` 与 `git log -1 --format=%h -- src Cargo.toml`。
 > 只改文档的提交不算过期。
@@ -179,6 +179,19 @@ updated: 2026-11-17 · code: `dea44eb`（Ctrl+E 定位收尾统一；Clash 订�
   `--check` 74 项全通。command 是 `wt` + `-d …\CeleClip` + `celeclip-tui.exe` —— **必须经真终端**：
   `celeclip-tui` 是控制台 TUI，tupa 直接 spawn 会走 `detached_command` 的 `CREATE_NO_WINDOW` + `stdout=null`，
   拿不到 tty 就静默退出。备份 `config.toml.bak-20261116-005523`
+- **结构优化四连（2026-11-17，行为不变，148 测试全绿）**：
+  ① **GUI 用 feature gate 隔离**：`[features] gui`（默认不编译，`--gui` 要
+  `cargo build --release --features gui`，无 gui 构建会报 `i18n::gui_disabled`）。
+  winit / cosmic-text / softbuffer / unicode-script 四个重依赖只有 `src/gui/` 在用，
+  剔除后**全量构建 70s → 33–44s、二进制 6.8MB → 4.1MB**；代码保留当资产。
+  ② **exec.rs 按动作域拆散**（737 → 531 行）：会话清理（`run_session`/`run_batch`）
+  归 `providers/clean.rs`、文章创建（`create_post`）归 `providers/blog.rs`；
+  serve 编排**留在 exec**（serve.rs 文档写明「只放纯逻辑」，不破坏分层）。
+  ③ **「加 Action 同步 4 处」变 3 处**：定位知识收拢成 `Action::reveal_target()`
+  （与枚举同文件），`app::reveal_selected` 只调方法不再枚举。
+  ④ **内置 PowerShell 脚本抽到 `src/scripts/*.ps1`**（21 个，`include_str!` 嵌入，
+  内容逐字节一致），actions.rs 1047 → 733 行；实测 `--query "@set"` 六个 get 全部正常。
+  文档同步：AGENTS.md 硬约定改 3 处、README / docs/06 §2§3§6 / docs/07 文首 / config.example。
 - **`Ctrl+E` 定位后的收尾与回车统一（2026-11-17）**：`app.rs::reveal_selected` 成功后原来只设一条
   status —— 面板不关、历史也不记，`@ev` 里定位过的东西永远进不了 `Ctrl+↑`。现在统一走
   `App::finish_open`（从 `execute` 成功分支抽出）：记历史 + `should_hide`，开屏时按条目累加次数。
