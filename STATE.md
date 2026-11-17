@@ -23,6 +23,8 @@ updated: 2026-11-17 · code: `e260b62`（结构优化四连：GUI feature gate /
   旧的 `new` provider / `Action::CreateFile` / `general.new_files_dir` 已删干净
 - **自绘 GUI 已能跑**：`src/gui/`（winit + cosmic-text + softbuffer），窗口 / 字体 / 键位 / 中文输入法（IME）/ daemon 接管都已实现；
   用 `--gui` 或在 `config.toml` 里设 `[daemon] panel = "gui"` 打开
+  ← 「直接打开」这部分已被 2026-11-17「结构优化四连」取代：GUI 转入 feature gate，
+  默认构建不含，要用得先 `cargo build --release --features gui`（其余描述仍有效）
 - **但默认仍是 `tui`**：`daemon::launch_panel` 按 `[daemon] panel` 分流；
   **自绘 GUI 已冷冻（2026-11-06）**：圆角 / 无边框 / 居中这些由现成终端 + Win11 DWM + GlazeWM 覆盖，
   `src/gui/` 保留当资产，不再投时间（`docs/07-shell-handover.md` 文首已标停）
@@ -184,7 +186,7 @@ updated: 2026-11-17 · code: `e260b62`（结构优化四连：GUI feature gate /
   `cargo build --release --features gui`，无 gui 构建会报 `i18n::gui_disabled`）。
   winit / cosmic-text / softbuffer / unicode-script 四个重依赖只有 `src/gui/` 在用，
   剔除后**全量构建 70s → 33–44s、二进制 6.8MB → 4.1MB**；代码保留当资产。
-  ② **exec.rs 按动作域拆散**（737 → 531 行）：会话清理（`run_session`/`run_batch`）
+  ② **exec.rs 按动作域拆散**（737 → 533 行）：会话清理（`run_session`/`run_batch`）
   归 `providers/clean.rs`、文章创建（`create_post`）归 `providers/blog.rs`；
   serve 编排**留在 exec**（serve.rs 文档写明「只放纯逻辑」，不破坏分层）。
   ③ **「加 Action 同步 4 处」变 3 处**：定位知识收拢成 `Action::reveal_target()`
