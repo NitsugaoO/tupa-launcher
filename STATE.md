@@ -1,6 +1,6 @@
 # tupa-launcher 状态
 
-updated: 2026-11-17 · code: `e260b62`（结构优化四连：GUI feature gate / exec 按域拆 / Action 收拢 / 脚本抽 .ps1）· 未推送
+updated: 2026-11-17 · code: `e260b62`（结构优化四连：GUI feature gate / exec 按域拆 / Action 收拢 / 脚本抽 .ps1）· main 与 origin/main 同步（已 push）
 
 > 判断本文件是否过期：比较 `code` 与 `git log -1 --format=%h -- src Cargo.toml`。
 > 只改文档的提交不算过期。
