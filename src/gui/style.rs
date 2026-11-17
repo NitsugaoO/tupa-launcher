@@ -8,9 +8,12 @@ use ratatui::style::Color;
 
 use crate::theme::Theme;
 
-/// 面板默认尺寸（逻辑像素）—— 用户拖边缩放后写入 `gui.json`
+/// 面板默认尺寸（逻辑像素）：拿不到主屏信息时的兜底
 pub const DEFAULT_WIDTH: f32 = 760.0;
 pub const DEFAULT_HEIGHT: f32 = 520.0;
+/// 面板占主屏的比例（和 TUI 面板的 GlazeWM 规则保持一致：62% × 55%）
+pub const WIDTH_RATIO: f32 = 0.62;
+pub const HEIGHT_RATIO: f32 = 0.55;
 
 pub const RADIUS: f32 = 12.0;
 pub const PADDING: f32 = 12.0;

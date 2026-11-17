@@ -50,11 +50,23 @@ pub fn run(cfg: Config, theme: Theme) -> Result<()> {
     let app = App::new(cfg, theme);
 
     gpui::Application::new().run(move |cx| {
-        let bounds = Bounds::centered(
-            None,
-            size(px(style::DEFAULT_WIDTH), px(style::DEFAULT_HEIGHT)),
-            cx,
-        );
+        // 尺寸与 TUI 面板对齐（屏幕的 62%×55%），居中放在主屏上。
+        // GlazeWM 那边这条规则是 `ignore`（面板是浮层，不该进 tiling / 不归 workspace 管），
+        // 所以位置和大小由这里说了算。
+        let display = cx.primary_display();
+        let bounds = match &display {
+            Some(display) => {
+                let area = display.bounds();
+                let width = px(f32::from(area.size.width) * style::WIDTH_RATIO);
+                let height = px(f32::from(area.size.height) * style::HEIGHT_RATIO);
+                Bounds::centered(Some(display.id()), size(width, height), cx)
+            }
+            None => Bounds::centered(
+                None,
+                size(px(style::DEFAULT_WIDTH), px(style::DEFAULT_HEIGHT)),
+                cx,
+            ),
+        };
         let result = cx.open_window(
             WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(bounds)),
@@ -784,6 +796,14 @@ impl Render for Panel {
                     self.scroll.scroll_to_item(index, ScrollStrategy::Center);
                 }
             }
+        }
+
+        if self.logged_rows == usize::MAX {
+            debug_log(&format!(
+                "window bounds={:?} scale={}",
+                window.bounds(),
+                window.scale_factor()
+            ));
         }
 
         // 输入框内容变了就记一行（排查 IME 提交 / 双插入）
