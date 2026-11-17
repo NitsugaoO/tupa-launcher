@@ -136,7 +136,17 @@ cargo clippy --release --features gui    # 零警告；必须带 feature，否�
      改行高 / 可视条数必须同时改 `row_height()` + `max_visible_rows()` + `desired_height()`；
      三者不一致就是「最后一行被窗口底边裁掉」或「选框越往下偏得越多」。
      卡片右列（状态 / 次数 / 时间）宽度按内容量，**不能写死**——「云上极速 · 13 小时前」
-     写死 72px 就只剩「云上极速」。
+     写死 72px 就只剩「云上极速」。**卡片本身不铺底色**（2026-11-18）：要的是两行结构，
+     不是一张张色块；底色只给 hover 和 marker。
+ 16. **虚拟滚动的 `inner` 偏移必须减 `first * row_h`**（2026-11-18 踩过）：
+     `list_area` 只渲染 `first..last` 这几行，第 `first` 行落在 inner 的 y=0，而它在
+     内容坐标系里是 `first * row_h`。写成 `-scroll_y` 时偏差 = `first * row_h`：
+     浅滚看不出来，滚到底部**整片内容被推到容器外 → 列表一片空白**（`30/30` 复现）。
+     marker 同理要减 `first * row_h`（它已经减了，别改成只写 `marker_y`）。
+ 17. **滚轮一格只走一行**（2026-11-18）：Windows 默认一格滚 3 行，启动器里一跳三条
+     太粗；`on_scroll` 只取 ±1 步，不足一行的部分累积（触控板细滚也能用）。
+     滚动判据用**目标位置 `scroll_target`**，不能用动画中的 `scroll_y`——
+     后者滞后，向上滚时会漏判、选框先跑出视口。
 - **输入框的文本入口是 `EntityInputHandler`，不是 `on_key_down`**：GPUI 在 `WM_CHAR`
   时调 `replace_text_in_range`、输入法组字时调 `replace_and_mark_text_in_range`，
   `bounds_for_range` 决定候选窗位置（Windows 端 GPUI 会 `ImmSetCandidateWindow`）。
