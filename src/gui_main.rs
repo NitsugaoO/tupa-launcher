@@ -1,3 +1,4 @@
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 //! tupa-gui —— GPUI 面板。
 //!
 //! 独立于 `tupa-launcher.exe`：

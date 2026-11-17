@@ -17,6 +17,10 @@ pub const HEIGHT_RATIO: f32 = 0.55;
 
 pub const RADIUS: f32 = 12.0;
 pub const PADDING: f32 = 12.0;
+/// 面板自己画的边框（草绿 accent 色，1px）
+pub const BORDER: f32 = 1.0;
+/// 展开后最多显示多少行结果（超出滚动）
+pub const MAX_VISIBLE_ROWS: usize = 12;
 
 /// 等宽字体：输入行与列表都用它，列对齐靠字符宽度而不是 flex 估算
 pub const FONT: &str = "JetBrains Maple Mono";

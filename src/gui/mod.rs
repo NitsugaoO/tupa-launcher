@@ -131,7 +131,7 @@ impl Panel {
 
         // 后台结果走 mpsc（`App::drain_events`），GPUI 没有 channel 唤醒，
         // 只能轻量轮询：查询中 16ms，空闲 120ms。拿到结果就 notify 一次。
-        cx.spawn(async move |this, cx| {
+        cx.spawn_in(window, async move |this, cx| {
             let mut pending = false;
             let mut styled = false;
             loop {
@@ -147,6 +147,17 @@ impl Panel {
                     #[cfg(windows)]
                     make_overlay_window();
                 }
+
+                // 高度跟内容走：空输入只有一条输入行，出结果后向下展开
+                let _ = this.update_in(cx, |panel, window, cx| {
+                    let current = f32::from(window.bounds().size.height);
+                    let wanted = panel.desired_height();
+                    if (current - wanted).abs() > 1.0 {
+                        let width = window.bounds().size.width;
+                        window.resize(size(width, px(wanted)));
+                        cx.notify();
+                    }
+                });
 
                 match this.update(cx, |panel, cx| {
                     // 光标闪烁：到点就翻一次（移动光标后 `blink_at` 会被推后）
@@ -356,6 +367,45 @@ impl Panel {
 
     fn separator(&self, p: Palette) -> AnyElement {
         div().h(px(1.)).w_full().bg(p.border).into_any_element()
+    }
+
+    /// 输入框下面那块：紧凑模式下空输入时整块隐藏（只留一条输入行）
+    fn body(&self, window: &Window, cx: &mut Context<Self>, p: Palette) -> AnyElement {
+        if !self.help && self.compact() {
+            return div().flex_1().into_any_element();
+        }
+        self.list_area(window, cx, p)
+    }
+
+    /// 是否按「呼出只有输入框」的紧凑形态显示（空输入 + 没有补全候选）
+    fn compact(&self) -> bool {
+        self.app.input.is_empty() && self.app.completion.is_none()
+    }
+
+    /// 窗口应该多高：紧凑时只有输入行，展开时按结果行数算（最多 MAX_VISIBLE_ROWS 行）
+    fn desired_height(&self) -> f32 {
+        let border = style::BORDER * 2.0;
+        let base = style::PADDING * 2.0 + border + style::INPUT_HEIGHT + 1.0;
+
+        if self.compact() && !self.help {
+            return base - 1.0; // 不画分隔线
+        }
+
+        if self.help {
+            let rows = i18n::gui_help().len() as f32;
+            return base + 24.0 + rows * 26.0 + style::STATUS_HEIGHT;
+        }
+
+        let visible = self.app.items.len().min(style::MAX_VISIBLE_ROWS) as f32;
+        let rows = visible.max(1.0);
+        let detail = self.app.detail;
+        let row_height = if detail {
+            // detail 模式每项至少两行
+            (style::ROW_HEIGHT + style::DETAIL_LINE).max(style::ROW_HEIGHT)
+        } else {
+            style::ROW_HEIGHT + style::ROW_GAP
+        };
+        base + style::LIST_TOP + rows * row_height + style::STATUS_HEIGHT
     }
 
     /// 结果列表：`uniform_list` 虚拟化（`@hist` 200 条 / `@web` 上千条也不会全渲染）
@@ -833,26 +883,37 @@ impl Render for Panel {
         }
 
         let p = self.palette;
-        div()
+        let compact = self.compact() && !self.help;
+
+        let mut root = div()
             .size_full()
             .flex()
             .flex_col()
             .bg(p.background)
             .rounded(px(style::RADIUS))
+            .border(px(style::BORDER))
+            .border_color(p.accent)
             .p(px(style::PADDING))
             .font_family(style::FONT)
             .font_weight(style::FONT_WEIGHT)
             .text_color(p.fg)
             .track_focus(&self.focus)
             .on_key_down(cx.listener(Self::handle_key))
-            .child(self.input_row(p, cx))
-            .child(self.separator(p))
-            .child(if self.help {
-                self.help_panel(p)
-            } else {
-                self.list_area(window, cx, p)
-            })
-            .child(self.status_bar(p))
+            .child(self.input_row(p, cx));
+
+        // 紧凑形态（刚呼出、还没输入）：只有一条输入行，分隔线 / 列表 / 状态栏都不画
+        if !compact {
+            root = root
+                .child(self.separator(p))
+                .child(if self.help {
+                    self.help_panel(p)
+                } else {
+                    self.body(window, cx, p)
+                })
+                .child(self.status_bar(p));
+        }
+
+        root
     }
 }
 
