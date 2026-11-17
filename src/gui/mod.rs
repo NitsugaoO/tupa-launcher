@@ -712,14 +712,26 @@ impl Panel {
 
         let visible = self.app.items.len().min(style::MAX_VISIBLE_ROWS) as f32;
         let rows = visible.max(1.0);
-        let detail = self.app.detail;
-        let row_height = if detail {
-            // detail 模式每项至少两行
-            (style::ROW_HEIGHT + style::DETAIL_LINE).max(style::ROW_HEIGHT)
-        } else {
-            style::ROW_HEIGHT + style::ROW_GAP
-        };
-        base + style::LIST_TOP + rows * row_height + style::STATUS_HEIGHT
+
+        if self.app.detail {
+            // detail 模式下每条高度随列数变化：头行 + (列数-1) 行明细 + 上下内边距 + 行间距。
+            // 之前按「固定两行」算，列数多的条目会被裁掉底部（4 条都铺不满就是这个原因）。
+            let max_columns = self
+                .app
+                .items
+                .iter()
+                .map(|item| item.columns.len())
+                .max()
+                .unwrap_or(1)
+                .max(1);
+            let extra = (max_columns - 1) as f32;
+            let per_row =
+                style::ROW_HEIGHT + extra * style::DETAIL_LINE + style::DETAIL_PAD_Y * 2.0
+                    + extra * 2.0;
+            return base + style::LIST_TOP + rows * per_row + style::STATUS_HEIGHT;
+        }
+
+        base + style::LIST_TOP + rows * (style::ROW_HEIGHT + style::ROW_GAP) + style::STATUS_HEIGHT
     }
 
     /// 结果列表：`uniform_list` 虚拟化（`@hist` 200 条 / `@web` 上千条也不会全渲染）
@@ -1164,8 +1176,8 @@ fn render_detail_row(
         .flex()
         .flex_col()
         .gap(px(2.))
-        .py(px(4.))
-        .px(px(8.))
+        .py(px(style::DETAIL_PAD_Y))
+        .px(px(style::ROW_PAD_X))
         .rounded(px(style::ROW_RADIUS))
         .whitespace_nowrap()
         .hover(|style| style.bg(p.panel));

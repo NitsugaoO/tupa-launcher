@@ -67,8 +67,9 @@ pub const ROW_PAD_X: f32 = 6.0;
 /// 选择模式下的序号列 / 收藏星标列
 pub const NUMBER_WIDTH: f32 = 18.0;
 pub const STAR_WIDTH: f32 = 14.0;
-/// detail 模式每一行的行高
+/// detail 模式每一行的行高 / 每条条目的上下内边距
 pub const DETAIL_LINE: f32 = 20.0;
+pub const DETAIL_PAD_Y: f32 = 4.0;
 /// 附注（副标题 / 末列）
 pub const NOTE_SIZE: f32 = 11.0;
 /// 状态栏：高 24、字号 11
