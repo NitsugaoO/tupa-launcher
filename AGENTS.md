@@ -74,6 +74,19 @@ tupa-launcher.exe --check # 所有 `[[apps]]` 都能解析
      列表列宽要给显式像素宽度再 `truncate()`（现在按 `window.bounds()` 宽度算）。
   4. GPUI 没有 channel 唤醒，后台结果靠 `cx.spawn` 轮询 `App::drain_events()`
      （查询中 16ms / 空闲 120ms），拿到结果再 `cx.notify()`。
+  5. **不要在 `entity.update` 闭包里再 `update` 同一个 entity，也不要调 `Window::resize`**
+     （2026-11-17 踩过两次，两次都是进程直接静默退出）：
+     - 嵌套 `this.update(cx, ..)` → `cannot update Panel while it is already being updated`
+     - `Window::resize` 会同步触发 relayout/render，同样重入
+     改窗口尺寸用 `util::resize_panel_height`（Win32 `SetWindowPos`），在 `update` 之外调用。
+     GUI 子系统下 panic 看不见 → `gui_main` 装了 panic hook 写 `%TEMP%	upa-gui.log`，
+     排查"进程莫名消失"先看这个文件。
+  6. **托盘图标**是运行时用 GDI 画的（`gui::icon::draw`，背景色方块 + 草绿 ❯），不依赖
+     `.ico` 资源、也没有 `build.rs`；`HICON` 是裸指针，跨线程只能传 `isize`。
+  7. **半透明**：`[gui] opacity` < 1.0 时窗口切 `WindowBackgroundAppearance::Transparent`。
+     **没有模糊**，也别去接 Windhawk 的 translucent-windows —— 它靠 `DwmEnableBlurBehindWindow` /
+     `SetWindowCompositionAttribute`，而 GPUI 的 `WS_EX_NOREDIRECTIONBITMAP` + DirectComposition
+     窗口没有 DWM 背景可合成，实测无效。
 - **输入框的文本入口是 `EntityInputHandler`，不是 `on_key_down`**：GPUI 在 `WM_CHAR`
   时调 `replace_text_in_range`、输入法组字时调 `replace_and_mark_text_in_range`，
   `bounds_for_range` 决定候选窗位置（Windows 端 GPUI 会 `ImmSetCandidateWindow`）。

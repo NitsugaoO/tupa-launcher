@@ -1,6 +1,6 @@
 # tupa-launcher 状态
 
-updated: 2026-11-17 · code: `e260b62`（结构优化四连：GUI feature gate / exec 按域拆 / Action 收拢 / 脚本抽 .ps1）· main 与 origin/main 同步（已 push）
+updated: 2026-11-17 · code: `f40b08f`（GPUI 面板全线打通：独立 exe + 托盘 + 紧凑形态 + IME + 半透明）· main 与 origin/main 同步（已 push）
 
 > 判断本文件是否过期：比较 `code` 与 `git log -1 --format=%h -- src Cargo.toml`。
 > 只改文档的提交不算过期。
@@ -12,6 +12,22 @@ updated: 2026-11-17 · code: `e260b62`（结构优化四连：GUI feature gate /
 > **每次会话收尾只需要改这一个文件的两节**（阶段 / 未完成），并更新首行。
 
 ## 阶段
+
+- **GPUI 面板全线打通（2026-11-17）**：自绘 GUI 从「winit 把字符网格贴成像素」换成 **GPUI** 重写。
+  旧的 `src/gui/`（1266 行）与 winit / cosmic-text / softbuffer / unicode-script 四个依赖已删。
+  现在是**两个 exe**（`src/lib.rs` 共享模块）：
+  - `tupa-launcher.exe` —— TUI + 守护进程，**不链接 gpui**
+  - `tupa-gui.exe` —— GPUI 面板，`required-features = ["gui"]`，默认 `cargo build` 不产出
+  - 面板能力：无边框圆角 + 1px 草绿边框、`TOOLWINDOW`（不占任务栏/Alt-Tab）、可拖边缩放、
+    `Esc` 隐藏、托盘图标（GDI 现画的草绿 ❯）+ 右键菜单、自带 `Alt+0` 热键（`[gui] hotkey`）
+  - 交互：紧凑形态（呼出只有输入行，按 `↓` 拉下开屏列表）、`uniform_list` 虚拟化、
+    选中跟手滚动、选中行超宽左右滚动（复用 `ui::scroll_offset`）、双击执行、hover 高亮、
+    `Ctrl+Tab` detail、收藏 ★、选择模式 1–9 序号、`?` 键位表
+  - 输入：中文输入法走 `EntityInputHandler`（预编辑画在光标处、候选窗贴光标）、光标跟手 + 闪烁
+  - 视觉：chip 胶囊两档（灰底 + 类型色字 / 选中反白）、行高 28、半透明开关 `[gui] opacity`
+  - 与 WM 的关系：GlazeWM 里 `tupa-gui` 是 **`ignore`**（浮层不归 workspace 管 —— 被接管会被
+    tiling 挤压、切 workspace 时被 `SW_HIDE`）；尺寸由 GPUI 按主屏 62%×55% 居中算
+  - 踩过的坑（4 条 GPUI 行为 + 2 条崩溃）都记在 `AGENTS.md`，别重踩
 
 - 版本 `Cargo.toml` **0.9.0**（`:blog` 删了旧 `:new`，升了一个次版本）
 - **TUI 面板稳定**：`app` `ev` `run` `pi` `go` `web` `blog` `fav` `cfg` `set` `exp` + 开屏 `home`（收藏 + 最近命令）
@@ -211,7 +227,15 @@ updated: 2026-11-17 · code: `e260b62`（结构优化四连：GUI feature gate /
 
 ## 未完成
 
-（无）
+- **真亚克力（模糊）**：目前做不到。Windhawk 的 `translucent-windows` v1.8.2 已经注入
+  `tupa-gui`（`@include *`）但无效 —— 它靠 `DwmEnableBlurBehindWindow` /
+  `SetWindowCompositionAttribute`，而 GPUI 窗口是 `WS_EX_NOREDIRECTIONBITMAP` +
+  DirectComposition 自绘，DWM 不给这种窗口合成背景。要模糊只能 fork gpui 关掉
+  NOREDIRECTIONBITMAP、改走 `DWMWA_SYSTEMBACKDROP_TYPE`（风险大，待评估）。
+  `[gui] opacity` 现在只是半透明，不模糊。
+- **窗口宽度记忆**：面板宽度固定按主屏 62%（高度随内容），拖边改过的宽度还没写回
+  `gui.json`（`config.toml` 手写带注释，不能程序回写）。
+- **TUI 侧没跟进的新交互**：紧凑形态、双击执行、chip 配色只在 GUI 有；TUI 仍是对齐表。
 
 > 2026-11-17 清理：原 6 条全部是「自动验过、只缺手点」的验收项（`@exp`、`@blog` 本地链路、
 > 开屏 / `@set` 对齐、WezTerm IME、剪贴板条目、FilmCraft 条目），按新规矩不算未完成，已删。
@@ -221,6 +245,10 @@ updated: 2026-11-17 · code: `e260b62`（结构优化四连：GUI feature gate /
 | 项 | 位置 |
 |---|---|
 | 权威源码 | `~/Projects/tupa-launcher`（git → `NitsugaoO/tupa-launcher`） |
+| GPUI 面板 | `target/release/tupa-gui.exe`（`cargo build --release --features gui` 才产出）。
+  配置在 `config.toml` 的 `[gui]`：`hotkey` / `tray` / `opacity`；托盘左键显隐、右键菜单 |
+| GlazeWM 规则 | 权威源 `~/Projects/my_dot/dotfiles/glazewm/config.yaml`（`tupa-gui` → `ignore`），
+  改完 `sync-dotfiles.ps1` + `Alt+Shift+R` 热重载 |
 | 生效配置 | `~/.config/tupa-launcher/{config,actions,theme}.toml`（改完下次启动生效，**不用编译**） |
 | 用户数据 | `~/.config/tupa-launcher/{favorites,history}.json` |
 | 守护进程日志 | `%TEMP%\tupa-launcher-daemon.log` |
