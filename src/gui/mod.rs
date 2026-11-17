@@ -138,6 +138,12 @@ struct Panel {
     /// 选框滑动的当前 y / 目标 y（像素）
     marker_y: f32,
     marker_target: f32,
+    /// 本次滑动的起点与起始时刻（固定时长 ease-out）
+    marker_from: f32,
+    marker_start: std::time::Instant,
+    /// 滚动同理：起点与起始时刻。**与选框用同一个进度**，否则两者会脉动。
+    scroll_from: f32,
+    scroll_start: std::time::Instant,
     /// 选框是否正在滑动（滑动期间 chip 不点亮，落地后再渐变成彩色）
     marker_moving: bool,
     /// 上一次选中项（它需要在滑动开始时从彩色渐隐回灰）
@@ -153,6 +159,8 @@ struct Panel {
     caret_top: f32,
     /// 上一帧的选中项，用来判断要不要跟随滚动
     last_selected: Option<usize>,
+    /// 滚动条 / 列表用的「累积不到一行就先存着」（滚轮 + 触控板）
+    wheel_accum: f32,
     /// `?` 打开的快捷键帮助浮层
     help: bool,
     /// 帮助浮层切隐的瞬间屏蔽一下文本输入。
@@ -263,6 +271,10 @@ impl Panel {
             animations,
             marker_y: 0.0,
             marker_target: 0.0,
+            marker_from: 0.0,
+            marker_start: std::time::Instant::now(),
+            scroll_from: 0.0,
+            scroll_start: std::time::Instant::now(),
             marker_moving: false,
             chip_from: None,
             chip_fade_start: std::time::Instant::now(),
@@ -274,6 +286,7 @@ impl Panel {
             last_selected: None,
             help: false,
             text_block: None,
+            wheel_accum: 0.0,
             cursor_on: true,
             blink_at: std::time::Instant::now() + Duration::from_millis(500),
             preedit: None,
@@ -389,7 +402,7 @@ impl Panel {
         // 选框/滚动立即起步：`animate()` 平时在后台轮询里跑（空闲时 120ms 一轮），
         // 按键后干等那一轮会明显「迟钝」。这里先把目标算好、立刻推一帧。
         if let Some(index) = self.app.list_state.selected() {
-            self.marker_target = index as f32 * self.row_height();
+            self.aim_marker(index as f32 * self.row_height());
         }
         self.animate();
 
@@ -404,6 +417,39 @@ impl Panel {
             || self
                 .text_block
                 .is_some_and(|until| std::time::Instant::now() < until)
+    }
+
+    /// 设选框目标。目标没变就什么都不做（每帧重置起点会让动画永远走不完）。
+    /// 位移超过一屏时直接瞬移（循环回第一条时选框不该扫过整屏）。
+    fn aim_marker(&mut self, target: f32) {
+        if (target - self.marker_target).abs() < 0.5 {
+            return;
+        }
+        let distance = (target - self.marker_y).abs();
+        self.marker_from = self.marker_y;
+        self.marker_start = std::time::Instant::now();
+        self.marker_target = target;
+        if distance > self.scroll_viewport.max(1.0) {
+            self.marker_y = target;
+            self.marker_from = target;
+        }
+    }
+
+    /// 设滚动目标（变化时才记起点，并把起点时刻对齐到选框的，保证两者同步）
+    fn aim_scroll(&mut self, target: f32) {
+        let target = target.clamp(0.0, self.scroll_max);
+        if (target - self.scroll_target).abs() < 0.5 {
+            return;
+        }
+        let distance = (target - self.scroll_y).abs();
+        self.scroll_from = self.scroll_y;
+        // 与选框同一个起始时刻：滚动目标比选框晚一帧算出，用选框的时刻才能追上进度
+        self.scroll_start = self.marker_start;
+        self.scroll_target = target;
+        if distance > self.scroll_viewport.max(1.0) {
+            self.scroll_y = target;
+            self.scroll_from = target;
+        }
     }
 
     /// 双击列表项 = 按回车（执行当前项）
@@ -635,12 +681,20 @@ impl Panel {
     /// 鼠标滚轮 = 上下移动选中项（和 ↑↓ 等价）
     fn on_scroll(&mut self, event: &ScrollWheelEvent, window: &mut Window, cx: &mut Context<Self>) {
         let lines = match event.delta {
-            // 精确像素：按一行 30px 折算
-            ScrollDelta::Pixels(delta) => f32::from(delta.y) / 30.0,
+            // 精确像素（触控板）：按行高折算，刻度小的地方会累积到一整行才动
+            ScrollDelta::Pixels(delta) => f32::from(delta.y) / 24.0,
             ScrollDelta::Lines(delta) => delta.y,
         };
-        let steps = lines.round() as i32;
-        debug_log(&format!("wheel: delta={:?} lines={lines:.2} steps={steps}", event.delta));
+        // **一格滚轮只走一行**：系统默认一次滚 3 行，启动器里一跳三条太快了
+        // （用户反馈「往上滚感觉滚多了」）。不足一行的部分累积起来，触控板也能用。
+        self.wheel_accum += lines;
+        let whole = self.wheel_accum.trunc();
+        self.wheel_accum -= whole;
+        let steps = (whole as i32).clamp(-1, 1);
+        debug_log(&format!(
+            "wheel: delta={:?} lines={lines:.2} steps={steps}",
+            event.delta
+        ));
         if steps == 0 {
             return;
         }
@@ -658,7 +712,7 @@ impl Panel {
             ));
         }
         if let Some(index) = self.app.list_state.selected() {
-            self.marker_target = index as f32 * self.row_height();
+            self.aim_marker(index as f32 * self.row_height());
         }
         self.animate();
         window.focus(&self.focus);
@@ -681,35 +735,38 @@ impl Panel {
 
         let mut moving = false;
 
-        // 大跳（典型场景：最后一条按 ↓ 循环回第一条）：直接瞬移，
-        // 否则选框会从列表底端扫到顶端，看着像「跳出可见范围」。
-        let jump = self.scroll_viewport.max(1.0);
-        if (self.marker_target - self.marker_y).abs() > jump {
-            self.marker_y = self.marker_target;
-        }
-        if (self.scroll_target - self.scroll_y).abs() > jump {
-            self.scroll_y = self.scroll_target;
-        }
-
-        let diff = self.scroll_target - self.scroll_y;
-        if diff.abs() > style::SCROLL_SNAP {
-            self.scroll_y += diff * style::SCROLL_EASE;
-            moving = true;
-        } else if self.scroll_y != self.scroll_target {
-            self.scroll_y = self.scroll_target;
-        }
-
-        let diff = self.marker_target - self.marker_y;
+        // 选框与列表滚动共用「固定时长 ease-out」：进度一致 → 内容看着是跟着选框走的。
+        // （以前两者各自指数逼近，120Hz 下两三帧就冲完，而且容易一快一慢）
+        let t = (self.marker_start.elapsed().as_secs_f32() / style::MOVE_SECS).min(1.0);
+        let ease = 1.0 - (1.0 - t) * (1.0 - t);
         let was_moving = self.marker_moving;
-        if diff.abs() > style::SCROLL_SNAP {
-            self.marker_y += diff * style::MOVE_EASE;
+        if t < 1.0 {
+            self.marker_y = self.marker_from + (self.marker_target - self.marker_from) * ease;
             self.marker_moving = true;
             moving = true;
         } else {
-            if self.marker_y != self.marker_target {
-                self.marker_y = self.marker_target;
-            }
+            self.marker_y = self.marker_target;
             self.marker_moving = false;
+        }
+
+        // 滚动用自己的进度（起点时刻对齐选框的，算目标比选框晚一帧）
+        let st = (self.scroll_start.elapsed().as_secs_f32() / style::MOVE_SECS).min(1.0);
+        let sease = 1.0 - (1.0 - st) * (1.0 - st);
+        if st < 1.0 {
+            self.scroll_y = self.scroll_from + (self.scroll_target - self.scroll_from) * sease;
+            moving = true;
+        } else {
+            self.scroll_y = self.scroll_target;
+        }
+        self.scroll_y = self.scroll_y.clamp(0.0, self.scroll_max);
+
+        // 光标仍用指数插值（独立元件，跟手优先）
+        let diff = self.caret_target - self.caret_x;
+        if diff.abs() > style::SCROLL_SNAP {
+            self.caret_x += diff * style::MOVE_EASE;
+            moving = true;
+        } else if self.caret_x != self.caret_target {
+            self.caret_x = self.caret_target;
         }
         // 选框刚落地：记时刻（新 chip 从这里开始渐变成彩色），并多画一帧推进渐变
         if was_moving != self.marker_moving {
@@ -1001,14 +1058,40 @@ impl Panel {
         if let Some(index) = self.app.list_state.selected() {
             let top = index as f32 * row_h;
             let bottom = top + row_h;
-            if top < self.scroll_y {
-                self.scroll_target = top.max(0.0);
-            } else if bottom > self.scroll_y + self.scroll_viewport {
-                self.scroll_target = (bottom - self.scroll_viewport).min(self.scroll_max);
+            // 用**目标位置**判断，不看动画中的 `scroll_y`：后者滞后，向上滚时
+            // 会因为「视图还没回滚」而漏判，选框会先跑出视口。
+            let mut target = self.scroll_target;
+            if top < target {
+                target = top.max(0.0);
+            } else if bottom > target + self.scroll_viewport {
+                target = (bottom - self.scroll_viewport).min(self.scroll_max);
             }
+            self.aim_scroll(target);
         }
         self.scroll_target = self.scroll_target.clamp(0.0, self.scroll_max);
         self.scroll_y = self.scroll_y.clamp(0.0, self.scroll_max);
+
+        {
+            use std::sync::atomic::{AtomicIsize, Ordering};
+            static LAST: AtomicIsize = AtomicIsize::new(isize::MAX);
+            let sel = self
+                .app
+                .list_state
+                .selected()
+                .map_or(-1isize, |index| index as isize);
+            if LAST.swap(sel, Ordering::Relaxed) != sel {
+                debug_log(&format!(
+                    "scroll: sel={:?} rows={} row_h={:.1} vp={:.1} max={:.1} y={:.1} target={:.1}",
+                    self.app.list_state.selected(),
+                    rows.len(),
+                    row_h,
+                    self.scroll_viewport,
+                    self.scroll_max,
+                    self.scroll_y,
+                    self.scroll_target
+                ));
+            }
+        }
 
         // 选框滑动的目标位置
         {
@@ -1027,12 +1110,12 @@ impl Panel {
                 ));
             }
         }
-        self.marker_target = self
-            .app
-            .list_state
-            .selected()
-            .map(|index| index as f32 * row_h)
-            .unwrap_or(0.0);
+        // 选框目标：目标没变就不重置起点（每帧都重置会让动画永远走不完）
+        if let Some(index) = self.app.list_state.selected() {
+            self.aim_marker(index as f32 * row_h);
+        } else {
+            self.aim_marker(0.0);
+        }
 
         // 只渲染可视区附近的行
         let first = ((self.scroll_y / row_h).floor() as usize).saturating_sub(1);
@@ -1561,15 +1644,12 @@ fn render_card_row(
         .rounded(px(style::ROW_RADIUS))
         .whitespace_nowrap();
 
-    // 选中行的底色由 marker 统一画（行画在 marker 之后，自带背景会把 marker 盖住），
-    // 未选中行给一层卡片底，把一条条分开；hover 再亮一档。
-    // `CARD_ALPHA` 不能太小：`panel` 本身就比 `background` 只亮一档，
-    // 再乘个 0.45 就和背景一样了（实测看不出卡片）。
+    // 选中行的底色由 marker 画，未选中行只挂 hover（卡片不铺底色——用户要的是
+    // 两行结构，不是一张张色块）。
     let card = if row.selected {
         card
     } else {
-        card.bg(style::with_alpha(p.panel, style::CARD_ALPHA))
-            .hover(|style| style.bg(p.panel))
+        card.hover(|style| style.bg(p.panel))
     };
 
     div()

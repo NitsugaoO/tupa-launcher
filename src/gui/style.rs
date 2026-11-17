@@ -29,8 +29,12 @@ pub const SCROLL_PAUSE: f32 = 0.6; // 两端各停多久（秒）
 /// **必须和 `MOVE_EASE` 一致**：滚动和选框是两个独立的插值，系数不同时选框会先
 /// 冲到目标、列表慢半拍追上来，看到的就是「选框已经露出可视区了」。
 pub const SCROLL_EASE: f32 = 0.55;
-/// 选框 / 光标滑动的缓动系数（比滚动稍快，跟手一点）
+/// 选框 / 光标滑动的缓动系数（指数逼近，光标用）
 pub const MOVE_EASE: f32 = 0.55;
+/// 选框 / 列表滚动的**固定动画时长**（秒）。
+/// 指数逼近在 120Hz 下两三帧就冲完，看着像「啪」地一跳；固定时长 + ease-out 才顺。
+/// 选框和滚动共享同一个进度，所以内容看着是「跟着选框走」的。
+pub const MOVE_SECS: f32 = 0.16;
 /// 位移小于这个像素数就吸附到目标
 pub const SCROLL_SNAP: f32 = 0.4;
 
@@ -96,9 +100,7 @@ pub const CARD_HEIGHT: f32 = 46.0;
 /// 卡片模式下最多显示多少条（一条两行，再高就装不下了）
 pub const CARD_VISIBLE_ROWS: usize = 7;
 
-/// 卡片模式下未选中行的底色透明度（选中行不画，交给 marker）。
 /// 别调小：`panel` 和 `background` 只差一档，0.45 实测看不出卡片。
-pub const CARD_ALPHA: f32 = 0.9;
 
 /// 两色插值：`t` = 0 取 `a`，1 取 `b`（chip 灰 ↔ 彩的渐变就用它）
 pub fn mix(a: Rgba, b: Rgba, t: f32) -> Rgba {
