@@ -1,6 +1,6 @@
 # tupa-launcher 状态
 
-updated: 2026-11-18 · code: `1cf54cd`（窗口靠上/高度上限 · 卡片底色 · 循环跳转瞬移）· main 领先 origin/main 6 个提交（未 push）
+updated: 2026-11-18 · code: `58b3169`（卡片底色 / 触底滚动修正）· main 领先 origin/main 8 个提交（未 push）
 
 > 判断本文件是否过期：比较 `code` 与 `git log -1 --format=%h -- src Cargo.toml`。
 > 只改文档的提交不算过期。
