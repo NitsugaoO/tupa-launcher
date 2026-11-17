@@ -31,7 +31,7 @@ pub fn draw(background: (u8, u8, u8), accent: (u8, u8, u8)) -> HICON {
         info.bmiHeader.biHeight = -SIZE; // 负值 = 自上而下
         info.bmiHeader.biPlanes = 1;
         info.bmiHeader.biBitCount = 32;
-        info.bmiHeader.biCompression = BI_RGB as u32;
+        info.bmiHeader.biCompression = BI_RGB;
 
         let mut bits: *mut c_void = std::ptr::null_mut();
         let color = CreateDIBSection(dc, &info, DIB_RGB_COLORS, &mut bits, std::ptr::null_mut(), 0);

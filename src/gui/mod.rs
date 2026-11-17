@@ -124,6 +124,9 @@ struct Panel {
     /// 光标滑动的当前 x / 目标 x（像素）
     caret_x: f32,
     caret_target: f32,
+    /// 光标块的高度与上边界（按字体 ascent/descent 算，和文本行严格对齐）
+    caret_height: f32,
+    caret_top: f32,
     /// detail 模式用的是非等高行，走普通滚动
     detail_scroll: ScrollHandle,
     /// 上一帧的选中项，用来判断要不要跟随滚动
@@ -248,6 +251,8 @@ impl Panel {
             marker_target: 0.0,
             caret_x: 0.0,
             caret_target: 0.0,
+            caret_height: style::INPUT_SIZE,
+            caret_top: (style::INPUT_HEIGHT - style::INPUT_SIZE) / 2.0,
             detail_scroll: ScrollHandle::new(),
             last_selected: None,
             help: false,
@@ -398,6 +403,31 @@ impl Panel {
             .unwrap_or(0.0);
         self.caret_target = prompt_width + before_width + preedit_width;
 
+        // 光标高度 = 文本行高（ascent + descent），上下边界与字形一致
+        {
+            let text_system = window.text_system();
+            let font_id = text_system.resolve_font(&gpui::font(style::FONT));
+            let size = px(style::INPUT_SIZE);
+            let ascent = f32::from(text_system.ascent(font_id, size));
+            // 注意：GPUI 的 `descent()` 返回**负值**（形如 -4.5），行高是 ascent - descent
+            let descent = f32::from(text_system.descent(font_id, size));
+            let line_height = ascent - descent;
+            if line_height > 0.0 {
+                self.caret_height = line_height;
+                self.caret_top = (style::INPUT_HEIGHT - self.caret_height) / 2.0;
+                {
+                    use std::sync::atomic::{AtomicUsize, Ordering};
+                    static N: AtomicUsize = AtomicUsize::new(0);
+                    if N.fetch_add(1, Ordering::Relaxed) < 2 {
+                        debug_log(&format!(
+                            "caret_h={:.1} caret_top={:.1} prompt_w={:.1} ascent={:.1} descent={:.1}",
+                            self.caret_height, self.caret_top, prompt_width, ascent, descent
+                        ));
+                    }
+                }
+            }
+        }
+
         let mut row = div()
             .relative()
             .h(px(style::INPUT_HEIGHT))
@@ -457,14 +487,16 @@ impl Panel {
                 .text_color(p.fg)
                 .child(after.to_owned()),
         )
-        // 光标：绝对定位（位置由动画插值驱动，所以不能占布局）
+        // 光标：绝对定位（位置由动画插值驱动，所以不能占布局）。
+        // 高度与位置按字体的 ascent/descent 算 —— GPUI 的文本在容器里是 `items_center`，
+        // 字形上边界就是 (行高 - (ascent+descent)) / 2，和这里完全一致。
         .child(
             div()
                 .absolute()
                 .left(px(self.caret_x))
-                .top(px((style::INPUT_HEIGHT - style::CURSOR_HEIGHT) / 2.0))
+                .top(px(self.caret_top))
                 .w(px(style::CURSOR_WIDTH))
-                .h(px(style::CURSOR_HEIGHT))
+                .h(px(self.caret_height))
                 .bg(if self.cursor_on { p.accent } else { p.background }),
         )
         .into_any_element()
@@ -691,7 +723,8 @@ impl Panel {
             inner = inner.child(
                 div()
                     .absolute()
-                    .top(px(self.marker_y))
+                    // 行高 31 而卡片 28，卡片是居中的（上下各 ROW_GAP/2），marker 要跟着偏
+                    .top(px(self.marker_y + style::ROW_GAP / 2.0))
                     .left(px(0.))
                     .w_full()
                     .h(px(style::ROW_HEIGHT))
@@ -876,7 +909,7 @@ fn render_row(
     let note = note_text_for_row(row);
     let fg = if row.unavailable { p.faint } else { p.fg };
 
-    let mut card = div()
+    let card = div()
         .id(("row", row.index))
         .h(px(style::ROW_HEIGHT))
         .w_full()
@@ -889,18 +922,10 @@ fn render_row(
         .whitespace_nowrap()
         .hover(|style| style.bg(p.panel));
 
-    if row.selected {
-        card = card.bg(p.overlay);
-    }
-
+    // 选中底色与左侧绿条由列表容器里的「选框」（marker）统一画，这里只留占位，
+    // 否则会和 marker 叠成两层（会看到高亮位置偏移、边缘发亮）
     let card = card
-        .child(
-            // 选中行左侧的强调条；未选中时留同样宽度占位，避免文字左右跳
-            div()
-                .w(px(style::ACCENT_BAR))
-                .h_full()
-                .bg(if row.selected { p.accent } else { p.background }),
-        )
+        .child(div().w(px(style::ACCENT_BAR)).h_full())
         .child(
             // 选择模式（Shift+Tab）下的 1-9 跳转序号
             div()
