@@ -121,6 +121,8 @@ struct Panel {
     /// 选框滑动的当前 y / 目标 y（像素）
     marker_y: f32,
     marker_target: f32,
+    /// 选框是否正在滑动（滑动期间所有 chip 都显示「未选中」的灰底，落地后才点亮）
+    marker_moving: bool,
     /// 光标滑动的当前 x / 目标 x（像素）
     caret_x: f32,
     caret_target: f32,
@@ -239,6 +241,7 @@ impl Panel {
             animations,
             marker_y: 0.0,
             marker_target: 0.0,
+            marker_moving: false,
             caret_x: 0.0,
             caret_target: 0.0,
             caret_height: style::INPUT_SIZE,
@@ -532,11 +535,20 @@ impl Panel {
         }
 
         let diff = self.marker_target - self.marker_y;
+        let was_moving = self.marker_moving;
         if diff.abs() > style::SCROLL_SNAP {
             self.marker_y += diff * style::MOVE_EASE;
+            self.marker_moving = true;
             moving = true;
-        } else if self.marker_y != self.marker_target {
-            self.marker_y = self.marker_target;
+        } else {
+            if self.marker_y != self.marker_target {
+                self.marker_y = self.marker_target;
+            }
+            self.marker_moving = false;
+        }
+        // 选框刚落地 → 再画一帧，让新选中行的 chip 从灰变彩
+        if was_moving != self.marker_moving {
+            moving = true;
         }
 
         let diff = self.caret_target - self.caret_x;
@@ -768,6 +780,7 @@ impl Panel {
                 badge: item.kind.badge(),
                 color: style::badge_color(item.kind),
                 selected: selected == Some(index),
+                chip_active: selected == Some(index) && !self.marker_moving,
                 favorite: self.app.is_favorite(item),
                 unavailable: matches!(item.control, crate::providers::Control::Unavailable),
                 number: (select_mode && index < 9).then_some(index + 1),
@@ -877,6 +890,8 @@ struct RowSnapshot {
     unavailable: bool,
     /// 选择模式下的跳转序号（1–9）
     number: Option<usize>,
+    /// chip 是否点亮（选中态）：选框滑动期间一律熄灭，避免两个彩色 chip 同时出现
+    chip_active: bool,
     /// 超宽时向左移动的像素（负 margin，实现左右滚动）
     shift: f32,
     /// 附注列同理
@@ -948,9 +963,9 @@ fn render_row(
                 .items_center()
                 .justify_center()
                 .rounded(px(style::BADGE_RADIUS))
-                .bg(if row.selected { row.color } else { p.panel })
+                .bg(if row.chip_active { row.color } else { p.panel })
                 .text_size(px(style::BADGE_SIZE))
-                .text_color(if row.selected { p.background } else { row.color })
+                .text_color(if row.chip_active { p.background } else { row.color })
                 .child(row.badge),
         )
         .child(
@@ -1073,9 +1088,9 @@ fn render_detail_row(
                     .items_center()
                     .justify_center()
                     .rounded(px(style::BADGE_RADIUS))
-                    .bg(if row.selected { row.color } else { p.panel })
+                    .bg(if row.chip_active { row.color } else { p.panel })
                     .text_size(px(style::BADGE_SIZE))
-                    .text_color(if row.selected { p.background } else { row.color })
+                    .text_color(if row.chip_active { p.background } else { row.color })
                     .child(row.badge),
             )
             .child(
