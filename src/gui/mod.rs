@@ -869,13 +869,9 @@ impl Panel {
 
         if self.app.detail {
             // detail 模式下每条高度随列数变化：头行 + 明细行 + 上下内边距 + 行间距。
-            // 之前按「固定两行」算，列数多的条目会被裁掉底部（4 条都铺不满就是这个原因）。
-            let extra = self.detail_extra_rows();
-            // 头部实际高度是 `ROW_HEIGHT - 6`（和渲染里 accent bar 一致），不是整行 28
-            let per_row = style::ROW_HEIGHT - 6.0
-                + extra * style::DETAIL_LINE
-                + style::DETAIL_PAD_Y * 2.0
-                + extra * 2.0;
+            // **直接用 `row_height()`**：这里以前自己再算一遍 `per_row`，但漏了
+            // `ROW_GAP`（3px/行），行数一多最后一行就被窗口底边裁掉。
+            let per_row = self.row_height();
             return base + style::LIST_TOP + rows * per_row + style::STATUS_HEIGHT;
         }
 
@@ -906,8 +902,19 @@ impl Panel {
         let total = f32::from(window.bounds().size.width) - style::PADDING * 2.0;
         // 控件行（`:set` / 开关）多一列状态。TUI 那边是 `ui.rs` 按 `Control` 追加的，
         // GUI 之前完全没画，所以看不到「开 / 关」。只有列表里真有控件行时才占位。
+        //
+        // 宽度按**实际内容**量（不能写死）：Clash 那行是「云上极速 · 3 小时前」，
+        // 写死 72px 会把时间那半截裁掉，看着像「只显示了订阅名」。
         let state_width = if self.app.items.iter().any(|item| item.control.is_control()) {
-            style::STATE_WIDTH
+            let widest = self
+                .app
+                .items
+                .iter()
+                .filter(|item| item.control.is_control())
+                .map(|item| display_width(&item.control.label()))
+                .max()
+                .unwrap_or(0) as f32;
+            (widest * style::NOTE_SIZE * 0.6 + 14.0).clamp(style::STATE_WIDTH, 240.0)
         } else {
             0.0
         };
@@ -1023,7 +1030,22 @@ impl Panel {
 
         for row in &rows[first..last] {
             inner = inner.child(if detail {
-                render_detail_row(row, p, metrics, &panel, row_h - style::ROW_GAP)
+                // 外层必须占满 `row_h` 并居中卡片：`render_detail_row` 返回的卡片
+                // 只有 `row_h - ROW_GAP` 高，直接塞进列表的话每行会少 ROW_GAP，
+                // 越往下偏越多（选框看着就跟行错位了）。`render_row` 里面自带这层。
+                div()
+                    .w_full()
+                    .h(px(row_h))
+                    .flex()
+                    .items_center()
+                    .child(render_detail_row(
+                        row,
+                        p,
+                        metrics,
+                        &panel,
+                        row_h - style::ROW_GAP,
+                    ))
+                    .into_any_element()
             } else {
                 render_row(row, p, metrics, &panel)
             });
