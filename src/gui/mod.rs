@@ -640,8 +640,10 @@ impl Panel {
         let fade = style::CHIP_FADE_SECS;
         if selected == Some(index) {
             if self.app.detail {
-                // detail 模式没有选框滑动，直接按时间 0 → 1 渐入
-                return (self.chip_settled_at.elapsed().as_secs_f32() / fade).clamp(0.0, 1.0);
+                // detail 模式没有选框滑动，按「选中变化的时刻」0 → 1 渐入。
+                // 这里**不能用 `chip_settled_at`**：marker 落地时会重置它，
+                // 渐入到一半被重置回 0 就是那个「闪」。
+                return (self.chip_fade_start.elapsed().as_secs_f32() / fade).clamp(0.0, 1.0);
             }
             if !self.marker_moving {
                 // 落地后从 85% 续到 100%
