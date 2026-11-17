@@ -993,15 +993,17 @@ impl Panel {
         self.scroll_max = (rows.len() as f32 * row_h - self.scroll_viewport).max(0.0);
 
         // 选中项保持在可视区内。
-        // **不要留余量**：之前这里用 `margin = row_h`，每次触底滚动都多滚一行，
-        // 看起来像「一按就向上板了一大截」。现在只保证「刚好可见」：
-        // 越过底部就滚到 `bottom - viewport`（正好一行），越过顶部就滚到 `top`。
+        //
+        // 两个细节（都是「看着怪」的真因）：
+        // 1. **不要留余量**：之前用 `margin = row_h`，每次触底滚动都多滚一行
+        // 2. **拿实际视口 `scroll_y` 判断**，不是 `scroll_target`：跟着目标值走时，
+        //    快速连按会提前停住（目标已经推出去了，实际视口还没到）
         if let Some(index) = self.app.list_state.selected() {
             let top = index as f32 * row_h;
             let bottom = top + row_h;
-            if top < self.scroll_target {
+            if top < self.scroll_y {
                 self.scroll_target = top.max(0.0);
-            } else if bottom > self.scroll_target + self.scroll_viewport {
+            } else if bottom > self.scroll_y + self.scroll_viewport {
                 self.scroll_target = (bottom - self.scroll_viewport).min(self.scroll_max);
             }
         }
@@ -1775,7 +1777,9 @@ fn card_parts(item: &crate::providers::Item) -> (String, Option<String>) {
         .into_iter()
         .filter(|value| !value.is_empty() && *value != title)
         .collect::<Vec<_>>()
-        .join(" · ");
+        // 用竖线分隔而不是「 · 」：第二行往往有 2–3 段（路径 / 分组 / 时间），
+        // 中点跟汉字挤在一起时边界看不清。
+        .join(" │ ");
     (secondary, trailing)
 }
 
@@ -1937,5 +1941,51 @@ fn tune_dwm(hwnd: windows_sys::Win32::Foundation::HWND) {
             (&no_border as *const u32).cast(),
             std::mem::size_of::<u32>() as u32,
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::providers::{Action, Item, Kind};
+    use std::path::PathBuf;
+
+    fn item(columns: &[&str]) -> Item {
+        Item::new(
+            Kind::App,
+            columns.iter().map(|s| s.to_string()).collect(),
+            Action::Open(PathBuf::from("x")),
+        )
+    }
+
+    /// 最后一列当右侧尾巴（次数 / 时间），其余进第二行
+    #[test]
+    fn card_parts_takes_last_column_as_trailing() {
+        let (secondary, trailing) = card_parts(&item(&["Code", "code", "19 次"]));
+        assert_eq!(secondary, "code");
+        assert_eq!(trailing.as_deref(), Some("19 次"));
+    }
+
+    /// 第二行多段之间用竖线分隔（中点跟汉字挤在一起看不清边界）
+    #[test]
+    fn card_parts_separates_segments_with_a_bar() {
+        let (secondary, trailing) = card_parts(&item(&["标题", r"D:\a", "网络", "3 天前"]));
+        assert_eq!(secondary, r"D:\a │ 网络");
+        assert_eq!(trailing.as_deref(), Some("3 天前"));
+    }
+
+    /// 第二行与标题重复（home 里 web 条目的 URL 出现了两次）就不显示
+    #[test]
+    fn card_parts_drops_duplicate_of_title() {
+        let (secondary, _) = card_parts(&item(&["https://x", "https://x", "5 次"]));
+        assert_eq!(secondary, "");
+    }
+
+    /// 两列时没有尾巴，整列都是第二行
+    #[test]
+    fn card_parts_keeps_two_column_items_intact() {
+        let (secondary, trailing) = card_parts(&item(&["Downloads", "D:\\"]));
+        assert_eq!(secondary, "D:\\");
+        assert_eq!(trailing, None);
     }
 }
