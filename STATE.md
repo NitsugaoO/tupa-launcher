@@ -1,6 +1,6 @@
 # tupa-launcher 状态
 
-updated: 2026-11-18 · code: `f06631b`（输入框选区/剪贴板 · 列表滚动条 · 控件状态列 · `?` 帮助）· main 领先 origin/main 2 个提交（未 push）
+updated: 2026-11-18 · code: `51db04a`（显示层：两行卡片 + Ctrl+Tab 单行密度）· main 领先 origin/main 5 个提交（未 push）
 
 > 判断本文件是否过期：比较 `code` 与 `git log -1 --format=%h -- src Cargo.toml`。
 > 只改文档的提交不算过期。
@@ -12,6 +12,17 @@ updated: 2026-11-18 · code: `f06631b`（输入框选区/剪贴板 · 列表滚�
 > **每次会话收尾只需要改这一个文件的两节**（阶段 / 未完成），并更新首行。
 
 ## 阶段
+
+- **显示层：两行卡片（2026-11-18）**：普通模式从「标题 + 一条 ` · ` 拼起来的附注」
+  改成**两行卡片**（第一行 标题 + 右侧状态/次数/时间，第二行 路径/分组 dim 小字），
+  `Ctrl+Tab` 切**单行密度表**（一屏 12 条）。要点：
+  - 卡片右列宽度按内容量（`card_parts` 拆 `trailing`），写死宽度会把
+    「云上极速 · 13 小时前」裁成「云上极速」
+  - 行高 / 可视条数 / 窗口高度统一到 `row_height()` + `max_visible_rows()` +
+    `desired_height()` 三处，不一致会「最后一行被裁」或「选框越往下越偏」
+  - 竖排的 `render_detail_row` 已删（GUI 不再用）；**TUI 的 Ctrl+Tab 仍是竖排详情**
+    （`ui.rs`），所以 `detail_mode_on/off` 文案按 GUI 语义写，TUI 会显示同样的字
+  - 卡片模式下 `App::detail` 语义变成「单行密度」，不再是「展开每列」
 
 - **输入框编辑 / 滚动条 / 控件状态列（2026-11-18）**：
   - 输入框：选区锚点 `App::anchor` + `Shift+←/→/Home/End`；`Ctrl+←/→` 按词跳

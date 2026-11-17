@@ -130,6 +130,13 @@ cargo clippy --release --features gui    # 零警告；必须带 feature，否�
      `replace_text_in_range`。只拦前者的话字符照样进输入框；中文输入法打的还是全角
      「？」，`keys::to_key` 得归一。现在靠 `Panel::text_blocked()`（help 期间 +
      切隐后 50ms）在 input handler 里吞掉那次提交，并补了「输入框为空时 ? 当帮助键」。
+ 15. **两种列表形态共用一套虚拟滚动**：默认两行卡片（`render_card_row`，标题行 +
+     路径/分组行，行高 `CARD_HEIGHT + ROW_GAP`、最多 `CARD_VISIBLE_ROWS` 条），
+     `Ctrl+Tab` 切单行对齐表（`render_row`，`ROW_HEIGHT + ROW_GAP`、`MAX_VISIBLE_ROWS` 条）。
+     改行高 / 可视条数必须同时改 `row_height()` + `max_visible_rows()` + `desired_height()`；
+     三者不一致就是「最后一行被窗口底边裁掉」或「选框越往下偏得越多」。
+     卡片右列（状态 / 次数 / 时间）宽度按内容量，**不能写死**——「云上极速 · 13 小时前」
+     写死 72px 就只剩「云上极速」。
 - **输入框的文本入口是 `EntityInputHandler`，不是 `on_key_down`**：GPUI 在 `WM_CHAR`
   时调 `replace_text_in_range`、输入法组字时调 `replace_and_mark_text_in_range`，
   `bounds_for_range` 决定候选窗位置（Windows 端 GPUI 会 `ImmSetCandidateWindow`）。
