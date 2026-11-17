@@ -93,6 +93,18 @@ tupa-launcher.exe --check # 所有 `[[apps]]` 都能解析
      - Windhawk 的 translucent-windows（`@include *` 确实注入进来了）同样无效
      真模糊要往 GPUI 的 DComp 树里插 `IDCompositionBackdropBrush`（社区 issue
      nowledge-co/con-terminal#55 的结论），属于上游改动；或者自己在应用里「截图 + 模糊」。
+  8. **动画一律 vsync 驱动，别用定时器 notify**（2026-11-17）：定时器（8ms / 16ms）和屏幕
+     刷新是两个独立节拍，互相挤 → 用户感受就是"卡卡的"。做法是在 `render` 末尾按需
+     `window.on_next_frame(...)`，回调里 `animate()` + `cx.notify()`，链条自然停在动画结束那帧。
+     动画帧率因此等于屏幕刷新率（本机 120Hz）。
+  9. **marker（选框）的坐标基准**：`inner` 里只渲染 `first..last` 这几行，第一行落在 y=0，
+     所以 `top = marker_y - first * row_h`。漏掉这个减项时「只看第一屏永远正确」，
+     滚到第二屏才暴露成"选框一路往下漂"。
+ 10. **选中行不要挂 `hover` 底色**：行画在 marker 之后，hover 会把选框盖住。
+     选中态只由 marker 负责，hover 只表示「鼠标在这行但没选中」。
+ 11. **chip 渐变的两个时间戳别混用**：`chip_settled_at` 会在 marker 落地时被重置，
+     拿它算渐入进度会导致"渐到一半归零再渐"（看起来是闪）；渐入起点用 `chip_fade_start`
+     （只在选中项变化时设），`chip_settled_at` 只负责「落地后从 85% 补满到 100%」。
 - **输入框的文本入口是 `EntityInputHandler`，不是 `on_key_down`**：GPUI 在 `WM_CHAR`
   时调 `replace_text_in_range`、输入法组字时调 `replace_and_mark_text_in_range`，
   `bounds_for_range` 决定候选窗位置（Windows 端 GPUI 会 `ImmSetCandidateWindow`）。

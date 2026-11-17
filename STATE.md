@@ -1,6 +1,6 @@
 # tupa-launcher 状态
 
-updated: 2026-11-17 · code: `f40b08f`（GPUI 面板全线打通：独立 exe + 托盘 + 紧凑形态 + IME + 半透明）· main 与 origin/main 同步（已 push）
+updated: 2026-11-17 · code: `283878c`（GPUI 面板：动画体系 + detail 统一 + 主入口切到 GUI）· main 与 origin/main 同步（已 push）
 
 > 判断本文件是否过期：比较 `code` 与 `git log -1 --format=%h -- src Cargo.toml`。
 > 只改文档的提交不算过期。
@@ -20,11 +20,16 @@ updated: 2026-11-17 · code: `f40b08f`（GPUI 面板全线打通：独立 exe + 
   - `tupa-gui.exe` —— GPUI 面板，`required-features = ["gui"]`，默认 `cargo build` 不产出
   - 面板能力：无边框圆角 + 1px 草绿边框、`TOOLWINDOW`（不占任务栏/Alt-Tab）、可拖边缩放、
     `Esc` 隐藏、托盘图标（GDI 现画的草绿 ❯）+ 右键菜单、自带 `Alt+0` 热键（`[gui] hotkey`）
+    ← 已改绑 `alt+\``（2026-11-17，见下面「主入口已切到 GUI」）
   - 交互：紧凑形态（呼出只有输入行，按 `↓` 拉下开屏列表）、`uniform_list` 虚拟化、
     选中跟手滚动、选中行超宽左右滚动（复用 `ui::scroll_offset`）、双击执行、hover 高亮、
     `Ctrl+Tab` detail、收藏 ★、选择模式 1–9 序号、`?` 键位表
+    ← `uniform_list` 与 `ui::scroll_offset` 都已被取代（2026-11-17）：`scroll_to_item` 只能瞬跳，
+    做不出平滑滚动；现在是自己算可视窗口 + 像素级插值，`scroll_offset` 只留给 TUI
   - 输入：中文输入法走 `EntityInputHandler`（预编辑画在光标处、候选窗贴光标）、光标跟手 + 闪烁
   - 视觉：chip 胶囊两档（灰底 + 类型色字 / 选中反白）、行高 28、半透明开关 `[gui] opacity`
+    ← chip 已改成颜色渐变（2026-11-17）：`style::mix()` 在两组色之间插值，旧行 140ms 渐隐、
+    新行渐亮；「两档」这个说法只对颜色终值成立
   - 与 WM 的关系：GlazeWM 里 `tupa-gui` 是 **`ignore`**（浮层不归 workspace 管 —— 被接管会被
     tiling 挤压、切 workspace 时被 `SW_HIDE`）；尺寸由 GPUI 按主屏 62%×55% 居中算
   - **主入口已切到 GUI**（2026-11-17 晚）：`[gui] hotkey = "alt+\`"`，开机自启是
@@ -32,7 +37,20 @@ updated: 2026-11-17 · code: `f40b08f`（GPUI 面板全线打通：独立 exe + 
     不再自启，TUI 仍可手动 `cargo run --release` 跑）。守护进程在跑时会占着热键，切换前先停它
   - 踩过的坑（4 条 GPUI 行为 + 2 条崩溃）都记在 `AGENTS.md`，别重踩
 
-- 版本 `Cargo.toml` **0.9.0**（`:blog` 删了旧 `:new`，升了一个次版本）
+- **动画体系（2026-11-17 晚）**：全部由 **vsync 驱动**（`render` 末尾按需注册
+  `window.on_next_frame`，回调里推一帧 + notify，直到动画结束），不再用定时器 ——
+  定时器 notify 会和 120Hz 屏的 vsync 抢节拍，表现是"卡卡的"。
+  - 列表滚动：自己算可视窗口 + 垂直偏移，`scroll_y` 向目标插值（0.28）
+  - 选框：独立绝对定位层，`marker_y` 插值（0.55）；坐标基准是 `marker_y - first*row_h`
+    （inner 只渲染可视区那几行，第一行在 y=0）
+  - chip：`marker_moving` 期间不点亮；新行按时间渐入、旧行按时间渐隐（140ms）
+  - 光标：绝对定位，`caret_x` 插值（0.55）+ 折叠闪烁；IME 预编辑时跟在拼音后面
+  - `[gui] animations = false` 一键全关（连 `on_next_frame` 都不注册，静止零重绘）
+- **detail 模式并进统一列表（2026-11-17 晚）**：行高按「最大列数」统一后，和普通模式共用
+  虚拟窗口 / 平滑滚动 / marker 滑动。之前它自己走 `overflow_y_scroll` + 手画选中行，
+  所以既没有选框动画、也没有 chip 渐变。
+
+- 版本 `Cargo.toml` **0.10.0**（GUI 拆成独立 exe `tupa-gui.exe`；之前 0.9.0 是 `:blog` 取代 `:new`）
 - **TUI 面板稳定**：`app` `ev` `run` `pi` `go` `web` `blog` `fav` `cfg` `set` `exp` + 开屏 `home`（收藏 + 最近命令）
 - **`:blog` 取代了旧的 `:new`（2026-10-25）**：`src/providers/blog.rs`。不带参数列三个入口
   （本地 `localhost:4000` / GitHub Pages / Cloudflare），`:blog:new <标题>` 在
