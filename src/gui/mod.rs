@@ -25,7 +25,7 @@ use std::time::Duration;
 use anyhow::Result;
 use gpui::{
     AnyElement, AppContext as _, Bounds, Context, FocusHandle, KeyDownEvent, Render, Rgba,
-    ScrollDelta, ScrollHandle, ScrollWheelEvent, TitlebarOptions, WeakEntity, Window,
+    ScrollDelta, ScrollWheelEvent, TitlebarOptions, WeakEntity, Window,
     WindowBackgroundAppearance, WindowBounds, WindowKind, WindowOptions, div, prelude::*, px, size,
 };
 
@@ -134,8 +134,6 @@ struct Panel {
     /// 光标块的高度与上边界（按字体 ascent/descent 算，和文本行严格对齐）
     caret_height: f32,
     caret_top: f32,
-    /// detail 模式用的是非等高行，走普通滚动
-    detail_scroll: ScrollHandle,
     /// 上一帧的选中项，用来判断要不要跟随滚动
     last_selected: Option<usize>,
     /// `?` 打开的快捷键帮助浮层
@@ -256,7 +254,6 @@ impl Panel {
             caret_target: 0.0,
             caret_height: style::INPUT_SIZE,
             caret_top: (style::INPUT_HEIGHT - style::INPUT_SIZE) / 2.0,
-            detail_scroll: ScrollHandle::new(),
             last_selected: None,
             help: false,
             cursor_on: true,
@@ -642,6 +639,10 @@ impl Panel {
         }
         let fade = style::CHIP_FADE_SECS;
         if selected == Some(index) {
+            if self.app.detail {
+                // detail 模式没有选框滑动，直接按时间 0 → 1 渐入
+                return (self.chip_settled_at.elapsed().as_secs_f32() / fade).clamp(0.0, 1.0);
+            }
             if !self.marker_moving {
                 // 落地后从 85% 续到 100%
                 let rest = (self.chip_settled_at.elapsed().as_secs_f32() / fade).clamp(0.0, 1.0);
@@ -725,9 +726,11 @@ impl Panel {
                 .unwrap_or(1)
                 .max(1);
             let extra = (max_columns - 1) as f32;
-            let per_row =
-                style::ROW_HEIGHT + extra * style::DETAIL_LINE + style::DETAIL_PAD_Y * 2.0
-                    + extra * 2.0;
+            // 头部实际高度是 `ROW_HEIGHT - 6`（和渲染里 accent bar 一致），不是整行 28
+            let per_row = style::ROW_HEIGHT - 6.0
+                + extra * style::DETAIL_LINE
+                + style::DETAIL_PAD_Y * 2.0
+                + extra * 2.0;
             return base + style::LIST_TOP + rows * per_row + style::STATUS_HEIGHT;
         }
 
@@ -777,27 +780,29 @@ impl Panel {
         let rows = Arc::new(self.snapshot(metrics));
         let panel = cx.entity().downgrade();
 
-        // detail 模式行高不等，退化成普通滚动容器（条目数一般不多）
-        if self.app.detail {
-            let mut block = div()
-                .id("detail-list")
-                .flex_1()
-                .w_full()
-                .flex()
-                .flex_col()
-                .gap(px(2.))
-                .py(px(6.))
-                .overflow_y_scroll()
-                .track_scroll(&self.detail_scroll);
-            for row in rows.iter() {
-                block = block.child(render_detail_row(row, p, metrics, &panel));
-            }
-            return block.into_any_element();
-        }
+        // 行高：普通模式固定；detail 模式按「最大列数」统一（所有行等高才能复用
+        // 虚拟窗口 + 平滑滚动 + 选框滑动这套，多算的几像素对少列条目只是留白）
+        let detail = self.app.detail;
+        let row_h = if detail {
+            let max_columns = rows
+                .iter()
+                .map(|row| row.columns.len())
+                .max()
+                .unwrap_or(1)
+                .max(1);
+            let extra = (max_columns - 1) as f32;
+            (style::ROW_HEIGHT - 6.0
+                + extra * style::DETAIL_LINE
+                + style::DETAIL_PAD_Y * 2.0
+                + extra * 2.0)
+                .max(style::ROW_HEIGHT)
+                + style::ROW_GAP
+        } else {
+            style::ROW_HEIGHT + style::ROW_GAP
+        };
 
-        // 普通模式：自己算「可视窗口 + 垂直偏移」，这样才能做平滑滚动
+        // 自己算「可视窗口 + 垂直偏移」，这样才能做平滑滚动
         // （GPUI 的 `uniform_list` 只能瞬间 scroll_to_item，没法插值）
-        let row_h = style::ROW_HEIGHT + style::ROW_GAP;
         let visible_rows = rows.len().min(style::MAX_VISIBLE_ROWS);
         self.scroll_viewport = visible_rows as f32 * row_h;
         self.scroll_max = (rows.len() as f32 * row_h - self.scroll_viewport).max(0.0);
@@ -862,7 +867,7 @@ impl Panel {
                     .top(px(self.marker_y + style::ROW_GAP / 2.0))
                     .left(px(0.))
                     .w_full()
-                    .h(px(style::ROW_HEIGHT))
+                    .h(px(row_h - style::ROW_GAP))
                     .rounded(px(style::ROW_RADIUS))
                     // 左侧绿条用边框画：不占内容宽度，列表能整体左移
                     .border_l(px(style::ACCENT_BAR))
@@ -872,7 +877,11 @@ impl Panel {
         }
 
         for row in &rows[first..last] {
-            inner = inner.child(render_row(row, p, metrics, &panel));
+            inner = inner.child(if detail {
+                render_detail_row(row, p, metrics, &panel, row_h - style::ROW_GAP)
+            } else {
+                render_row(row, p, metrics, &panel)
+            });
         }
 
         div()
@@ -903,7 +912,6 @@ impl Panel {
                 columns: item.columns.clone(),
                 badge: item.kind.badge(),
                 color: style::badge_color(item.kind),
-                selected: selected == Some(index),
                 chip_progress: self.chip_progress(index, selected),
                 favorite: self.app.is_favorite(item),
                 unavailable: matches!(item.control, crate::providers::Control::Unavailable),
@@ -1008,7 +1016,6 @@ struct RowSnapshot {
     columns: Vec<String>,
     badge: &'static str,
     color: Rgba,
-    selected: bool,
     favorite: bool,
     /// 开关类条目不可用（灰掉，提示是死项）
     unavailable: bool,
@@ -1161,6 +1168,7 @@ fn render_detail_row(
     p: Palette,
     metrics: RowMetrics,
     panel: &WeakEntity<Panel>,
+    height: f32,
 ) -> AnyElement {
     let head = row.columns.first().cloned().unwrap_or_default();
     let fg = if row.unavailable { p.faint } else { p.fg };
@@ -1170,21 +1178,19 @@ fn render_detail_row(
         + style::BADGE_WIDTH
         + 8.0;
 
-    let mut block = div()
+    let block = div()
         .id(("detail", row.index))
         .w_full()
+        .h(px(height))
         .flex()
         .flex_col()
         .gap(px(2.))
         .py(px(style::DETAIL_PAD_Y))
         .px(px(style::ROW_PAD_X))
         .rounded(px(style::ROW_RADIUS))
+        .overflow_hidden()
         .whitespace_nowrap()
         .hover(|style| style.bg(p.panel));
-
-    if row.selected {
-        block = block.bg(p.overlay);
-    }
 
     let mut block = block.child(
         div()
@@ -1192,12 +1198,6 @@ fn render_detail_row(
             .flex_row()
             .items_center()
             .gap(px(8.))
-            .child(
-                div()
-                    .w(px(style::ACCENT_BAR))
-                    .h(px(style::ROW_HEIGHT - 6.0))
-                    .bg(if row.selected { p.accent } else { p.background }),
-            )
             .child(
                 div()
                     .w(px(style::STAR_WIDTH))
@@ -1281,14 +1281,10 @@ impl Render for Panel {
             }
             // 旧选中行的 chip 从彩色渐隐回灰（`chip_from` 上面已经记好，别再覆盖成新值）
             self.chip_fade_start = std::time::Instant::now();
+            // detail 模式没有选框滑动，直接从现在开始渐入，所以也记一个起点
+            self.chip_settled_at = std::time::Instant::now();
             // 滚动动画从头开始（每换一行都从「贴左边」开始走）
             self.scroll_started = std::time::Instant::now();
-            if let Some(index) = selected
-                && self.app.detail
-            {
-                // detail 模式行高不等，保持立即到位；普通模式的平滑滚动在 `animate_scroll`
-                self.detail_scroll.scroll_to_item(index);
-            }
         }
 
         // 从紧凑形态展开时，列表淡入
