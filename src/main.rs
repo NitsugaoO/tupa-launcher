@@ -18,6 +18,8 @@ mod daemon;
 mod exec;
 mod favorites;
 mod glazewm;
+#[cfg(feature = "gui")]
+mod gui;
 mod history;
 mod i18n;
 mod providers;
@@ -110,8 +112,14 @@ fn main() -> Result<()> {
         return cli_query(&cfg, &line);
     }
 
-    // 自绘窗口（GPUI 版，待重写）：旧的 winit 实现已于 2026-11-17 删除。
+    // 自绘窗口（GPUI，默认构建不含）：`cargo build --release --features gui`
     if args.iter().any(|a| a == "--gui") {
+        #[cfg(feature = "gui")]
+        {
+            let theme = theme::Theme::load(&cfg);
+            return gui::run(cfg, theme);
+        }
+        #[cfg(not(feature = "gui"))]
         anyhow::bail!(i18n::gui_disabled());
     }
 
