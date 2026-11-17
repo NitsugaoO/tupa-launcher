@@ -93,8 +93,9 @@ pub const CARD_HEIGHT: f32 = 46.0;
 /// 卡片模式下最多显示多少条（一条两行，再高就装不下了）
 pub const CARD_VISIBLE_ROWS: usize = 7;
 
-/// 卡片模式下未选中行的底色透明度（选中行不画，交给 marker）
-pub const CARD_ALPHA: f32 = 0.45;
+/// 卡片模式下未选中行的底色透明度（选中行不画，交给 marker）。
+/// 别调小：`panel` 和 `background` 只差一档，0.45 实测看不出卡片。
+pub const CARD_ALPHA: f32 = 0.9;
 
 /// 两色插值：`t` = 0 取 `a`，1 取 `b`（chip 灰 ↔ 彩的渐变就用它）
 pub fn mix(a: Rgba, b: Rgba, t: f32) -> Rgba {

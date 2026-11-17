@@ -992,16 +992,17 @@ impl Panel {
         self.scroll_viewport = visible_rows as f32 * row_h;
         self.scroll_max = (rows.len() as f32 * row_h - self.scroll_viewport).max(0.0);
 
-        // 选中项保持在可视区内（上下各留一行余量）
+        // 选中项保持在可视区内。
+        // **不要留余量**：之前这里用 `margin = row_h`，每次触底滚动都多滚一行，
+        // 看起来像「一按就向上板了一大截」。现在只保证「刚好可见」：
+        // 越过底部就滚到 `bottom - viewport`（正好一行），越过顶部就滚到 `top`。
         if let Some(index) = self.app.list_state.selected() {
             let top = index as f32 * row_h;
             let bottom = top + row_h;
-            let margin = row_h;
             if top < self.scroll_target {
-                self.scroll_target = (top - margin).max(0.0);
+                self.scroll_target = top.max(0.0);
             } else if bottom > self.scroll_target + self.scroll_viewport {
-                self.scroll_target =
-                    (bottom - self.scroll_viewport + margin).min(self.scroll_max);
+                self.scroll_target = (bottom - self.scroll_viewport).min(self.scroll_max);
             }
         }
         self.scroll_target = self.scroll_target.clamp(0.0, self.scroll_max);
@@ -1559,12 +1560,14 @@ fn render_card_row(
         .whitespace_nowrap();
 
     // 选中行的底色由 marker 统一画（行画在 marker 之后，自带背景会把 marker 盖住），
-    // 未选中行给一层很淡的卡片底，把一条条分开；hover 再亮一档。
+    // 未选中行给一层卡片底，把一条条分开；hover 再亮一档。
+    // `CARD_ALPHA` 不能太小：`panel` 本身就比 `background` 只亮一档，
+    // 再乘个 0.45 就和背景一样了（实测看不出卡片）。
     let card = if row.selected {
         card
     } else {
         card.bg(style::with_alpha(p.panel, style::CARD_ALPHA))
-            .hover(|style| style.bg(style::with_alpha(p.panel, style::CARD_ALPHA * 2.0)))
+            .hover(|style| style.bg(p.panel))
     };
 
     div()
