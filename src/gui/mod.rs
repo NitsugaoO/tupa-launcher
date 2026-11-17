@@ -458,7 +458,7 @@ fn render_row(
             .bg(if row.selected { p.accent } else { p.background }),
     )
     .child(
-        // chip：未选中是灰底灰字（YASB 那种胶囊），选中行反白成类型色底 + 深色字
+        // chip：胶囊底；未选中灰底 + 类型色字，选中行反白成类型色底 + 深色字
         div()
             .w(px(style::BADGE_WIDTH))
             .h(px(style::BADGE_HEIGHT))
@@ -469,7 +469,7 @@ fn render_row(
             .rounded(px(style::BADGE_RADIUS))
             .bg(if row.selected { row.color } else { p.panel })
             .text_size(px(style::BADGE_SIZE))
-            .text_color(if row.selected { p.background } else { p.muted })
+            .text_color(if row.selected { p.background } else { row.color })
             .child(row.badge),
     )
     .child(
