@@ -30,6 +30,14 @@ command_prefix = ":"
 # 博客（:blog）：新建文章 / 管理页 / 三个站点入口
 # ---------------------------------------------------------------------------
 
+[gui]
+# GPUI 面板（tupa-gui.exe）自己的设置，与 [daemon] 完全独立：
+# 它自带托盘图标和全局热键，不经过守护进程。
+# 唤起 / 隐藏面板的热键（写法同 [daemon] hotkey，别和它用同一个组合）
+hotkey = "alt+0"
+# 是否显示托盘图标（左键显示/隐藏，右键菜单：显示面板 / 退出）
+tray = true
+
 [blog]
 # 博客仓库根目录（package.json 和 source/_posts 在这里）；留空 = ~/blog
 # dir = 'C:\Users\<你>\blog'
@@ -53,8 +61,7 @@ hotkey = "alt+`"
 copilot_key = true
 # 热键唤起哪种面板：
 #   tui = 终端模拟器里的终端界面（默认）
-#   gui = 自绘无边框窗口（实验特性，相当于 tupa-launcher --gui）
-#        注意：默认构建不含 GUI，要用它得先 cargo build --release --features gui
+#   gui = GPUI 面板，独立程序 tupa-gui.exe（默认构建不含，要 cargo build --release --features gui）
 panel = "tui"
 # TUI 面板跑在哪个终端里：auto / wezterm / wt
 #   auto = 装了 WezTerm 就用 WezTerm，否则退回 Windows Terminal

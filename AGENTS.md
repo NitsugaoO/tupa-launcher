@@ -56,6 +56,11 @@ tupa-launcher.exe --check # 所有 `[[apps]]` 都能解析
 - 命令关键字是 **`set`**（历史上叫 switch，已改名）；文档示例写默认前缀 `:`，
   用户本机 `config.toml` 改成了 `@`，别把两者搞混。
 - **面板渲染只走 `ui::draw`**（TUI 与 GUI 共用），别在 GUI 里另写一套布局。
+- **两个可执行文件，别混**（2026-11-17 起）：`src/lib.rs` 放全部模块（`pub mod`），
+  `src/main.rs` → `tupa-launcher.exe`（TUI + 守护进程，不链接 gpui），
+  `src/gui_main.rs` → `tupa-gui.exe`（GPUI 面板 + 托盘 + 热键，`required-features = ["gui"]`，
+  默认 `cargo build` 不构建它）。`tupa-launcher --gui` 已删，只报一句提示。
+  两个 exe 通过 `util::find_panel(PanelKind::Gui)`（进程名 `tupa-gui.exe`）协作。
 - **GUI 换成 GPUI（2026-11-17 起）**：旧的 winit + cosmic-text + softbuffer 实现已整体删除
   （把 ratatui 字符网格逐像素贴窗口，拿不到真圆角/动效）。新 `src/gui/` 是可选 feature
   `gui`，默认构建不含。四条实测结论，改这块之前先记住：
@@ -69,6 +74,11 @@ tupa-launcher.exe --check # 所有 `[[apps]]` 都能解析
      列表列宽要给显式像素宽度再 `truncate()`；`gui::style::fit` 只在拿不到布局宽度时兜底。
   4. GPUI 没有 channel 唤醒，后台结果靠 `cx.spawn` 轮询 `App::drain_events()`
      （查询中 16ms / 空闲 120ms），拿到结果再 `cx.notify()`。
+- **托盘/热键在后台线程，别塞进 GPUI**：`Application::run` 占住主线程，所以 `src/tray.rs`
+  自己开线程跑 message-only 窗口 + `Shell_NotifyIconW` + `RegisterHotKey`，面板显隐直接用
+  `ShowWindow` 操作 HWND（`util::find_panel`），不碰 GPUI 状态。托盘菜单用
+  `TPM_RETURNCMD` 直接拿返回值，`quit()` 先 `NIM_DELETE` 再 `process::exit`。
+  `WNDCLASSW` / `RegisterClassW` 需要 windows-sys 的 `Win32_Graphics_Gdi` feature。
 - **`config.example.toml` 保持精简示例（2026-11-03 决定）**：只教语法，不同步本机 55 项应用。
 - **不要用「方向键 + `Space`」操作 Windows 系统 UI**（快速设置 / 通知中心）：`Space` 切的
   是**当前焦点项**，而系统 UI 的按钮布局会因用户增删固定项而变——必然存在「焦点落错行
