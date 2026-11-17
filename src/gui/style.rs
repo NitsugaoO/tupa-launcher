@@ -68,9 +68,6 @@ pub const NUMBER_WIDTH: f32 = 18.0;
 pub const STAR_WIDTH: f32 = 14.0;
 /// 控件行的状态列（`开` / `关` / 数值 / 选项），TUI 里是 `ui.rs` 追加的
 pub const STATE_WIDTH: f32 = 72.0;
-/// detail 模式每一行的行高 / 每条条目的上下内边距
-pub const DETAIL_LINE: f32 = 20.0;
-pub const DETAIL_PAD_Y: f32 = 4.0;
 /// 附注（副标题 / 末列）
 pub const NOTE_SIZE: f32 = 11.0;
 /// 状态栏：高 24、字号 11
@@ -86,6 +83,11 @@ pub const SCROLLBAR_WIDTH: f32 = 3.0;
 pub const SCROLLBAR_MIN_RATIO: f32 = 0.06;
 /// 滚动条滑块的亮度（用 `with_alpha(fg, ..)` 套出来，别写死颜色）
 pub const SCROLLBAR_ALPHA: f32 = 0.25;
+
+/// 两行卡片（默认形态）：标题行 + 次要信息行
+pub const CARD_HEIGHT: f32 = 46.0;
+/// 卡片模式下最多显示多少条（一条两行，再高就装不下了）
+pub const CARD_VISIBLE_ROWS: usize = 7;
 
 /// 两色插值：`t` = 0 取 `a`，1 取 `b`（chip 灰 ↔ 彩的渐变就用它）
 pub fn mix(a: Rgba, b: Rgba, t: f32) -> Rgba {

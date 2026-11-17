@@ -257,7 +257,7 @@ impl Panel {
                 title: 0.0,
                 note: 0.0,
                 state: 0.0,
-                detail: 0.0,
+                secondary: 0.0,
             },
             scale: 1.0,
             opacity,
@@ -780,33 +780,24 @@ impl Panel {
         });
     }
 
-    /// detail 模式每行「除表头外还有几行」：明细列数 - 1，再加上可能的控件状态行。
-    /// `row_height` 与 `desired_height` 必须用同一个值，否则窗口高度和实际行高对不上。
-    fn detail_extra_rows(&self) -> f32 {
-        let max_columns = self
-            .app
-            .items
-            .iter()
-            .map(|item| item.columns.len())
-            .max()
-            .unwrap_or(1)
-            .max(1);
-        let state_rows = usize::from(self.app.items.iter().any(|item| item.control.is_control()));
-        (max_columns - 1 + state_rows) as f32
+    /// 当前模式最多显示多少条（卡片两行一条，能放的条数是一半多）
+    fn max_visible_rows(&self) -> usize {
+        if self.app.detail {
+            style::MAX_VISIBLE_ROWS
+        } else {
+            style::CARD_VISIBLE_ROWS
+        }
     }
 
-    /// 当前列表的行高（含行间距）。普通模式固定；detail 按最大列数算。
+    /// 当前列表的行高（含行间距）。
+    ///
+    /// - `detail = true`：单行对齐表（密度模式，`Ctrl+Tab`）
+    /// - 默认：两行卡片（标题 + 次要信息）
     fn row_height(&self) -> f32 {
         if self.app.detail {
-            let extra = self.detail_extra_rows();
-            (style::ROW_HEIGHT - 6.0
-                + extra * style::DETAIL_LINE
-                + style::DETAIL_PAD_Y * 2.0
-                + extra * 2.0)
-                .max(style::ROW_HEIGHT)
-                + style::ROW_GAP
-        } else {
             style::ROW_HEIGHT + style::ROW_GAP
+        } else {
+            style::CARD_HEIGHT + style::ROW_GAP
         }
     }
 
@@ -831,15 +822,14 @@ impl Panel {
             return true;
         }
 
-        // 其余列也要算：之前只看标题列，所以「标题不超宽、附注 / 明细超宽」时
+        // 其余列也要算：之前只看标题列，所以「标题不超宽、附注 / 第二行超宽」时
         // 压根不会推帧，滚动动画就停在第一帧（看着像「只播一次」）。
         if self.app.detail {
-            item.columns.iter().skip(1).any(|value| {
-                display_width(value) as f32 * note_advance > self.row_metrics.detail
-            })
-        } else {
             let note = note_text(item);
             display_width(&note) as f32 * note_advance > self.row_metrics.note
+        } else {
+            let secondary = card_parts(item).0;
+            display_width(&secondary) as f32 * note_advance > self.row_metrics.secondary
         }
     }
 
@@ -864,18 +854,10 @@ impl Panel {
             return base + 24.0 + rows * 26.0 + style::STATUS_HEIGHT;
         }
 
-        let visible = self.app.items.len().min(style::MAX_VISIBLE_ROWS) as f32;
+        let visible = self.app.items.len().min(self.max_visible_rows()) as f32;
         let rows = visible.max(1.0);
 
-        if self.app.detail {
-            // detail 模式下每条高度随列数变化：头行 + 明细行 + 上下内边距 + 行间距。
-            // **直接用 `row_height()`**：这里以前自己再算一遍 `per_row`，但漏了
-            // `ROW_GAP`（3px/行），行数一多最后一行就被窗口底边裁掉。
-            let per_row = self.row_height();
-            return base + style::LIST_TOP + rows * per_row + style::STATUS_HEIGHT;
-        }
-
-        base + style::LIST_TOP + rows * (style::ROW_HEIGHT + style::ROW_GAP) + style::STATUS_HEIGHT
+        base + style::LIST_TOP + rows * self.row_height() + style::STATUS_HEIGHT
     }
 
     /// 结果列表：`uniform_list` 虚拟化（`@hist` 200 条 / `@web` 上千条也不会全渲染）
@@ -900,24 +882,34 @@ impl Panel {
 
         // 列宽按真实窗口宽度算（等宽字体 + truncate 由 GPUI 按像素裁）
         let total = f32::from(window.bounds().size.width) - style::PADDING * 2.0;
-        // 控件行（`:set` / 开关）多一列状态。TUI 那边是 `ui.rs` 按 `Control` 追加的，
-        // GUI 之前完全没画，所以看不到「开 / 关」。只有列表里真有控件行时才占位。
-        //
+        // 右侧尾巴列：密度模式只放控件状态；卡片模式还要放「次数 / 时间」。
         // 宽度按**实际内容**量（不能写死）：Clash 那行是「云上极速 · 3 小时前」，
         // 写死 72px 会把时间那半截裁掉，看着像「只显示了订阅名」。
-        let state_width = if self.app.items.iter().any(|item| item.control.is_control()) {
+        let card_mode = !self.app.detail;
+        let trailing_width = {
             let widest = self
                 .app
                 .items
                 .iter()
-                .filter(|item| item.control.is_control())
-                .map(|item| display_width(&item.control.label()))
+                .filter_map(|item| {
+                    if item.control.is_control() {
+                        Some(item.control.label())
+                    } else if card_mode {
+                        card_parts(item).1
+                    } else {
+                        None
+                    }
+                })
+                .map(|text| display_width(&text))
                 .max()
                 .unwrap_or(0) as f32;
-            (widest * style::NOTE_SIZE * 0.6 + 14.0).clamp(style::STATE_WIDTH, 240.0)
-        } else {
-            0.0
+            if widest > 0.0 {
+                (widest * style::NOTE_SIZE * 0.6 + 14.0).clamp(style::STATE_WIDTH, 260.0)
+            } else {
+                0.0
+            }
         };
+        let state_width = trailing_width;
         let number = if self.app.select_mode {
             style::NUMBER_WIDTH
         } else {
@@ -929,15 +921,23 @@ impl Panel {
             + number
             + style::STAR_WIDTH
             + style::BADGE_WIDTH;
-        // 标题至少留 120px，剩下的才给附注列
-        let note_width = (total * 0.32)
-            .clamp(80.0, 240.0)
-            .min((total - fixed - state_width - 120.0).max(60.0));
+        // 密度模式：标题 + 拼接附注 + 状态；卡片模式：标题 + 右侧尾巴，第二行全宽
+        let note_width = if card_mode {
+            0.0
+        } else {
+            (total * 0.32)
+                .clamp(80.0, 240.0)
+                .min((total - fixed - state_width - 120.0).max(60.0))
+        };
         let metrics = RowMetrics {
-            title: (total - fixed - note_width - state_width).max(80.0),
+            title: (total - fixed - note_width - state_width).max(120.0),
             note: note_width,
             state: state_width,
-            detail: (total - detail_indent()).max(60.0),
+            secondary: if card_mode {
+                (total - card_indent() - style::ROW_PAD_X).max(80.0)
+            } else {
+                0.0
+            },
         };
         self.row_metrics = metrics;
 
@@ -951,7 +951,7 @@ impl Panel {
 
         // 自己算「可视窗口 + 垂直偏移」，这样才能做平滑滚动
         // （GPUI 的 `uniform_list` 只能瞬间 scroll_to_item，没法插值）
-        let visible_rows = rows.len().min(style::MAX_VISIBLE_ROWS);
+        let visible_rows = rows.len().min(self.max_visible_rows());
         self.scroll_viewport = visible_rows as f32 * row_h;
         self.scroll_max = (rows.len() as f32 * row_h - self.scroll_viewport).max(0.0);
 
@@ -1030,24 +1030,10 @@ impl Panel {
 
         for row in &rows[first..last] {
             inner = inner.child(if detail {
-                // 外层必须占满 `row_h` 并居中卡片：`render_detail_row` 返回的卡片
-                // 只有 `row_h - ROW_GAP` 高，直接塞进列表的话每行会少 ROW_GAP，
-                // 越往下偏越多（选框看着就跟行错位了）。`render_row` 里面自带这层。
-                div()
-                    .w_full()
-                    .h(px(row_h))
-                    .flex()
-                    .items_center()
-                    .child(render_detail_row(
-                        row,
-                        p,
-                        metrics,
-                        &panel,
-                        row_h - style::ROW_GAP,
-                    ))
-                    .into_any_element()
-            } else {
+                // 密度模式（`Ctrl+Tab`）：单行对齐表
                 render_row(row, p, metrics, &panel)
+            } else {
+                render_card_row(row, p, metrics, &panel)
             });
         }
 
@@ -1123,6 +1109,8 @@ impl Panel {
                         control_color(&item.control, &self.palette),
                     )
                 }),
+                secondary: card_parts(item).0,
+                trailing: card_parts(item).1,
                 // 只有选中行会左右滚动（跟 TUI 一样），其余行裁掉就裁掉。
                 // 用像素级 ping-pong + 时间基准，60fps 下是连续移动，不再是「一格一格跳」。
                 shift: if selected == Some(index) {
@@ -1133,8 +1121,13 @@ impl Panel {
                     0.0
                 },
                 note_shift: if selected == Some(index) {
-                    let note = note_text(item);
-                    let overflow = display_width(&note) as f32 * note_advance - metrics.note;
+                    // 密度模式滚拼接的附注；卡片模式滚第二行
+                    let (text, width) = if self.app.detail {
+                        (note_text(item), metrics.note)
+                    } else {
+                        (card_parts(item).0, metrics.secondary)
+                    };
+                    let overflow = display_width(&text) as f32 * note_advance - width;
                     ping_pong(overflow, elapsed)
                 } else {
                     0.0
@@ -1142,19 +1135,6 @@ impl Panel {
                 // detail 模式的每条明细列都单独算：超宽了就滚，没超就不动。
                 // 之前这里只有「第一列 + 附注列」两路，detail 下除表头以外的列
                 // 全走 `truncate()` 硬切，选中也看不到后半段。
-                detail_shifts: if selected == Some(index) && self.app.detail {
-                    item.columns
-                        .iter()
-                        .skip(1)
-                        .map(|value| {
-                            let overflow =
-                                display_width(value) as f32 * note_advance - metrics.detail;
-                            ping_pong(overflow, elapsed)
-                        })
-                        .collect()
-                } else {
-                    Vec::new()
-                },
             })
             .collect()
     }
@@ -1252,11 +1232,13 @@ struct RowSnapshot {
     shift: f32,
     /// 附注列同理
     note_shift: f32,
-    /// detail 模式下每条明细列各自的左移量（与 `columns[1..]` 一一对应）
-    detail_shifts: Vec<f32>,
     /// 控件行的状态（文本 + 颜色）：`开` / `关` / 选项 / 数值 / 动作说明。
     /// 普通条目为 `None`（不占列宽）。
     state: Option<(String, Rgba)>,
+    /// 卡片第二行：路径 / 分组等次要信息（已去掉用作右侧的那一列）
+    secondary: String,
+    /// 卡片右侧的尾巴：没控件时用最后一列（次数 / 时间），否则 `None`
+    trailing: Option<String>,
 }
 
 /// 行内固定列的宽度（`number` 只在选择模式下占位）
@@ -1264,10 +1246,10 @@ struct RowSnapshot {
 struct RowMetrics {
     title: f32,
     note: f32,
-    /// 状态列宽度（列表里没有控件行时为 0）
+    /// 右侧尾巴 / 状态列宽度
     state: f32,
-    /// detail 模式下明细列可用的宽度（行宽减去递进缩进）
-    detail: f32,
+    /// 卡片模式第二行可用的宽度
+    secondary: f32,
 }
 
 /// 画一行结果卡片（普通模式）。
@@ -1419,122 +1401,139 @@ fn render_row(
         .into_any_element()
 }
 
-/// detail 模式明细列的左边递进缩进（对齐星标 + 徽标右侧）
-fn detail_indent() -> f32 {
+/// 卡片第二行的缩进（对齐到 chip 右侧）
+fn card_indent() -> f32 {
     style::ACCENT_BAR + 8.0 * 2.0 + style::STAR_WIDTH + style::BADGE_WIDTH + 8.0
 }
 
-/// detail 模式（`Ctrl+Tab`）：第一列作标题，其余列竖排
-fn render_detail_row(
+/// 两行卡片（默认形态）：第一行标题 + 右侧尾巴，第二行路径 / 分组（dim 小字）。
+///
+/// `Ctrl+Tab` 会切回 [`render_row`] 的单行对齐表（密度模式）。
+fn render_card_row(
     row: &RowSnapshot,
     p: Palette,
     metrics: RowMetrics,
     panel: &WeakEntity<Panel>,
-    height: f32,
 ) -> AnyElement {
-    let head = row.columns.first().cloned().unwrap_or_default();
+    let title = row.columns.first().cloned().unwrap_or_default();
     let fg = if row.unavailable { p.faint } else { p.fg };
-    let indent = detail_indent();
 
-    let block = div()
-        .id(("detail", row.index))
+    // 右侧：控件状态（开 / 关 / 数值）优先，否则次数 / 时间
+    let trailing = row
+        .state
+        .clone()
+        .or_else(|| row.trailing.clone().map(|text| (text, p.dim)));
+
+    let head = div()
         .w_full()
-        .h(px(height))
         .flex()
-        .flex_col()
-        .gap(px(2.))
-        .py(px(style::DETAIL_PAD_Y))
-        .px(px(style::ROW_PAD_X))
-        .rounded(px(style::ROW_RADIUS))
-        .overflow_hidden()
-        .whitespace_nowrap();
-
-    let block = if row.selected {
-        block
-    } else {
-        block.hover(|style| style.bg(p.panel))
-    };
-
-    let mut block = block.child(
-        div()
-            .flex()
-            .flex_row()
-            .items_center()
-            .gap(px(8.))
-            .child(
-                div()
-                    .w(px(style::STAR_WIDTH))
-                    .flex_shrink_0()
-                    .text_color(p.warn)
-                    .child(if row.favorite { "\u{2605}" } else { "" }),
-            )
-            .child(
-                div()
-                    .w(px(style::BADGE_WIDTH))
-                    .h(px(style::BADGE_HEIGHT))
-                    .flex_shrink_0()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .rounded(px(style::BADGE_RADIUS))
-                    .bg(style::mix(p.panel, row.color, row.chip_progress))
-                    .text_size(px(style::BADGE_SIZE))
-                    .text_color(style::mix(row.color, p.background, row.chip_progress))
-                    .child(row.badge),
-            )
-            .child(
-                // 表头：和普通模式一样，选中行超宽时左右滚动
-                div()
-                    .w(px(metrics.title))
-                    .flex_shrink_0()
-                    .overflow_hidden()
-                    .whitespace_nowrap()
-                    .child(
-                        div()
-                            .ml(px(-row.shift))
-                            .whitespace_nowrap()
-                            .text_size(px(style::ROW_SIZE))
-                            .text_color(fg)
-                            .child(head),
-                    ),
-            ),
-    );
-
-    for (slot, value) in row.columns.iter().skip(1).enumerate() {
-        // 每条明细列自己滚（`detail_shifts` 与这里同序）
-        let shift = row.detail_shifts.get(slot).copied().unwrap_or(0.0);
-        block = block.child(
+        .flex_row()
+        .items_center()
+        .gap(px(style::ROW_GAP_X))
+        .child(if let Some(n) = row.number {
             div()
-                .pl(px(indent))
-                .w_full()
-                .h(px(style::DETAIL_LINE))
+                .w(px(style::NUMBER_WIDTH))
+                .flex_shrink_0()
+                .text_size(px(style::NOTE_SIZE))
+                .text_color(p.dim)
+                .child(n.to_string())
+                .into_any_element()
+        } else {
+            div().into_any_element()
+        })
+        .child(
+            div()
+                .w(px(style::STAR_WIDTH))
+                .flex_shrink_0()
+                .text_color(p.warn)
+                .child(if row.favorite { "\u{2605}" } else { "" }),
+        )
+        .child(
+            div()
+                .w(px(style::BADGE_WIDTH))
+                .h(px(style::BADGE_HEIGHT))
+                .flex_shrink_0()
+                .flex()
+                .items_center()
+                .justify_center()
+                .rounded(px(style::BADGE_RADIUS))
+                .bg(style::mix(p.panel, row.color, row.chip_progress))
+                .text_size(px(style::BADGE_SIZE))
+                .text_color(style::mix(row.color, p.background, row.chip_progress))
+                .child(row.badge),
+        )
+        .child(
+            // 标题：外层定宽裁剪，内层负 margin 左移 = 左右滚动
+            div()
+                .w(px(metrics.title))
+                .flex_shrink_0()
+                .overflow_hidden()
+                .whitespace_nowrap()
+                .child(
+                    div()
+                        .ml(px(-row.shift))
+                        .whitespace_nowrap()
+                        .text_size(px(style::ROW_SIZE))
+                        .text_color(fg)
+                        .child(title),
+                ),
+        )
+        .child(
+            div()
+                .w(px(metrics.state))
+                .flex_shrink_0()
                 .overflow_hidden()
                 .whitespace_nowrap()
                 .text_size(px(style::NOTE_SIZE))
-                .text_color(p.dim)
+                .text_color(trailing.as_ref().map_or(p.dim, |(_, color)| *color))
                 .child(
-                    div()
-                        .ml(px(-shift))
-                        .whitespace_nowrap()
-                        .child(value.clone()),
+                    trailing
+                        .map(|(text, _)| text)
+                        .unwrap_or_default(),
                 ),
         );
-    }
 
-    if let Some((label, color)) = &row.state {
-        // 状态（开 / 关 / 数值 / 选项）在 detail 下当额外一行
-        block = block.child(
+    // 第二行：路径 / 分组（超宽时跟标题一样左右滚动）
+    let sub = div()
+        .w_full()
+        .pl(px(card_indent()))
+        .overflow_hidden()
+        .whitespace_nowrap()
+        .child(
             div()
-                .pl(px(indent))
-                .w_full()
-                .h(px(style::DETAIL_LINE))
+                .ml(px(-row.note_shift))
+                .whitespace_nowrap()
                 .text_size(px(style::NOTE_SIZE))
-                .text_color(*color)
-                .child(label.clone()),
+                .text_color(p.dim)
+                .child(row.secondary.clone()),
         );
-    }
 
-    block
+    let card = div()
+        .id(("card", row.index))
+        .h(px(style::CARD_HEIGHT))
+        .w_full()
+        .flex()
+        .flex_col()
+        .justify_center()
+        .gap(px(2.))
+        .px(px(style::ROW_PAD_X))
+        .rounded(px(style::ROW_RADIUS))
+        .whitespace_nowrap();
+
+    // 选中底色与左侧绿条由 marker 统一画，这里只给未选中行挂 hover
+    let card = if row.selected {
+        card
+    } else {
+        card.hover(|style| style.bg(p.panel))
+    };
+
+    div()
+        .id(("card-row", row.index))
+        .w_full()
+        .h(px(style::CARD_HEIGHT + style::ROW_GAP))
+        .flex()
+        .items_center()
+        .child(card.child(head).child(sub))
         .on_click({
             let panel = panel.clone();
             let index = row.index;
@@ -1715,6 +1714,26 @@ fn control_color(control: &crate::providers::Control, p: &Palette) -> Rgba {
         Control::Unavailable => p.faint,
         Control::Run => p.dim,
     }
+}
+
+/// 卡片两行怎么拆：`columns[0]` 是标题；最后一列当右侧尾巴（次数 / 时间），
+/// 剩下的拼成第二行。控件行不抽尾巴（右侧显示 control 的 label）。
+fn card_parts(item: &crate::providers::Item) -> (String, Option<String>) {
+    let title = item.columns.first().map(String::as_str).unwrap_or("");
+    let mut rest: Vec<&str> = item.columns.iter().skip(1).map(String::as_str).collect();
+
+    let trailing = if !item.control.is_control() && item.columns.len() >= 3 {
+        rest.pop().map(str::to_string)
+    } else {
+        None
+    };
+
+    let secondary = rest
+        .into_iter()
+        .filter(|value| !value.is_empty() && *value != title)
+        .collect::<Vec<_>>()
+        .join(" · ");
+    (secondary, trailing)
 }
 
 fn note_text(item: &crate::providers::Item) -> String {

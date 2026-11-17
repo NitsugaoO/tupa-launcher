@@ -473,7 +473,7 @@ pub fn gui_help() -> Vec<(&'static str, &'static str)> {
             ("Ctrl+C / X / V", "复制 / 剪切 / 粘贴"),
             ("Ctrl+E", "在文件管理器中定位"),
             ("Ctrl+D", "收藏 / 取消收藏"),
-            ("Ctrl+Tab", "详细信息模式"),
+            ("Ctrl+Tab", "两行卡片 / 单行密度 切换"),
             ("Shift+Tab", "选择模式（1-9 跳转）"),
             ("Esc", "清空输入；开屏时隐藏面板"),
             ("Ctrl+Q", "退出面板进程"),
@@ -491,7 +491,7 @@ pub fn gui_help() -> Vec<(&'static str, &'static str)> {
             ("Ctrl+C / X / V", "copy / cut / paste"),
             ("Ctrl+E", "reveal in file explorer"),
             ("Ctrl+D", "toggle favorite"),
-            ("Ctrl+Tab", "detail mode"),
+            ("Ctrl+Tab", "two-line cards / dense single line"),
             ("Shift+Tab", "select mode (1-9 jumps)"),
             ("Esc", "clear input; hide the panel at home"),
             ("Ctrl+Q", "quit the panel process"),
@@ -560,11 +560,11 @@ pub fn cannot_favorite_command() -> &'static str {
 }
 
 pub fn detail_mode_on() -> &'static str {
-    t("详细信息模式", "Detail mode")
+    t("单行密度模式", "Dense single-line mode")
 }
 
 pub fn detail_mode_off() -> &'static str {
-    t("紧凑模式", "Compact mode")
+    t("两行卡片模式", "Two-line card mode")
 }
 
 pub fn select_mode() -> &'static str {
