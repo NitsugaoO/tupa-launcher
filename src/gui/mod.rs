@@ -929,6 +929,7 @@ impl Panel {
                 index,
                 columns: item.columns.clone(),
                 badge: item.kind.badge(),
+                selected: selected == Some(index),
                 color: style::badge_color(item.kind),
                 chip_progress: self.chip_progress(index, selected),
                 favorite: self.app.is_favorite(item),
@@ -1034,6 +1035,8 @@ struct RowSnapshot {
     columns: Vec<String>,
     badge: &'static str,
     color: Rgba,
+    /// 是否是选中行（选中行不做 hover 高亮，否则会盖住 marker）
+    selected: bool,
     favorite: bool,
     /// 开关类条目不可用（灰掉，提示是死项）
     unavailable: bool,
@@ -1078,8 +1081,14 @@ fn render_row(
         .gap(px(style::ROW_GAP_X))
         .px(px(style::ROW_PAD_X))
         .rounded(px(style::ROW_RADIUS))
-        .whitespace_nowrap()
-        .hover(|style| style.bg(p.panel));
+        .whitespace_nowrap();
+
+    // 选中行的底色来自 marker（背景层），这里再挂 hover 会把它盖掉，所以只给未选中行加
+    let card = if row.selected {
+        card
+    } else {
+        card.hover(|style| style.bg(p.panel))
+    };
 
     // 选中底色与左侧绿条由列表容器里的「选框」（marker）统一画；
     // 绿条是 marker 的左边框，不占内容宽度，所以这里不再留占位（列表能整体左移）。
@@ -1207,8 +1216,13 @@ fn render_detail_row(
         .px(px(style::ROW_PAD_X))
         .rounded(px(style::ROW_RADIUS))
         .overflow_hidden()
-        .whitespace_nowrap()
-        .hover(|style| style.bg(p.panel));
+        .whitespace_nowrap();
+
+    let block = if row.selected {
+        block
+    } else {
+        block.hover(|style| style.bg(p.panel))
+    };
 
     let mut block = block.child(
         div()
