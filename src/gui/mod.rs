@@ -1044,10 +1044,21 @@ fn render_row(
         .whitespace_nowrap()
         .hover(|style| style.bg(p.panel));
 
-    // 选中底色与左侧绿条由列表容器里的「选框」（marker）统一画，这里只留占位，
-    // 否则会和 marker 叠成两层（会看到高亮位置偏移、边缘发亮）
+    // 选中底色与左侧绿条由列表容器里的「选框」（marker）统一画；
+    // 绿条是 marker 的左边框，不占内容宽度，所以这里不再留占位（列表能整体左移）。
     let card = card
-        .child(div().w(px(style::ACCENT_BAR)).h_full())
+        .child(if let Some(n) = row.number {
+            // 选择模式（Shift+Tab）下的 1-9 跳转序号，平时不占位
+            div()
+                .w(px(style::NUMBER_WIDTH))
+                .flex_shrink_0()
+                .text_size(px(style::NOTE_SIZE))
+                .text_color(p.dim)
+                .child(n.to_string())
+                .into_any_element()
+        } else {
+            div().into_any_element()
+        })
         .child(
             // 收藏星标（未收藏也占位，保证列对齐）
             div()
