@@ -1123,7 +1123,11 @@ impl Panel {
         let last = (first + count).min(rows.len()).max(first);
         let mut inner = div()
             .absolute()
-            .top(px(-self.scroll_y))
+            // **必须减掉 `first * row_h`**：inner 里只堆 `first..last`，第一行落在
+            // inner 的 y=0，而它在内容坐标系里的位置是 `first * row_h`。
+            // 只写 `-scroll_y` 时偏差 = `first * row_h`，滚得越深偏得越多，
+            // 到底部整片推到容器上方 → 列表一片空白（2026-11-18 修）。
+            .top(px(first as f32 * row_h - self.scroll_y))
             .left(px(0.))
             .w_full()
             .flex()
