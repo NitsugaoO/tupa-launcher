@@ -41,23 +41,30 @@ Everything 本体没装的话，`ev` 会用不了，其余功能正常。
 
 ## 全局热键
 
+主入口是 **`tupa-gui.exe`** —— 独立程序，自带托盘图标 + 全局热键，**不需要守护进程**：
+
 ```bash
-./target/release/tupa-launcher.exe --daemon    # 常驻
+cargo build --release --features gui     # 默认 cargo build 不产出它
+./target/release/tupa-gui.exe
 ```
 
-两个热键，任选（都可在 `config.toml` 的 `[daemon]` 里改）：
+热键 `Alt+`` `（`config.toml` 的 `[gui] hotkey` 可改），托盘图标左键显隐、右键菜单。
+
+按一下唤起、再按一下隐藏；`Esc` 在输入框空的时候是隐藏（进程留着，下次唤起瞬时），
+有内容时先清空输入；
+`Enter` 启动应用后也是隐藏，把屏幕让出去。
+
+已配置开机自启：启动文件夹里的 `tupa-gui.lnk`。
+想停掉就 `taskkill /IM tupa-gui.exe /F`，或删掉那个快捷方式（右键托盘 → 退出 也行）。
+
+守护进程 + TUI 的实现还在，可以手动跑（`./target/release/tupa-launcher.exe --daemon`），
+但它已不是日常入口 —— **热键只能被一个进程注册**，两边同时跑会抢，所以开机自启里的
+`tupa-launcher-daemon.lnk` 已改名 `.disabled`。它的热键在 `[daemon]` 里：
 
 | 热键 | 怎么来的 |
 |---|---|
 | **`Alt+`` `** | `RegisterHotKey` 注册（默认值） |
 | **`Copilot 键`** | 低级键盘钩子拦 `F23`（`copilot_key = true` 才启用） |
-
-按一下唤起、再按一下隐藏；`Esc` 在输入框空的时候是隐藏（进程留着，下次唤起瞬时），
-有内容时先清空输入；
-`Enter` 启动应用后也是隐藏，把屏幕让出去。选完以后想彻底结束进程按 `Ctrl+C`。
-
-已配置开机自启：启动文件夹里的 `tupa-launcher-daemon.lnk`。
-想停掉就 `taskkill /IM tupa-launcher.exe /F`，或删掉那个快捷方式。
 
 ### 为什么不用裸 `Win+S`
 
@@ -382,9 +389,12 @@ const COLUMNS: &[Column] = &[
 | `Ctrl+Tab` / `Ctrl+O` | **详细信息模式**：每列纵向铺开（`Ctrl+Tab` 在 Windows Terminal 里默认被占用，需要解绑；`Ctrl+O` 是备用键） |
 | `Ctrl+D` | 收藏 / 取消收藏当前选中项（`★` 表示已收藏） |
 | `Ctrl+↑` `Ctrl+↓` | 上一条 / 下一条历史输入 |
-| `Ctrl+W` | 删除一个词 |
+| `Ctrl+W` / `Ctrl+Backspace` | 删掉光标前的一个词 |
+| `Shift+←` `Shift+→` / `Shift+Home` `Shift+End` | 选中文字；有选区时打字 / 退格 / 粘贴直接**替换选区** |
+| `Ctrl+←` `Ctrl+→` | 按词移动光标（路径里的 `\` `.` `:` 也算分隔，能逐段跳） |
+| `Ctrl+A` / `Ctrl+C` / `Ctrl+X` / `Ctrl+V` | 全选 / 复制 / 剪切 / 粘贴（没选区时复制、剪切整行；多行粘贴会压成一行） |
 | `Esc` | 选择模式里退出选择模式；否则清空输入回到开屏（`:` 或空串）；已经在开屏状态时**隐藏面板**（进程保留） |
-| `Ctrl+C` | 真正退出（销毁面板进程） |
+| `Ctrl+Q` | 真正退出（销毁面板进程）。**`Ctrl+C` 现在是复制**，不再退出 |
 
 ## 配置
 
@@ -521,5 +531,6 @@ src/
       —— 旧 winit 实现**已于 2026-11-17 整体删除**（依赖重、能力天花板低），正换成 **GPUI** 重写。
       面板现在是**独立程序 `tupa-gui.exe`**（自带托盘图标 + 全局热键，不依赖守护进程）：
       `cargo build --release --features gui` 才产出，默认构建不含。
+      原来的守护进程 + TUI 仍可手动跑，但开机自启已改为 GUI。
       面板默认宿主是 WezTerm（`[daemon] terminal`），`WindowsTerminal` 只在找不到 WezTerm 时兜底
       （开工说明见 [`docs/07-shell-handover.md`](docs/07-shell-handover.md)，当前进度见 [`STATE.md`](STATE.md)）

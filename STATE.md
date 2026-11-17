@@ -1,6 +1,6 @@
 # tupa-launcher 状态
 
-updated: 2026-11-17 · code: `283878c`（GPUI 面板：动画体系 + detail 统一 + 主入口切到 GUI）· main 与 origin/main 同步（已 push）
+updated: 2026-11-18 · code: `f06631b`（输入框选区/剪贴板 · 列表滚动条 · 控件状态列 · `?` 帮助）· main 领先 origin/main 2 个提交（未 push）
 
 > 判断本文件是否过期：比较 `code` 与 `git log -1 --format=%h -- src Cargo.toml`。
 > 只改文档的提交不算过期。
@@ -12,6 +12,28 @@ updated: 2026-11-17 · code: `283878c`（GPUI 面板：动画体系 + detail 统
 > **每次会话收尾只需要改这一个文件的两节**（阶段 / 未完成），并更新首行。
 
 ## 阶段
+
+- **输入框编辑 / 滚动条 / 控件状态列（2026-11-18）**：
+  - 输入框：选区锚点 `App::anchor` + `Shift+←/→/Home/End`；`Ctrl+←/→` 按词跳
+    （路径里的 `\` `.` `:` 也算分隔，能逐段跳）；`Ctrl+A`；`Ctrl+C/X/V`
+    （新增 `clipboard::set_text()`）；有选区时打字 / 退格 / 粘贴覆盖选区；
+    `selected_text_range` 如实上报（之前永远零宽，IME 会把选区当零点）
+  - **`Ctrl+C` 改成复制，退出统一 `Ctrl+Q`** —— `on_key` 是 TUI/GUI 共用的，两边一起变
+  - 列表右侧 3px 滚动条：高度按「可视/内容」、位置跟 `scroll_y`，内容不足一屏不画；
+    **只做指示**（不可拖、不淡入，这两项 2026-11-18 明确不做）
+  - **超宽滚动补全**：`needs_scroll_raw()` 之前只看标题列，所以附注列 / detail 明细列
+    超宽时压根不推帧，`ping_pong` 停在第一帧（看着像「只播一次」）。现在按模式检查
+    所有会滚的列，detail 下每条明细列各自滚
+  - **`@set` 的状态列回来了**：TUI 的「开 / 关 / 73%」是 `ui.rs` 按 `Control` 追加的，
+    GUI 从没画过 → 只剩两列。现在普通模式单独一列（带颜色），detail 追加一行；
+    行高与窗口高共用 `detail_extra_rows()`
+  - **`?` 帮助**：中文输入法打的是全角「？」（`keys::to_key` 不认，字符会漏进输入框）
+    → 归一 + 「输入框为空时 ?/？ 当帮助键」+ 50ms `text_block` 吞掉那次 `WM_CHAR`；
+    帮助页补了新键位，`Alt+0` 改成不写死
+  - **鼠标拖动选择不做**（2026-11-18 决定）：只支持键盘选区，要按字形宽度反查字符下标，
+    收益不抵复杂度
+  - 顺手修 clippy：`--features gui` 下 `icon::destroy_icon`（裸指针参数）报
+    `not_unsafe_ptr_arg_deref` —— 这个 error 一直藏着，因为默认构建不编译 `src/gui/`
 
 - **GPUI 面板全线打通（2026-11-17）**：自绘 GUI 从「winit 把字符网格贴成像素」换成 **GPUI** 重写。
   旧的 `src/gui/`（1266 行）与 winit / cosmic-text / softbuffer / unicode-script 四个依赖已删。

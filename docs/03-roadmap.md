@@ -48,7 +48,7 @@
   - 包名 / exe：`tupa-launcher` / `tupa-launcher.exe`
   - 配置目录：`~/.config/tupa-launcher/`（已从旧的迁移过来）
   - WT profile 名 / tabTitle：`tupa-launcher`
-  - 自启：启动文件夹里的 `tupa-launcher-daemon.lnk`
+  - 自启：启动文件夹里的 `tupa-gui.lnk`（旧守护进程的 `tupa-launcher-daemon.lnk.disabled` 已停用）
 
 ## 原计划（v0.3 已全部实现，保留设计记录）
 
@@ -239,12 +239,12 @@ src/
 - **provider 的 `query` 在后台线程跑**，可以放心做阻塞 IO（es.exe、SQLite、读文件）
 - **不要在主线程做耗时操作**：`App::reveal_selected` 里的 `.lnk` 解析是例外（按键触发、可接受）
 - 用户可见的字符串用中文
-- 提交前跑 `cargo clippy --release`，保持零警告
-- 改完记得 `cargo build --release` 并重启守护进程（它占着 exe）：
+- 提交前跑 `cargo clippy --release`（改 `src/gui/` 时加 `--features gui`），保持零警告
+- 改完要重启面板才生效（GPUI 是单实例，不杀旧的等于没改）：
   ```bash
-  taskkill //IM tupa-launcher.exe //F
-  cargo build --release
-  powershell -NoProfile -Command "Start-Process (Join-Path \$env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Startup\tupa-launcher-daemon.lnk')"
+  taskkill //IM tupa-gui.exe //F
+  cargo build --release --features gui
+  powershell -NoProfile -Command "Start-Process .\target\release\tupa-gui.exe"
   ```
 
 ## 已知的坑（别重踩）
@@ -269,4 +269,4 @@ tupa-launcher.exe --reveal "C:\x.exe"    # 测「在资源管理器里定位」
 tupa-launcher.exe --daemon --debug       # 守护进程 + 详细日志
 ```
 
-守护进程日志：`%TEMP%\tupa-launcher-daemon.log`
+守护进程日志：`%TEMP%\tupa-launcher-daemon.log`；面板日志：`%TEMP%\tupa-gui.log`

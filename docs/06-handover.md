@@ -261,7 +261,8 @@ tupa-launcher.exe --reveal "C:\x.exe"     # 测「在资源管理器里定位」
 tupa-launcher.exe --daemon --debug        # 守护进程 + 日志
 ```
 
-日志：`%TEMP%\tupa-launcher-daemon.log`
+日志：面板 `%TEMP%\tupa-gui.log`（GUI 子系统下 panic 只能写这里）；
+守护进程 `%TEMP%\tupa-launcher-daemon.log`
 
 ## 8. 已知可以不做的小事
 

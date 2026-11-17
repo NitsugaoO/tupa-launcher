@@ -26,23 +26,37 @@ git log -1 --format=%h -- src Cargo.toml   # 不等于 STATE 里的 code → 代
 
 ## 改完怎么生效 + 怎么验证（硬性，别忘）
 
-面板进程常驻（`Esc` 只是隐藏），改完不重启就还是旧 exe：
+**主入口是 `tupa-gui.exe`**（`src/gui/`，GPUI）。面板进程常驻（`Esc` 只是隐藏），
+改完不重启就还是旧 exe：
 
 ```bash
 cd ~/Projects/tupa-launcher
-taskkill //IM tupa-launcher.exe //F
-cargo test --release && cargo clippy --release && cargo build --release
-powershell -NoProfile -Command "Start-Process (Join-Path \$env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Startup\tupa-launcher-daemon.lnk')"
+taskkill //IM tupa-gui.exe //F            # 单实例：不杀旧的，新起的只会把旧窗口叫到前面就退出
+cargo build --release --features gui      # 默认 cargo build 不产出 tupa-gui.exe
+powershell -NoProfile -Command "Start-Process .\target\release\tupa-gui.exe"
 ```
 
+三个前提（踩过）：
+
+- **热键只属于一个进程**：`tupa-launcher --daemon` 在跑会先占住 `alt+\``，GUI 就注册失败
+  （托盘图标在、按热键没反应）。改 GUI 前先 `tasklist | findstr tupa-launcher` 确认没在跑。
+- **不带 `--features gui` 时 `src/gui/` 一行都不编译** —— 只跑默认的 `build` / `clippy` /
+  `test` 拿到的「全绿」不包含 GUI 代码，改了等于没改。动 `src/gui/` / `gui_main.rs` 一律带 feature。
+- **进程莫名消失**（GUI 子系统下 panic 没有控制台）：先看 `%TEMP%\tupa-gui.log`，
+  `gui_main` 装了 panic hook 写这里。
+
 ```bash
-cargo test --release      # 全绿（数字以输出为准，不写进文档）
-cargo clippy --release    # 零警告
-tupa-launcher.exe --check # 所有 `[[apps]]` 都能解析
+cargo test  --release --features gui     # 全绿（数字以输出为准，不写进文档）
+cargo clippy --release --features gui    # 零警告；必须带 feature，否则 GUI 代码不参与
+./target/release/tupa-launcher.exe --check  # 所有 `[[apps]]` 都能解析（默认构建就有这个 exe）
 ```
+
+只改 lib / TUI 侧（`providers` / `exec` / `ui`）时 `cargo build --release` 就够；
+`tupa-launcher.exe` 手动 `cargo run --release` 跑（守护进程 + TUI 已停用，见下面硬约定）。
 
 ## 硬约定
 
+- **不要在这个仓库跑 `cargo fmt`**（2026-11-18 实测）：代码是手写排版（不少行超过 100 列也不折），`cargo fmt` 会一口气重排 20+ 个文件，diff 直接淹没本次改动。要格式化只手动整自己碰过的那几行。
 - **所有用户可见文案走 `src/i18n.rs`**（`t("中文", "English")`），业务代码里不写裸字符串。
 - **加 `Action` 变体要同步 3 处**（2026-11-17 从 4 处收拢：定位知识移进
   `Action::reveal_target`，`app::reveal_selected` 不再枚举）：
@@ -57,7 +71,7 @@ tupa-launcher.exe --check # 所有 `[[apps]]` 都能解析
   用户本机 `config.toml` 改成了 `@`，别把两者搞混。
 - **面板渲染只走 `ui::draw`**（TUI 与 GUI 共用），别在 GUI 里另写一套布局。
 - **主入口是 `tupa-gui.exe`**（2026-11-17 晚起）：热键 `[gui] hotkey`（本机 `alt+\``）、
-  开机自启 `启动	upa-gui.lnk`。守护进程 + TUI 已停用（`tupa-launcher-daemon.lnk.disabled`），
+  开机自启 `Startup\tupa-gui.lnk`。守护进程 + TUI 已停用（`tupa-launcher-daemon.lnk.disabled`），
   TUI 只能手动跑。改 GUI 之前先确认守护进程没在跑，否则它会占着热键让 GUI 注册失败。
 - **两个可执行文件，别混**（2026-11-17 起）：`src/lib.rs` 放全部模块（`pub mod`），
   `src/main.rs` → `tupa-launcher.exe`（TUI + 守护进程，不链接 gpui），
@@ -82,7 +96,7 @@ tupa-launcher.exe --check # 所有 `[[apps]]` 都能解析
      - 嵌套 `this.update(cx, ..)` → `cannot update Panel while it is already being updated`
      - `Window::resize` 会同步触发 relayout/render，同样重入
      改窗口尺寸用 `util::resize_panel_height`（Win32 `SetWindowPos`），在 `update` 之外调用。
-     GUI 子系统下 panic 看不见 → `gui_main` 装了 panic hook 写 `%TEMP%	upa-gui.log`，
+     GUI 子系统下 panic 看不见 → `gui_main` 装了 panic hook 写 `%TEMP%\tupa-gui.log`，
      排查"进程莫名消失"先看这个文件。
   6. **托盘图标**是运行时用 GDI 画的（`gui::icon::draw`，背景色方块 + 草绿 ❯），不依赖
      `.ico` 资源、也没有 `build.rs`；`HICON` 是裸指针，跨线程只能传 `isize`。
@@ -105,6 +119,17 @@ tupa-launcher.exe --check # 所有 `[[apps]]` 都能解析
  11. **chip 渐变的两个时间戳别混用**：`chip_settled_at` 会在 marker 落地时被重置，
      拿它算渐入进度会导致"渐到一半归零再渐"（看起来是闪）；渐入起点用 `chip_fade_start`
      （只在选中项变化时设），`chip_settled_at` 只负责「落地后从 85% 补满到 100%」。
+ 12. **控件状态列 GUI 要自己画**：TUI 的「开 / 关 / 73%」是 `ui.rs::draw` 按
+     `Control` 追加的一列，GUI 没有对应实现 → `@set` 曾经只剩「标题 + 附注」两列。
+     现在普通模式单独占 `metrics.state` 那一列（颜色见 `control_color`），detail 模式
+     追加一行；行高和窗口高度都用 `detail_extra_rows()`，别两边各算一套。
+ 13. **`needs_scroll_raw()` 决定「要不要继续推帧」**：只看标题列时，附注列 / detail
+     明细列超宽就没有动画帧，`ping_pong` 停在第一帧（表现为「只播一次」或干脆不动）。
+     新增任何可滚列都要同步这里。
+ 14. **`?` 是 Shift+/，会走两条路**：`WM_KEYDOWN` → `handle_key`，以及 `WM_CHAR` →
+     `replace_text_in_range`。只拦前者的话字符照样进输入框；中文输入法打的还是全角
+     「？」，`keys::to_key` 得归一。现在靠 `Panel::text_blocked()`（help 期间 +
+     切隐后 50ms）在 input handler 里吞掉那次提交，并补了「输入框为空时 ? 当帮助键」。
 - **输入框的文本入口是 `EntityInputHandler`，不是 `on_key_down`**：GPUI 在 `WM_CHAR`
   时调 `replace_text_in_range`、输入法组字时调 `replace_and_mark_text_in_range`，
   `bounds_for_range` 决定候选窗位置（Windows 端 GPUI 会 `ImmSetCandidateWindow`）。
