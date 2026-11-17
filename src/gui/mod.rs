@@ -593,8 +593,11 @@ impl Panel {
             moving = true;
         }
 
-        // chip 渐变还在进行中 → 继续按 60fps 重绘
-        if self.marker_moving || self.chip_settled_at.elapsed().as_secs_f32() < style::CHIP_FADE_SECS
+        // chip 渐变（新行渐入 / 旧行渐隐）还在进行中 → 继续按 60fps 重绘
+        if self.marker_moving
+            || self.chip_settled_at.elapsed().as_secs_f32() < style::CHIP_FADE_SECS
+            || (self.chip_from.is_some()
+                && self.chip_fade_start.elapsed().as_secs_f32() < style::CHIP_FADE_SECS)
         {
             moving = true;
         }
@@ -617,10 +620,13 @@ impl Panel {
         }
         let fade = style::CHIP_FADE_SECS;
         if selected == Some(index) {
-            if self.marker_moving {
-                return 0.0;
+            if !self.marker_moving {
+                return (self.chip_settled_at.elapsed().as_secs_f32() / fade).clamp(0.0, 1.0);
             }
-            (self.chip_settled_at.elapsed().as_secs_f32() / fade).clamp(0.0, 1.0)
+            // 滑动中就不等落地了：离目标越近越亮（最多 85%，剩下的落地后补满）
+            let row_h = style::ROW_HEIGHT + style::ROW_GAP;
+            let gap = ((self.marker_target - self.marker_y).abs() / row_h).clamp(0.0, 1.0);
+            (1.0 - gap / 0.6).clamp(0.0, 1.0) * 0.85
         } else if self.chip_from == Some(index) {
             // 旧行：从 1 渐隐到 0
             1.0 - (self.chip_fade_start.elapsed().as_secs_f32() / fade).clamp(0.0, 1.0)
@@ -1215,6 +1221,8 @@ impl Render for Panel {
         // 选中项跟手滚动（键盘 ↑↓ / 鼠标点击都走这里）
         let selected = self.app.list_state.selected();
         if selected != self.last_selected {
+            // 先记下「上一行的选中项」，再更新 —— 顺序反了的话旧行永远不渐隐
+            self.chip_from = self.last_selected;
             self.last_selected = selected;
             // 先熄灭 chip：不然新选中行会先用「点亮」状态渲染一帧，再被 animate 关掉 → 闪
             if self.animations {
