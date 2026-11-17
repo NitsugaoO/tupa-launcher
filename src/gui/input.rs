@@ -10,6 +10,7 @@
 //! 阶段调用。
 
 use std::ops::Range;
+use std::time::Duration;
 
 use gpui::{
     Bounds, Context, EntityInputHandler, Pixels, Point, UTF16Selection, Window, point, px, size,
@@ -50,6 +51,9 @@ impl EntityInputHandler for Panel {
         _window: &mut Window,
         _cx: &mut Context<Self>,
     ) -> Option<String> {
+        if self.text_blocked() {
+            return None;
+        }
         let start = utf16_to_char(&self.app.input, range.start);
         let end = utf16_to_char(&self.app.input, range.end);
         *adjusted_range = Some(range);
@@ -69,10 +73,19 @@ impl EntityInputHandler for Panel {
         _window: &mut Window,
         _cx: &mut Context<Self>,
     ) -> Option<UTF16Selection> {
-        let at = utf16_len(&self.app.input, self.app.cursor);
+        // 有选区就如实报给系统：IME 提交、系统级复制都按这个范围处理。
+        // 之前永远返回「光标处空范围」，所以 Shift+方向键根本没法建选区：
+        // 就算建了，系统下一次替换也会把它当成零宽点。
+        let (start, end) = self
+            .app
+            .selection()
+            .unwrap_or((self.app.cursor, self.app.cursor));
+        let from = utf16_len(&self.app.input, start);
+        let to = utf16_len(&self.app.input, end);
         Some(UTF16Selection {
-            range: at..at,
-            reversed: false,
+            range: from..to,
+            // 活动端（cursor）在锚点左边 = 反向选区
+            reversed: self.app.anchor.is_some_and(|anchor| anchor > self.app.cursor),
         })
     }
 
@@ -98,18 +111,38 @@ impl EntityInputHandler for Panel {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // 帮助浮层开着（或刚关）：`?` 那一下的 `WM_CHAR` 不能落进来
+        if self.text_blocked() {
+            return;
+        }
+
+        // 中文输入法把 Shift+/ 直接当全角「？」提交（没有对应的 WM_KEYDOWN），
+        // `handle_key` 里那个帮助开关就永远收不到。这里补一道：
+        // **输入框为空时**单个问号当帮助键；已经打了字就照常插入
+        // （别让 `@web https://x?a=b` 这类没法输入）。
+        if (text == "?" || text == "？") && self.app.input.is_empty() && self.preedit.is_none() {
+            self.help = true;
+            self.text_block = Some(std::time::Instant::now() + Duration::from_millis(50));
+            cx.notify();
+            return;
+        }
+
         let (start, end) = match range {
             Some(range) => (
                 utf16_to_char(&self.app.input, range.start),
                 utf16_to_char(&self.app.input, range.end),
             ),
-            None => (self.app.cursor, self.app.cursor),
+            None => self
+                .app
+                .selection()
+                .unwrap_or((self.app.cursor, self.app.cursor)),
         };
 
         let from = byte_index(&self.app.input, start);
         let to = byte_index(&self.app.input, end);
         self.app.input.replace_range(from..to, text);
         self.app.cursor = start + text.chars().count();
+        self.app.anchor = None;
         self.preedit = None;
         self.app.refresh();
         cx.notify();
@@ -124,6 +157,9 @@ impl EntityInputHandler for Panel {
         cx: &mut Context<Self>,
     ) {
         // 预编辑：只是「显示在光标处」，先不动输入框本身，等 commit 再落进去
+        if self.text_blocked() {
+            return;
+        }
         let start = match range {
             Some(range) => utf16_to_char(&self.app.input, range.start),
             None => self.app.cursor,

@@ -467,12 +467,17 @@ pub fn gui_help() -> Vec<(&'static str, &'static str)> {
             ("Enter", "执行当前项"),
             ("Tab", "补全命令 / 参数"),
             ("Ctrl+↑ / Ctrl+↓", "命令历史"),
+            ("Shift+← / →", "选中文字（也可以 Shift+Home / End）"),
+            ("Ctrl+← / →", "按词移动光标"),
+            ("Ctrl+A", "全选输入框"),
+            ("Ctrl+C / X / V", "复制 / 剪切 / 粘贴"),
             ("Ctrl+E", "在文件管理器中定位"),
             ("Ctrl+D", "收藏 / 取消收藏"),
             ("Ctrl+Tab", "详细信息模式"),
             ("Shift+Tab", "选择模式（1-9 跳转）"),
             ("Esc", "清空输入；开屏时隐藏面板"),
-            ("Alt+0", "显示 / 隐藏面板（全局热键）"),
+            ("Ctrl+Q", "退出面板进程"),
+            ("全局热键", "显示 / 隐藏面板（`[gui] hotkey`）"),
             ("?", "打开 / 关闭这份说明"),
         ],
         Lang::En => vec![
@@ -480,12 +485,17 @@ pub fn gui_help() -> Vec<(&'static str, &'static str)> {
             ("Enter", "run the selected item"),
             ("Tab", "complete command / argument"),
             ("Ctrl+↑ / Ctrl+↓", "command history"),
+            ("Shift+← / →", "select text (or Shift+Home / End)"),
+            ("Ctrl+← / →", "move by word"),
+            ("Ctrl+A", "select all"),
+            ("Ctrl+C / X / V", "copy / cut / paste"),
             ("Ctrl+E", "reveal in file explorer"),
             ("Ctrl+D", "toggle favorite"),
             ("Ctrl+Tab", "detail mode"),
             ("Shift+Tab", "select mode (1-9 jumps)"),
             ("Esc", "clear input; hide the panel at home"),
-            ("Alt+0", "show / hide the panel (global hotkey)"),
+            ("Ctrl+Q", "quit the panel process"),
+            ("global hotkey", "show / hide the panel (`[gui] hotkey`)"),
             ("?", "toggle this help"),
         ],
     }
@@ -514,6 +524,21 @@ pub fn cannot_reveal() -> &'static str {
         "该条目没有可以定位的路径",
         "This item has no path to reveal",
     )
+}
+
+/// 复制 / 剪切时剪贴板写不进去（被别的程序占着等）
+pub fn clipboard_failed() -> &'static str {
+    t("剪贴板被占用，写入失败", "Clipboard busy, write failed")
+}
+
+/// 剪贴板里不是文本 / 读不到
+pub fn clipboard_empty() -> &'static str {
+    t("剪贴板里没有可粘贴的文本", "No text in the clipboard")
+}
+
+/// 没选中也没输入时按 Ctrl+C
+pub fn nothing_to_copy() -> &'static str {
+    t("没有可复制的内容", "Nothing to copy")
 }
 
 pub fn favorited(title: &str) -> String {

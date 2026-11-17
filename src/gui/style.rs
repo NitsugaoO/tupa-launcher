@@ -47,7 +47,8 @@ pub const INPUT_HEIGHT: f32 = 40.0;
 pub const INPUT_SIZE: f32 = 15.0;
 /// 光标块的尺寸（`app.cursor` 处那根竖线）。
 /// 高度跟字号一致（15px），比 18 更贴合字形上下边界——之前高出字头一截，看着像错位。
-pub const CURSOR_WIDTH: f32 = 1.0;
+/// 宽度 2px：1px 在 200% DPI 下就是半像素，看着像缺了一块。
+pub const CURSOR_WIDTH: f32 = 2.0;
 pub const CURSOR_HEIGHT: f32 = 15.0;
 /// 结果行：卡片 30、间距 4、圆角 7、字号 13（YASB 那种紧凑感）
 pub const ROW_HEIGHT: f32 = 28.0;
@@ -65,6 +66,8 @@ pub const ROW_PAD_X: f32 = 6.0;
 /// 选择模式下的序号列 / 收藏星标列
 pub const NUMBER_WIDTH: f32 = 18.0;
 pub const STAR_WIDTH: f32 = 14.0;
+/// 控件行的状态列（`开` / `关` / 数值 / 选项），TUI 里是 `ui.rs` 追加的
+pub const STATE_WIDTH: f32 = 72.0;
 /// detail 模式每一行的行高 / 每条条目的上下内边距
 pub const DETAIL_LINE: f32 = 20.0;
 pub const DETAIL_PAD_Y: f32 = 4.0;
@@ -77,6 +80,12 @@ pub const STATUS_SIZE: f32 = 11.0;
 pub const ACCENT_BAR: f32 = 3.0;
 /// 列表区顶部留白（别让第一行贴着分隔线）
 pub const LIST_TOP: f32 = 4.0;
+/// 列表滚动条：宽 3px，贴在右侧内缩 1px
+pub const SCROLLBAR_WIDTH: f32 = 3.0;
+/// 内容再长，滑块也不低于轨道的这个比例（否则小到看不见）
+pub const SCROLLBAR_MIN_RATIO: f32 = 0.06;
+/// 滚动条滑块的亮度（用 `with_alpha(fg, ..)` 套出来，别写死颜色）
+pub const SCROLLBAR_ALPHA: f32 = 0.25;
 
 /// 两色插值：`t` = 0 取 `a`，1 取 `b`（chip 灰 ↔ 彩的渐变就用它）
 pub fn mix(a: Rgba, b: Rgba, t: f32) -> Rgba {

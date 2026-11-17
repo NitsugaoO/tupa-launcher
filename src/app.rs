@@ -13,7 +13,7 @@ use crate::providers::{
     RowLayout, commands,
 };
 use crate::theme::Theme;
-use crate::{favorites, history};
+use crate::{clipboard, favorites, history};
 
 /// 命令 / 修饰符的补全候选状态。
 ///
@@ -34,6 +34,11 @@ pub struct App {
     pub input: String,
     /// 光标位置（**字符**下标，不是字节）
     pub cursor: usize,
+    /// 选区锚点（字符下标）。`None` = 没有选区。
+    ///
+    /// 选区范围 = `min(anchor, cursor)..max(anchor, cursor)`，
+    /// 所以「活动端」永远是 `cursor`（Shift+← 往后涨就等于往左扩）。
+    pub anchor: Option<usize>,
     /// 当前结果
     pub items: Vec<Item>,
     pub list_state: ListState,
@@ -135,6 +140,7 @@ impl App {
         App {
             input: home.clone(),
             cursor,
+            anchor: None,
             items: Vec::new(),
             list_state: ListState::default(),
             infos,
@@ -360,6 +366,7 @@ impl App {
     pub fn on_key(&mut self, key: KeyEvent) {
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         let alt = key.modifiers.contains(KeyModifiers::ALT);
+        let shift = key.modifiers.contains(KeyModifiers::SHIFT);
 
         // 选择模式只认这几个键，其他键（输入、翻历史……）都退回普通模式
         if self.select_mode && !is_select_mode_key(key.code) {
@@ -378,7 +385,13 @@ impl App {
                     self.set_home();
                 }
             }
-            KeyCode::Char('c') if ctrl => self.should_quit = true,
+            KeyCode::Char('q') if ctrl => self.should_quit = true,
+            // Ctrl+C 现在是「复制」（Windows 习惯）；退出改用 Ctrl+Q。
+            // 以前 Ctrl+C 直接 `should_quit`，选区和剪贴板都无从谈起。
+            KeyCode::Char('a') if ctrl => self.select_all(),
+            KeyCode::Char('c') if ctrl => self.copy(false),
+            KeyCode::Char('x') if ctrl => self.copy(true),
+            KeyCode::Char('v') if ctrl => self.paste(),
             KeyCode::Char('d') if ctrl => self.toggle_favorite(),
             KeyCode::Char('w') if ctrl => self.delete_word(),
             KeyCode::Char('o') if ctrl => self.toggle_detail(),
@@ -389,6 +402,7 @@ impl App {
                 self.move_selection(c as isize - '0' as isize);
             }
             KeyCode::Char(c) if !ctrl && !alt => self.insert_char(c),
+            KeyCode::Backspace if ctrl => self.delete_word(),
             KeyCode::Backspace => self.backspace(),
             KeyCode::Delete => self.delete_forward(),
             KeyCode::Left => {
@@ -396,26 +410,29 @@ impl App {
                 if !ctrl && !alt && self.adjust_control(-1) {
                     return;
                 }
-                self.cursor = self.cursor.saturating_sub(1);
-                self.update_completion();
+                // Ctrl+← 跳词（路径里的 `\` `.` `:` 也算分隔，能逐段跳）
+                let to = if ctrl {
+                    self.word_boundary(self.cursor, false)
+                } else {
+                    self.cursor.saturating_sub(1)
+                };
+                self.move_cursor(to, shift);
             }
             KeyCode::Right => {
                 if !ctrl && !alt && self.adjust_control(1) {
                     return;
                 }
-                if self.cursor < self.char_len() {
-                    self.cursor += 1;
-                }
-                self.update_completion();
+                let to = if ctrl {
+                    self.word_boundary(self.cursor, true)
+                } else if self.cursor < self.char_len() {
+                    self.cursor + 1
+                } else {
+                    self.cursor
+                };
+                self.move_cursor(to, shift);
             }
-            KeyCode::Home => {
-                self.cursor = 0;
-                self.update_completion();
-            }
-            KeyCode::End => {
-                self.cursor = self.char_len();
-                self.update_completion();
-            }
+            KeyCode::Home => self.move_cursor(0, shift),
+            KeyCode::End => self.move_cursor(self.char_len(), shift),
             KeyCode::Up if ctrl => self.history_prev(),
             KeyCode::Down if ctrl => self.history_next(),
             KeyCode::Up => self.move_selection(-1),
@@ -836,6 +853,7 @@ impl App {
     fn set_home(&mut self) {
         self.input = self.home.clone();
         self.cursor = self.input.chars().count();
+        self.anchor = None;
         self.leave_history();
         self.refresh();
     }
@@ -844,6 +862,7 @@ impl App {
     fn set_input(&mut self, line: String) {
         self.input = line;
         self.cursor = self.input.chars().count();
+        self.anchor = None;
         self.refresh();
     }
 
@@ -905,6 +924,139 @@ impl App {
         self.input.chars().count()
     }
 
+    /// 当前选区（字符下标 `start..end`）。`None` = 没有选区
+    pub fn selection(&self) -> Option<(usize, usize)> {
+        let anchor = self.anchor?;
+        (anchor != self.cursor).then(|| (anchor.min(self.cursor), anchor.max(self.cursor)))
+    }
+
+    /// 选中的文本（给复制 / 切切用）
+    pub fn selected_text(&self) -> Option<String> {
+        let (start, end) = self.selection()?;
+        Some(self.input.chars().skip(start).take(end - start).collect())
+    }
+
+    /// Ctrl+A
+    fn select_all(&mut self) {
+        if self.input.is_empty() {
+            return;
+        }
+        self.anchor = Some(0);
+        self.cursor = self.char_len();
+        self.update_completion();
+    }
+
+    /// 移动光标。`extend` = Shift 按下：不动锚点、只改活动端（延伸选区）
+    fn move_cursor(&mut self, to: usize, extend: bool) {
+        if extend {
+            // 第一次按 Shift+← 时把当前位置记为锚点，之后不再变
+            if self.anchor.is_none() {
+                self.anchor = Some(self.cursor);
+            }
+        } else {
+            self.anchor = None;
+        }
+        self.cursor = to.min(self.char_len());
+        self.update_completion();
+    }
+
+    /// 词边界（Ctrl+←/→、Ctrl+Backspace 共用）。
+    ///
+    /// 分三类：空白 / 字母数字或下划线 / 其它符号。路径里的 `\` `/` `.` `:` `-`
+    /// 都归第三类，所以 `C:\Users\Agustin` 能逐段跳，而不是当一整块。
+    /// 中文 `is_alphanumeric()` 为真，所以一整串中文算一个词。
+    fn word_boundary(&self, from: usize, forward: bool) -> usize {
+        let chars: Vec<char> = self.input.chars().collect();
+        let len = chars.len();
+        let class = |c: char| -> u8 {
+            if c.is_whitespace() {
+                0
+            } else if c.is_alphanumeric() || c == '_' {
+                1
+            } else {
+                2
+            }
+        };
+
+        let mut i = from.min(len);
+        if forward {
+            // 先跳过紧跟着的空白，再跳到同类字符结尾
+            while i < len && class(chars[i]) == 0 {
+                i += 1;
+            }
+            if i < len {
+                let kind = class(chars[i]);
+                while i < len && class(chars[i]) == kind {
+                    i += 1;
+                }
+            }
+            i
+        } else {
+            while i > 0 && class(chars[i - 1]) == 0 {
+                i -= 1;
+            }
+            if i > 0 {
+                let kind = class(chars[i - 1]);
+                while i > 0 && class(chars[i - 1]) == kind {
+                    i -= 1;
+                }
+            }
+            i
+        }
+    }
+
+    /// 删掉选区，光标落在原选区起点。返回「有没有删掉东西」
+    fn delete_selection(&mut self) -> bool {
+        let Some((start, end)) = self.selection() else {
+            self.anchor = None;
+            return false;
+        };
+        let from = self.byte_index(start);
+        let to = self.byte_index(end);
+        self.input.replace_range(from..to, "");
+        self.cursor = start;
+        self.anchor = None;
+        self.leave_history();
+        true
+    }
+
+    /// Ctrl+C / Ctrl+X。没选区时整行当作选区（启动器里几乎总是想要整行）。
+    fn copy(&mut self, cut: bool) {
+        let text = self.selected_text().unwrap_or_else(|| self.input.clone());
+        if text.is_empty() {
+            self.status = Some((i18n::nothing_to_copy().to_string(), true));
+            return;
+        }
+        if !clipboard::set_text(&text) {
+            self.status = Some((i18n::clipboard_failed().to_string(), true));
+            return;
+        }
+        if cut && self.delete_selection() {
+            self.refresh();
+        }
+    }
+
+    /// Ctrl+V：粘到光标处（有选区就替换掉）。多行内容压成一行。
+    fn paste(&mut self) {
+        let Some(text) = clipboard::text() else {
+            self.status = Some((i18n::clipboard_empty().to_string(), true));
+            return;
+        };
+        if text.is_empty() {
+            return;
+        }
+        let single_line: String = text
+            .chars()
+            .map(|c| if c == '\r' || c == '\n' { ' ' } else { c })
+            .collect();
+        let (start, end) = self
+            .selection()
+            .unwrap_or((self.cursor, self.cursor));
+        self.anchor = None;
+        self.replace_chars(start, end, &single_line);
+        self.refresh();
+    }
+
     /// 字符下标 → 字节下标（中文参数也能安全编辑）
     fn byte_index(&self, char_idx: usize) -> usize {
         self.input
@@ -920,10 +1072,13 @@ impl App {
         let to = self.byte_index(end);
         self.input.replace_range(from..to, text);
         self.cursor = start + text.chars().count();
+        self.anchor = None;
         self.leave_history();
     }
 
     fn insert_char(&mut self, c: char) {
+        // 有选区就先删（和所有编辑器一致：打字/粘贴覆盖选区）
+        self.delete_selection();
         let at = self.byte_index(self.cursor);
         self.input.insert(at, c);
         self.cursor += 1;
@@ -932,6 +1087,10 @@ impl App {
     }
 
     fn backspace(&mut self) {
+        if self.delete_selection() {
+            self.refresh();
+            return;
+        }
         if self.cursor == 0 {
             return;
         }
@@ -944,6 +1103,10 @@ impl App {
     }
 
     fn delete_forward(&mut self) {
+        if self.delete_selection() {
+            self.refresh();
+            return;
+        }
         if self.cursor >= self.char_len() {
             return;
         }
@@ -954,15 +1117,15 @@ impl App {
         self.refresh();
     }
 
-    /// Ctrl+W：删掉光标前的一个词
+    /// Ctrl+W / Ctrl+Backspace：删掉光标前的一个词（词边界和 Ctrl+← 一致）
     fn delete_word(&mut self) {
-        let chars: Vec<char> = self.input.chars().collect();
-        let mut i = self.cursor;
-        while i > 0 && chars[i - 1].is_whitespace() {
-            i -= 1;
+        if self.delete_selection() {
+            self.refresh();
+            return;
         }
-        while i > 0 && !chars[i - 1].is_whitespace() {
-            i -= 1;
+        let i = self.word_boundary(self.cursor, false);
+        if i == self.cursor {
+            return;
         }
         let from = self.byte_index(i);
         let to = self.byte_index(self.cursor);
@@ -1430,5 +1593,105 @@ mod tests {
 
         assert!(!app.should_hide, "没定位成功不该关面板");
         assert!(app.status.as_ref().is_some_and(|(_, error)| *error));
+    }
+
+    // ---------------- 输入框：选区 / 词跳 / 剪贴板 ----------------
+
+    /// Shift+← 建选区，再 Shift+→ 收缩；回到锚点选区就没了
+    #[test]
+    fn shift_arrows_extend_and_shrink_selection() {
+        let mut app = app();
+        app.set_input("hello".to_string());
+        app.on_key(KeyEvent::new(KeyCode::Left, KeyModifiers::SHIFT));
+        assert_eq!(app.selection(), Some((4, 5)));
+        app.on_key(KeyEvent::new(KeyCode::Left, KeyModifiers::SHIFT));
+        assert_eq!(app.selection(), Some((3, 5)));
+        app.on_key(KeyEvent::new(KeyCode::Right, KeyModifiers::SHIFT));
+        assert_eq!(app.selection(), Some((4, 5)));
+        app.on_key(KeyEvent::new(KeyCode::Right, KeyModifiers::SHIFT));
+        assert_eq!(app.selection(), None, "回到锚点应该没有选区");
+    }
+
+    /// 不带 Shift 的方向键：撤销选区
+    #[test]
+    fn plain_arrow_drops_the_selection() {
+        let mut app = app();
+        app.set_input("hello".to_string());
+        app.on_key(KeyEvent::new(KeyCode::Left, KeyModifiers::SHIFT));
+        app.on_key(KeyEvent::new(KeyCode::Left, KeyModifiers::SHIFT));
+        assert!(app.selection().is_some());
+        app.on_key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE));
+        assert_eq!(app.selection(), None);
+        assert_eq!(app.cursor, 2);
+    }
+
+    /// Ctrl+← 按段跳路径：`\` `.` `:` 也算分隔，不会把一整条路径当一块
+    #[test]
+    fn ctrl_left_jumps_path_segments() {
+        let mut app = app();
+        app.set_input(r":go C:\Users\Agustin".to_string());
+        assert_eq!(app.cursor, 20);
+        let mut stops = Vec::new();
+        for _ in 0..3 {
+            app.on_key(KeyEvent::new(KeyCode::Left, KeyModifiers::CONTROL));
+            stops.push(app.cursor);
+        }
+        // 20 -> Agustin 开头(13) -> 反斜杠前(12) -> Users 开头(7)
+        assert_eq!(stops, vec![13, 12, 7]);
+    }
+
+    /// 有选区时输入字符 = 替换选区（和任何编辑器一致）
+    #[test]
+    fn typing_replaces_the_selection() {
+        let mut app = app();
+        app.set_input("hello".to_string());
+        app.on_key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE));
+        app.on_key(KeyEvent::new(KeyCode::Right, KeyModifiers::SHIFT));
+        app.on_key(KeyEvent::new(KeyCode::Right, KeyModifiers::SHIFT));
+        assert_eq!(app.selected_text().as_deref(), Some("he"));
+
+        app.insert_char('X');
+        assert_eq!(app.input, "Xllo");
+        assert_eq!(app.cursor, 1);
+        assert_eq!(app.selection(), None);
+    }
+
+    /// Ctrl+A 全选，Backspace 一次清空
+    #[test]
+    fn select_all_then_backspace_clears_input() {
+        let mut app = app();
+        app.set_input("abc".to_string());
+        app.on_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL));
+        assert_eq!(app.selection(), Some((0, 3)));
+
+        app.on_key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE));
+        assert_eq!(app.input, "");
+        assert_eq!(app.cursor, 0);
+    }
+
+    /// Ctrl+C 不再是退出（不然没法复制）；退出改用 Ctrl+Q。
+    ///
+    /// 输入为空时不会真去写系统剪贴板，测试没有副作用。
+    #[test]
+    fn ctrl_c_copies_and_ctrl_q_quits() {
+        let mut app = app();
+        app.set_input(String::new());
+        app.on_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
+        assert!(!app.should_quit, "Ctrl+C 已经改成复制了");
+        assert!(app.status.as_ref().is_some_and(|(_, error)| *error));
+
+        app.on_key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::CONTROL));
+        assert!(app.should_quit);
+    }
+
+    /// 中文串是一个词：Ctrl+← 不该把它拆成单字
+    #[test]
+    fn ctrl_left_treats_chinese_run_as_one_word() {
+        let mut app = app();
+        app.set_input(":go 报告 第一期".to_string());
+        app.on_key(KeyEvent::new(KeyCode::Left, KeyModifiers::CONTROL));
+        assert_eq!(app.cursor, 7, "「第一期」开头在 7");
+        app.on_key(KeyEvent::new(KeyCode::Left, KeyModifiers::CONTROL));
+        assert_eq!(app.cursor, 4, "「报告」开头在 4");
     }
 }

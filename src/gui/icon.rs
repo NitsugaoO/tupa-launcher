@@ -75,7 +75,11 @@ pub fn draw(background: (u8, u8, u8), accent: (u8, u8, u8)) -> HICON {
 }
 
 /// 释放 [`draw`] 生成的图标
-pub fn destroy_icon(icon: HICON) {
+///
+/// # Safety
+/// `icon` 必须是 [`draw`] 返回、还没被释放的句柄（`HICON` 是裸指针，clippy 的
+/// `not_unsafe_ptr_arg_deref` 要求这种 `pub fn` 标 `unsafe`）。
+pub unsafe fn destroy_icon(icon: HICON) {
     if icon.is_null() {
         return;
     }

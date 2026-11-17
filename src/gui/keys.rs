@@ -50,7 +50,13 @@ pub fn to_key(keystroke: &Keystroke) -> Option<KeyEvent> {
             if chars.next().is_some() {
                 return None; // 组合字符（emoji 等）交给 IME 路径处理
             }
-            KeyCode::Char(ch)
+            // 中文输入法下 Shift+/ 打出的是全角「？」，归一成 ASCII，
+            // 否则 `handle_key` 里的帮助开关（只认 `?`）会漏掉它。
+            if ch == '？' {
+                KeyCode::Char('?')
+            } else {
+                KeyCode::Char(ch)
+            }
         }
     };
 

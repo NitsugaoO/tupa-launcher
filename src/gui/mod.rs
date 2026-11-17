@@ -26,7 +26,8 @@ use anyhow::Result;
 use gpui::{
     AnyElement, AppContext as _, Bounds, Context, FocusHandle, KeyDownEvent, Render, Rgba,
     ScrollDelta, ScrollWheelEvent, TitlebarOptions, WeakEntity, Window,
-    WindowBackgroundAppearance, WindowBounds, WindowKind, WindowOptions, div, prelude::*, px, size,
+    WindowBackgroundAppearance, WindowBounds, WindowKind, WindowOptions, div, prelude::*, px,
+    relative, size,
 };
 
 use crate::app::App;
@@ -138,6 +139,13 @@ struct Panel {
     last_selected: Option<usize>,
     /// `?` 打开的快捷键帮助浮层
     help: bool,
+    /// 帮助浮层切隐的瞬间屏蔽一下文本输入。
+    ///
+    /// `?` 是 Shift+/ 打出来的：`WM_KEYDOWN` 先到 `handle_key`（打开帮助），
+    /// 紧接着同一按键的 `WM_CHAR` 会走 `EntityInputHandler::replace_text_in_range`
+    /// 把 `?` 插进输入框。设一个短窗口（60ms）把这个字符吞掉——
+    /// 既盖住「`?` 打开帮助」，也盖住「帮助开着时按任意键关闭」。
+    text_block: Option<std::time::Instant>,
     /// 光标是否显示（500ms 翻转一次，模拟闪烁）
     cursor_on: bool,
     /// 下一次翻转光标的时间点（移动光标后重置，让它先亮着）
@@ -240,11 +248,17 @@ impl Panel {
             caret_top: (style::INPUT_HEIGHT - style::INPUT_SIZE) / 2.0,
             last_selected: None,
             help: false,
+            text_block: None,
             cursor_on: true,
             blink_at: std::time::Instant::now() + Duration::from_millis(500),
             preedit: None,
             hint_open: false,
-            row_metrics: RowMetrics { title: 0.0, note: 0.0 },
+            row_metrics: RowMetrics {
+                title: 0.0,
+                note: 0.0,
+                state: 0.0,
+                detail: 0.0,
+            },
             scale: 1.0,
             opacity,
             scroll_started: std::time::Instant::now(),
@@ -270,12 +284,14 @@ impl Panel {
             if !question {
                 self.help = false;
             }
+            self.text_block = Some(std::time::Instant::now() + Duration::from_millis(50));
             window.focus(&self.focus);
             cx.notify();
             return;
         }
         if question {
             self.help = true;
+            self.text_block = Some(std::time::Instant::now() + Duration::from_millis(50));
             window.focus(&self.focus);
             cx.notify();
             return;
@@ -356,6 +372,14 @@ impl Panel {
         cx.notify();
     }
 
+    /// 帮助浮层期间（以及刚切隐的那一下）不要往输入框插字
+    fn text_blocked(&self) -> bool {
+        self.help
+            || self
+                .text_block
+                .is_some_and(|until| std::time::Instant::now() < until)
+    }
+
     /// 双击列表项 = 按回车（执行当前项）
     fn run_selected(&mut self, cx: &mut Context<Self>) {
         self.app.on_key(crossterm::event::KeyEvent::new(
@@ -382,8 +406,7 @@ impl Panel {
             .nth(self.app.cursor)
             .map(|(index, _)| index)
             .unwrap_or(self.app.input.len());
-        let (before, after) = self.app.input.split_at(at);
-
+        let (before, _after) = self.app.input.split_at(at);
         // 光标的目标位置：提示符 + 已输入 + 预编辑（全部按真实字形宽度量，不猜格数）
         let preedit = self.preedit.as_ref().map(|(_, text)| text.clone());
         let prompt_width = text_width(window, style::PROMPT, style::INPUT_SIZE);
@@ -450,19 +473,58 @@ impl Panel {
                 .left(px(0.))
                 .w(px(1.))
                 .h(px(1.)),
-            )
-            .child(
-                div()
-                    .text_size(px(style::INPUT_SIZE))
-                    .text_color(p.accent)
-                    .child(style::PROMPT),
-            )
-            .child(
-                div()
+            );
+
+        // 提示符
+        row = row.child(
+            div()
+                .text_size(px(style::INPUT_SIZE))
+                .text_color(p.accent)
+                .child(style::PROMPT),
+        );
+
+        // 输入行按「选区边界」切成假设干段：普通段不着色，选中段给一层 `overlay` 底色。
+        // 光标可能落在选区中间（Shift+← 往左就一直如此），所以前后两半都要按 cursor 再切一次。
+        //
+        // 光标之前：普通 → 选中 → 普通
+        {
+            let chars: Vec<char> = self.app.input.chars().collect();
+            let n = chars.len();
+            let c = self.app.cursor.min(n);
+            let (sel_start, sel_end) = self.app.selection().unwrap_or((c, c));
+            let cut = |a: usize, b: usize| -> String {
+                let a = a.min(n);
+                let b = b.min(n).max(a);
+                chars[a..b].iter().collect()
+            };
+            let mut parts: Vec<(String, bool)> = Vec::new();
+
+            let before_sel = sel_start.min(c);
+            if before_sel > 0 {
+                parts.push((cut(0, before_sel), false));
+            }
+            let before_sel_end = sel_end.min(c);
+            if before_sel_end > before_sel {
+                parts.push((cut(before_sel, before_sel_end), true));
+            }
+            if c > before_sel_end {
+                parts.push((cut(before_sel_end, c), false));
+            }
+
+            for (text, selected) in parts {
+                if text.is_empty() {
+                    continue;
+                }
+                let mut segment = div()
                     .text_size(px(style::INPUT_SIZE))
                     .text_color(p.fg)
-                    .child(before.to_owned()),
-            );
+                    .child(text);
+                if selected {
+                    segment = segment.bg(p.overlay);
+                }
+                row = row.child(segment);
+            }
+        }
 
         // 输入法预编辑（拼音还没上屏）：画在光标处、带底色
         if let Some(text) = preedit {
@@ -477,12 +539,46 @@ impl Panel {
             );
         }
 
-        row.child(
-            div()
-                .text_size(px(style::INPUT_SIZE))
-                .text_color(p.fg)
-                .child(after.to_owned()),
-        )
+        // 光标之后：普通 → 选中 → 普通（同样的切法，起点是 `cursor`）
+        {
+            let chars: Vec<char> = self.app.input.chars().collect();
+            let n = chars.len();
+            let c = self.app.cursor.min(n);
+            let (sel_start, sel_end) = self.app.selection().unwrap_or((c, c));
+            let cut = |a: usize, b: usize| -> String {
+                let a = a.min(n);
+                let b = b.min(n).max(a);
+                chars[a..b].iter().collect()
+            };
+            let mut parts: Vec<(String, bool)> = Vec::new();
+
+            let after_sel = sel_start.max(c);
+            if after_sel > c {
+                parts.push((cut(c, after_sel), false));
+            }
+            let after_sel_end = sel_end.max(c);
+            if after_sel_end > after_sel {
+                parts.push((cut(after_sel, after_sel_end), true));
+            }
+            if n > after_sel_end {
+                parts.push((cut(after_sel_end, n), false));
+            }
+
+            for (text, selected) in parts {
+                if text.is_empty() {
+                    continue;
+                }
+                let mut segment = div()
+                    .text_size(px(style::INPUT_SIZE))
+                    .text_color(p.fg)
+                    .child(text);
+                if selected {
+                    segment = segment.bg(p.overlay);
+                }
+                row = row.child(segment);
+            }
+        }
+        row
         // 光标：绝对定位（位置由动画插值驱动，所以不能占布局）。
         // 高度与位置按字体的 ascent/descent 算 —— GPUI 的文本在容器里是 `items_center`，
         // 字形上边界就是 (行高 - (ascent+descent)) / 2，和这里完全一致。
@@ -684,18 +780,25 @@ impl Panel {
         });
     }
 
+    /// detail 模式每行「除表头外还有几行」：明细列数 - 1，再加上可能的控件状态行。
+    /// `row_height` 与 `desired_height` 必须用同一个值，否则窗口高度和实际行高对不上。
+    fn detail_extra_rows(&self) -> f32 {
+        let max_columns = self
+            .app
+            .items
+            .iter()
+            .map(|item| item.columns.len())
+            .max()
+            .unwrap_or(1)
+            .max(1);
+        let state_rows = usize::from(self.app.items.iter().any(|item| item.control.is_control()));
+        (max_columns - 1 + state_rows) as f32
+    }
+
     /// 当前列表的行高（含行间距）。普通模式固定；detail 按最大列数算。
     fn row_height(&self) -> f32 {
         if self.app.detail {
-            let max_columns = self
-                .app
-                .items
-                .iter()
-                .map(|item| item.columns.len())
-                .max()
-                .unwrap_or(1)
-                .max(1);
-            let extra = (max_columns - 1) as f32;
+            let extra = self.detail_extra_rows();
             (style::ROW_HEIGHT - 6.0
                 + extra * style::DETAIL_LINE
                 + style::DETAIL_PAD_Y * 2.0
@@ -718,10 +821,26 @@ impl Panel {
         let Some(item) = self.app.items.get(index) else {
             return false;
         };
+
+        let row_advance = style::ROW_SIZE * 0.6;
+        let note_advance = style::NOTE_SIZE * 0.6;
+
+        // 标题列
         let title = item.columns.first().map(String::as_str).unwrap_or("");
-        let advance = style::ROW_SIZE * 0.6;
-        let total = display_width(title) as f32 * advance;
-        total > self.row_metrics.title
+        if display_width(title) as f32 * row_advance > self.row_metrics.title {
+            return true;
+        }
+
+        // 其余列也要算：之前只看标题列，所以「标题不超宽、附注 / 明细超宽」时
+        // 压根不会推帧，滚动动画就停在第一帧（看着像「只播一次」）。
+        if self.app.detail {
+            item.columns.iter().skip(1).any(|value| {
+                display_width(value) as f32 * note_advance > self.row_metrics.detail
+            })
+        } else {
+            let note = note_text(item);
+            display_width(&note) as f32 * note_advance > self.row_metrics.note
+        }
     }
 
     /// 是否按「呼出只有输入框」的紧凑形态显示。
@@ -749,17 +868,9 @@ impl Panel {
         let rows = visible.max(1.0);
 
         if self.app.detail {
-            // detail 模式下每条高度随列数变化：头行 + (列数-1) 行明细 + 上下内边距 + 行间距。
+            // detail 模式下每条高度随列数变化：头行 + 明细行 + 上下内边距 + 行间距。
             // 之前按「固定两行」算，列数多的条目会被裁掉底部（4 条都铺不满就是这个原因）。
-            let max_columns = self
-                .app
-                .items
-                .iter()
-                .map(|item| item.columns.len())
-                .max()
-                .unwrap_or(1)
-                .max(1);
-            let extra = (max_columns - 1) as f32;
+            let extra = self.detail_extra_rows();
             // 头部实际高度是 `ROW_HEIGHT - 6`（和渲染里 accent bar 一致），不是整行 28
             let per_row = style::ROW_HEIGHT - 6.0
                 + extra * style::DETAIL_LINE
@@ -793,7 +904,13 @@ impl Panel {
 
         // 列宽按真实窗口宽度算（等宽字体 + truncate 由 GPUI 按像素裁）
         let total = f32::from(window.bounds().size.width) - style::PADDING * 2.0;
-        let note_width = (total * 0.32).clamp(80.0, 240.0);
+        // 控件行（`:set` / 开关）多一列状态。TUI 那边是 `ui.rs` 按 `Control` 追加的，
+        // GUI 之前完全没画，所以看不到「开 / 关」。只有列表里真有控件行时才占位。
+        let state_width = if self.app.items.iter().any(|item| item.control.is_control()) {
+            style::STATE_WIDTH
+        } else {
+            0.0
+        };
         let number = if self.app.select_mode {
             style::NUMBER_WIDTH
         } else {
@@ -805,9 +922,15 @@ impl Panel {
             + number
             + style::STAR_WIDTH
             + style::BADGE_WIDTH;
+        // 标题至少留 120px，剩下的才给附注列
+        let note_width = (total * 0.32)
+            .clamp(80.0, 240.0)
+            .min((total - fixed - state_width - 120.0).max(60.0));
         let metrics = RowMetrics {
-            title: (total - fixed - note_width).max(80.0),
+            title: (total - fixed - note_width - state_width).max(80.0),
             note: note_width,
+            state: state_width,
+            detail: (total - detail_indent()).max(60.0),
         };
         self.row_metrics = metrics;
 
@@ -906,15 +1029,48 @@ impl Panel {
             });
         }
 
-        div()
+        let mut area = div()
             .id("list")
             .relative()
             .flex_1()
             .w_full()
             .overflow_hidden()
             .on_scroll_wheel(cx.listener(Self::on_scroll))
-            .child(inner)
-            .into_any_element()
+            .child(inner);
+
+        // 滚动条（只做指示，不能拖）：轨道铺满列表区右边，滑块高度 = 可视/内容。
+        //
+        // 用百分比（`relative`）而不是像素：列表区是 `flex_1`，高由窗口决定，
+        // 而窗口高是固定的（主屏 55%），与「最多 12 行」的 `scroll_viewport` 不是一回事。
+        // 算像素的话滑块只占顶部一小段，看着像没画满。
+        // 轨道 = 上方空白 + 滑块，两者比例相加 ≤ 1，滚到底时正好贴底。
+        let content_h = rows.len() as f32 * row_h;
+        if content_h > self.scroll_viewport + 0.5 {
+            let thumb = (self.scroll_viewport / content_h).clamp(style::SCROLLBAR_MIN_RATIO, 1.0);
+            let fraction = if self.scroll_max > 0.0 {
+                (self.scroll_y / self.scroll_max).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
+            area = area.child(
+                div()
+                    .absolute()
+                    .right(px(1.))
+                    .top(px(0.))
+                    .bottom(px(0.))
+                    .w(px(style::SCROLLBAR_WIDTH))
+                    .child(div().h(relative(fraction * (1.0 - thumb))).w_full())
+                    .child(
+                        div()
+                            .h(relative(thumb))
+                            .w_full()
+                            .rounded(px(style::SCROLLBAR_WIDTH / 2.0))
+                            .bg(style::with_alpha(p.fg, style::SCROLLBAR_ALPHA)),
+                    ),
+            );
+        }
+
+        area.into_any_element()
     }
 
     /// 把当前结果快照成「一行一个结构体」，供 `uniform_list` 的闭包使用
@@ -939,6 +1095,12 @@ impl Panel {
                 favorite: self.app.is_favorite(item),
                 unavailable: matches!(item.control, crate::providers::Control::Unavailable),
                 number: (select_mode && index < 9).then_some(index + 1),
+                state: item.control.is_control().then(|| {
+                    (
+                        item.control.label(),
+                        control_color(&item.control, &self.palette),
+                    )
+                }),
                 // 只有选中行会左右滚动（跟 TUI 一样），其余行裁掉就裁掉。
                 // 用像素级 ping-pong + 时间基准，60fps 下是连续移动，不再是「一格一格跳」。
                 shift: if selected == Some(index) {
@@ -954,6 +1116,22 @@ impl Panel {
                     ping_pong(overflow, elapsed)
                 } else {
                     0.0
+                },
+                // detail 模式的每条明细列都单独算：超宽了就滚，没超就不动。
+                // 之前这里只有「第一列 + 附注列」两路，detail 下除表头以外的列
+                // 全走 `truncate()` 硬切，选中也看不到后半段。
+                detail_shifts: if selected == Some(index) && self.app.detail {
+                    item.columns
+                        .iter()
+                        .skip(1)
+                        .map(|value| {
+                            let overflow =
+                                display_width(value) as f32 * note_advance - metrics.detail;
+                            ping_pong(overflow, elapsed)
+                        })
+                        .collect()
+                } else {
+                    Vec::new()
                 },
             })
             .collect()
@@ -1052,6 +1230,11 @@ struct RowSnapshot {
     shift: f32,
     /// 附注列同理
     note_shift: f32,
+    /// detail 模式下每条明细列各自的左移量（与 `columns[1..]` 一一对应）
+    detail_shifts: Vec<f32>,
+    /// 控件行的状态（文本 + 颜色）：`开` / `关` / 选项 / 数值 / 动作说明。
+    /// 普通条目为 `None`（不占列宽）。
+    state: Option<(String, Rgba)>,
 }
 
 /// 行内固定列的宽度（`number` 只在选择模式下占位）
@@ -1059,6 +1242,10 @@ struct RowSnapshot {
 struct RowMetrics {
     title: f32,
     note: f32,
+    /// 状态列宽度（列表里没有控件行时为 0）
+    state: f32,
+    /// detail 模式下明细列可用的宽度（行宽减去递进缩进）
+    detail: f32,
 }
 
 /// 画一行结果卡片（普通模式）。
@@ -1164,6 +1351,23 @@ fn render_row(
                         .child(note),
                 ),
         )
+        .child(
+            // 状态列（`:set` / 开关）：TUI 里由 `ui.rs` 按 `Control` 追加，
+            // GUI 这边同样单独占一列（之前根本没画，所以只剩「标题 + 附注」两列）。
+            div()
+                .w(px(metrics.state))
+                .flex_shrink_0()
+                .overflow_hidden()
+                .whitespace_nowrap()
+                .text_size(px(style::NOTE_SIZE))
+                .text_color(row.state.as_ref().map_or(p.dim, |(_, color)| *color))
+                .child(
+                    row.state
+                        .as_ref()
+                        .map(|(label, _)| label.clone())
+                        .unwrap_or_default(),
+                ),
+        )
         .on_click({
             let panel = panel.clone();
             let index = row.index;
@@ -1193,6 +1397,11 @@ fn render_row(
         .into_any_element()
 }
 
+/// detail 模式明细列的左边递进缩进（对齐星标 + 徽标右侧）
+fn detail_indent() -> f32 {
+    style::ACCENT_BAR + 8.0 * 2.0 + style::STAR_WIDTH + style::BADGE_WIDTH + 8.0
+}
+
 /// detail 模式（`Ctrl+Tab`）：第一列作标题，其余列竖排
 fn render_detail_row(
     row: &RowSnapshot,
@@ -1203,11 +1412,7 @@ fn render_detail_row(
 ) -> AnyElement {
     let head = row.columns.first().cloned().unwrap_or_default();
     let fg = if row.unavailable { p.faint } else { p.fg };
-    let indent = style::ACCENT_BAR
-        + 8.0 * 2.0
-        + style::STAR_WIDTH
-        + style::BADGE_WIDTH
-        + 8.0;
+    let indent = detail_indent();
 
     let block = div()
         .id(("detail", row.index))
@@ -1256,26 +1461,54 @@ fn render_detail_row(
                     .child(row.badge),
             )
             .child(
+                // 表头：和普通模式一样，选中行超宽时左右滚动
                 div()
                     .w(px(metrics.title))
                     .flex_shrink_0()
-                    .truncate()
-                    .text_size(px(style::ROW_SIZE))
-                    .text_color(fg)
-                    .child(head),
+                    .overflow_hidden()
+                    .whitespace_nowrap()
+                    .child(
+                        div()
+                            .ml(px(-row.shift))
+                            .whitespace_nowrap()
+                            .text_size(px(style::ROW_SIZE))
+                            .text_color(fg)
+                            .child(head),
+                    ),
             ),
     );
 
-    for value in row.columns.iter().skip(1) {
+    for (slot, value) in row.columns.iter().skip(1).enumerate() {
+        // 每条明细列自己滚（`detail_shifts` 与这里同序）
+        let shift = row.detail_shifts.get(slot).copied().unwrap_or(0.0);
         block = block.child(
             div()
                 .pl(px(indent))
                 .w_full()
-                .truncate()
                 .h(px(style::DETAIL_LINE))
+                .overflow_hidden()
+                .whitespace_nowrap()
                 .text_size(px(style::NOTE_SIZE))
                 .text_color(p.dim)
-                .child(value.clone()),
+                .child(
+                    div()
+                        .ml(px(-shift))
+                        .whitespace_nowrap()
+                        .child(value.clone()),
+                ),
+        );
+    }
+
+    if let Some((label, color)) = &row.state {
+        // 状态（开 / 关 / 数值 / 选项）在 detail 下当额外一行
+        block = block.child(
+            div()
+                .pl(px(indent))
+                .w_full()
+                .h(px(style::DETAIL_LINE))
+                .text_size(px(style::NOTE_SIZE))
+                .text_color(*color)
+                .child(label.clone()),
         );
     }
 
@@ -1449,6 +1682,19 @@ fn ping_pong(overflow: f32, elapsed: f32) -> f32 {
 }
 
 /// 除了第一列之外的所有列，用 " · " 拼起来
+/// 状态列的颜色（和 TUI 的 `ui::state_style` 一致：开=绿、关=灰、选项/数值=强调色）
+fn control_color(control: &crate::providers::Control, p: &Palette) -> Rgba {
+    use crate::providers::Control;
+    match control {
+        Control::Toggle { value: true } => p.good,
+        Control::Toggle { value: false } => p.dim,
+        Control::Choice { .. } | Control::Number { .. } => p.accent,
+        Control::Action { .. } => p.muted,
+        Control::Unavailable => p.faint,
+        Control::Run => p.dim,
+    }
+}
+
 fn note_text(item: &crate::providers::Item) -> String {
     item.columns
         .iter()
