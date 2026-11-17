@@ -100,7 +100,9 @@ Control::{Run, Toggle{value}, Choice{options,index}, Number{value,min,max,step,s
 
 1. `providers/mod.rs` 的 `Action` 加变体
 2. `exec.rs::run` 加分支
-3. `app.rs::reveal_selected` 加分支（不支持的写 `=> return`）
+3. `app.rs::reveal_selected` 加分支（**不支持的走 `_` 分支给 `i18n::cannot_reveal()` 提示**，
+   不要静默 `return` —— 按下去没反应会被当成 bug）；支持定位的动作成功后由
+   `App::finish_open` 统一收尾（记历史 + 隐藏面板，和回车一致）
 4. `providers/mod.rs::Item::detail_line` 加分支（详情模式显示什么）
 
 ### 加一句用户可见文案

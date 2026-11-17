@@ -449,6 +449,13 @@ pub fn not_found(what: &str) -> String {
     s(|| format!("找不到 {what}"), || format!("Not found: {what}"))
 }
 
+pub fn cannot_reveal() -> &'static str {
+    t(
+        "该条目没有可以定位的路径",
+        "This item has no path to reveal",
+    )
+}
+
 pub fn favorited(title: &str) -> String {
     s(
         || format!("已收藏 {title}"),

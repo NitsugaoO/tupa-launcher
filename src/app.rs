@@ -478,18 +478,24 @@ impl App {
         }
 
         match exec::run(&item.action) {
-            // 成功就隐藏面板，把屏幕让给刚打开的程序（进程留着，下次唤起更快）
-            Ok(_) => {
-                if self.at_home() {
-                    // 开屏（输入框空着）没有输入行可当历史键，按条目本身累加次数
-                    self.bump_item(&item);
-                } else {
-                    self.remember_input(Some(item));
-                }
-                self.should_hide = true;
-            }
+            Ok(_) => self.finish_open(item),
             Err(e) => self.status = Some((format!("{e:#}"), true)),
         }
+    }
+
+    /// 执行（或定位）成功后的统一收尾：记历史 + 隐藏面板。
+    ///
+    /// 回车和 `Ctrl+E` 共用 —— 两个键只在「做什么」上不同，收尾不该有差别：
+    /// 少了隐藏，提示会一直挂在面板里；少了记账，这一次就永远进不了历史。
+    fn finish_open(&mut self, item: Item) {
+        if self.at_home() {
+            // 开屏（输入框空着）没有输入行可当历史键，按条目本身累加次数
+            self.bump_item(&item);
+        } else {
+            self.remember_input(Some(item));
+        }
+        // 成功就隐藏面板，把屏幕让给刚打开的程序（进程留着，下次唤起更快）
+        self.should_hide = true;
     }
 
     /// 回车 / 空格：把控件的新值写出去（不隐藏面板）。
@@ -758,6 +764,12 @@ impl App {
         }
         let line = history_line(&typed, &self.args, item.as_ref(), self.prefix, &self.flags);
         history::push(&mut self.history, &line, item);
+        self.save_history();
+    }
+
+    /// 把历史落盘。单测里不写 —— 真实文件在配置目录，别让测试覆盖用户的历史。
+    fn save_history(&self) {
+        #[cfg(not(test))]
         if let Err(e) = history::save(&self.history) {
             eprintln!("保存历史失败：{e:#}");
         }
@@ -771,9 +783,7 @@ impl App {
         if !history::record_open(&mut self.history, item, self.prefix) {
             return;
         }
-        if let Err(e) = history::save(&self.history) {
-            eprintln!("保存历史失败：{e:#}");
-        }
+        self.save_history();
     }
 
     /// Ctrl+↑：上一条（更早的）输入
@@ -852,23 +862,17 @@ impl App {
                     return;
                 }
             },
-            Action::OpenUrl(_)
-            | Action::LaunchInTerminal { .. }
-            | Action::RunCommand { .. }
-            | Action::OpenInEditor { .. }
-            | Action::CreateBlogPost { .. }
-            | Action::BlogAdmin { .. }
-            | Action::BlogPreview { .. }
-            | Action::ServeStop { .. }
-            | Action::ServeStopAll { .. }
-            | Action::SetControl { .. }
-            | Action::CleanSession { .. }
-            | Action::CleanBatch { .. }
-            | Action::FillInput(_) => return,
+            // 其余动作没有可以定位的路径（网址 / 命令 / 控件 / 清理…）。
+            // 以前这里是静默 return，按下去毫无反应，看起来像坏了
+            _ => {
+                self.status = Some((i18n::cannot_reveal().to_string(), true));
+                return;
+            }
         };
 
         match exec::run(&Action::Reveal(target)) {
-            Ok(msg) => self.status = Some((msg, false)),
+            // 定位成功后和回车一样收尾：焦点已经交给资源管理器了，面板留着只是挡屏幕
+            Ok(_) => self.finish_open(item),
             Err(e) => self.status = Some((format!("{e:#}"), true)),
         }
     }
@@ -1376,5 +1380,76 @@ mod tests {
             },
         );
         assert_eq!(history_line("@blog", "", Some(&stop), '@', &[]), "@blog");
+    }
+
+    /// 定位成功后的收尾要和回车一致：记历史 + 隐藏。
+    ///
+    /// 曾经只留一句 status、面板不关（焦点其实已经交给资源管理器了），
+    /// 历史也不记 —— `Ctrl+E` 定位过的东西永远进不了 `Ctrl+↑`。
+    #[test]
+    fn ctrl_e_finishes_like_enter() {
+        use crate::providers::{Action, Kind};
+
+        let mut app = app();
+        // 非开屏：历史记的是输入行本身（和回车一致）
+        app.input = "@ev a.pdf".to_string();
+        app.args = "a.pdf".to_string();
+        let item = Item::new(
+            Kind::File,
+            vec!["a.pdf".to_string(), r"D:\Archive".to_string()],
+            Action::Open(r"D:\Archive\a.pdf".into()),
+        );
+
+        app.finish_open(item);
+
+        assert!(app.should_hide, "定位后要把屏幕让给资源管理器");
+        assert_eq!(app.history[0].line, "@ev a.pdf");
+    }
+
+    /// 开屏（输入框空着）里按 `Ctrl+E`：没有输入行，按条目本身累加次数
+    #[test]
+    fn ctrl_e_at_home_counts_as_one_use() {
+        use crate::providers::{Action, Kind};
+
+        let item = Item::new(
+            Kind::File,
+            vec!["a.pdf".to_string(), r"D:\Archive".to_string()],
+            Action::Open(r"D:\Archive\a.pdf".into()),
+        );
+
+        let mut app = app();
+        assert!(app.at_home());
+        app.history = vec![history::Entry {
+            line: r"@go D:\Archive\a.pdf".to_string(),
+            item: Some(item.clone()),
+            hits: 1,
+            last_used: 0,
+        }];
+
+        app.finish_open(item);
+
+        assert!(app.should_hide);
+        assert_eq!(app.history.len(), 1, "应该累加，不是另记一条");
+        assert_eq!(app.history[0].hits, 2);
+    }
+
+    /// 没有路径可定位的条目（网址 / 命令 / 控件）：给提示，不要静默无反应
+    #[test]
+    fn ctrl_e_on_a_row_without_a_path_says_so() {
+        use crate::providers::{Action, Kind};
+
+        let mut app = app();
+        app.items = vec![Item::new(
+            Kind::Web,
+            vec!["https://example.com".to_string(), "example".to_string()],
+            Action::OpenUrl("https://example.com".to_string()),
+        )];
+        app.loaded = true;
+        app.list_state.select(Some(0));
+
+        app.on_key(KeyEvent::new(KeyCode::Char('e'), KeyModifiers::CONTROL));
+
+        assert!(!app.should_hide, "没定位成功不该关面板");
+        assert!(app.status.as_ref().is_some_and(|(_, error)| *error));
     }
 }
