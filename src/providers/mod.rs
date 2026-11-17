@@ -288,6 +288,25 @@ pub struct ServeTarget {
     pub name: String,
 }
 
+impl Action {
+    /// `Ctrl+E`（定位到资源管理器）要打开的目标路径。
+    ///
+    /// 哪些动作有可定位路径是 [`Action`] 自己的知识，收拢在这里：
+    /// 新增变体时在这一处处理（`Err` 里给用户可见文案），
+    /// 调用方（`app::reveal_selected`）不再逐个枚举。
+    pub(crate) fn reveal_target(&self) -> Result<PathBuf, String> {
+        match self {
+            Action::Open(path) | Action::Reveal(path) => Ok(path.clone()),
+            // app 条目：解析出真实的 exe 位置（`.lnk` 会跟到目标）
+            Action::Launch { command, .. } => crate::util::resolve_executable(command)
+                .ok_or_else(|| crate::i18n::not_found(command)),
+            // 其余动作没有可以定位的路径（网址 / 命令 / 控件 / 清理…）。
+            // 以前按下去是静默无反应，看起来像坏了；现在调用方会显出红提示
+            _ => Err(crate::i18n::cannot_reveal().to_string()),
+        }
+    }
+}
+
 /// 批量清理里的一项
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CleanOp {
