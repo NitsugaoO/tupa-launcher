@@ -1,6 +1,6 @@
 # tupa-launcher 状态
 
-updated: 2026-11-17 · code: `e532dad`（Ctrl+E 定位后的收尾与回车统一；本机 config 新增 CeleClip）· main 领先 origin/main（未 push）
+updated: 2026-11-17 · code: `dea44eb`（Ctrl+E 定位收尾统一；Clash 订阅更新的动作类条目不再 5s 超时）· main 领先 origin/main（未 push）
 
 > 判断本文件是否过期：比较 `code` 与 `git log -1 --format=%h -- src Cargo.toml`。
 > 只改文档的提交不算过期。
@@ -185,6 +185,14 @@ updated: 2026-11-17 · code: `e532dad`（Ctrl+E 定位后的收尾与回车统�
   没有可定位路径的条目（`:web` 行 / 命令列表 / `:set` 控件）原来静默 `return`，现在给
   `i18n::cannot_reveal()` 红提示。`Ctrl+Enter` / `Alt+Enter` 是同一条路径，行为一并变化。
   顺带把历史落盘抽成 `App::save_history`（`#[cfg(not(test))]` 才写），单测不再覆盖真实 `history.json`
+- **动作类条目不再 5s 超时（2026-11-17）**：用户报 `:set` → 「更新订阅」每次报
+  「执行超时（5s）：powershell -NoProfile -NonInteract…」。`src/actions.rs` 原来所有脚本共用
+  5s（`TIMEOUT`），而 Clash 更新是下载订阅 + 覆盖两个 yaml + 停进程 + 800ms + 起进程 + 2s，
+  **实测全程 5.2s**，必炸。现在 `SpecKind::Action` 默认 `ACTION_TIMEOUT` = 60s，
+  其余（`get` 这类每次打开 `:set` 都要跑的）仍 5s；`actions.toml` 新增可选 `timeout = <秒>`。
+  超时改用 `serve::kill_pid`（`taskkill /T /F`）杀进程树 —— 只 `TerminateProcess` 会留下
+  子进程继续写 yaml。报错里的命令改成 `display_command` 缩写（base64 一屏装不下）。
+  实测：`--apply clash-subscription` 5.2s 返回「已更新并重启 Clash Party」，`updated` 刷新
 
 ## 未完成
 
