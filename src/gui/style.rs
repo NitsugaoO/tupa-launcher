@@ -27,6 +27,9 @@ pub const MOVE_EASE: f32 = 0.55;
 /// 位移小于这个像素数就吸附到目标
 pub const SCROLL_SNAP: f32 = 0.4;
 
+/// chip 灰 ↔ 彩 的渐变时长（秒）
+pub const CHIP_FADE_SECS: f32 = 0.14;
+
 /// 列表展开时的淡入时长（秒）
 pub const REVEAL_SECS: f32 = 0.12;
 /// 动画帧间隔（毫秒）：需要滚动/淡入时按这个频率重绘
@@ -72,6 +75,17 @@ pub const STATUS_SIZE: f32 = 11.0;
 pub const ACCENT_BAR: f32 = 3.0;
 /// 列表区顶部留白（别让第一行贴着分隔线）
 pub const LIST_TOP: f32 = 4.0;
+
+/// 两色插值：`t` = 0 取 `a`，1 取 `b`（chip 灰 ↔ 彩的渐变就用它）
+pub fn mix(a: Rgba, b: Rgba, t: f32) -> Rgba {
+    let t = t.clamp(0.0, 1.0);
+    Rgba {
+        r: a.r + (b.r - a.r) * t,
+        g: a.g + (b.g - a.g) * t,
+        b: a.b + (b.b - a.b) * t,
+        a: a.a + (b.a - a.a) * t,
+    }
+}
 
 /// 给颜色套一个不透明度（1.0 = 原样）
 pub fn with_alpha(color: Rgba, alpha: f32) -> Rgba {

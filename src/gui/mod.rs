@@ -121,8 +121,13 @@ struct Panel {
     /// 选框滑动的当前 y / 目标 y（像素）
     marker_y: f32,
     marker_target: f32,
-    /// 选框是否正在滑动（滑动期间所有 chip 都显示「未选中」的灰底，落地后才点亮）
+    /// 选框是否正在滑动（滑动期间 chip 不点亮，落地后再渐变成彩色）
     marker_moving: bool,
+    /// 上一次选中项（它需要在滑动开始时从彩色渐隐回灰）
+    chip_from: Option<usize>,
+    /// 开始滑动的时刻 / 选框落地的时刻（chip 渐变的两端）
+    chip_fade_start: std::time::Instant,
+    chip_settled_at: std::time::Instant,
     /// 光标滑动的当前 x / 目标 x（像素）
     caret_x: f32,
     caret_target: f32,
@@ -242,6 +247,9 @@ impl Panel {
             marker_y: 0.0,
             marker_target: 0.0,
             marker_moving: false,
+            chip_from: None,
+            chip_fade_start: std::time::Instant::now(),
+            chip_settled_at: std::time::Instant::now(),
             caret_x: 0.0,
             caret_target: 0.0,
             caret_height: style::INPUT_SIZE,
@@ -551,6 +559,7 @@ impl Panel {
             self.marker_y = self.marker_target;
             self.caret_x = self.caret_target;
             self.marker_moving = false;
+            self.chip_settled_at = std::time::Instant::now() - Duration::from_secs(5);
             return false;
         }
 
@@ -576,8 +585,17 @@ impl Panel {
             }
             self.marker_moving = false;
         }
-        // 选框刚落地 → 再画一帧，让新选中行的 chip 从灰变彩
+        // 选框刚落地：记时刻（新 chip 从这里开始渐变成彩色），并多画一帧推进渐变
         if was_moving != self.marker_moving {
+            if !self.marker_moving {
+                self.chip_settled_at = std::time::Instant::now();
+            }
+            moving = true;
+        }
+
+        // chip 渐变还在进行中 → 继续按 60fps 重绘
+        if self.marker_moving || self.chip_settled_at.elapsed().as_secs_f32() < style::CHIP_FADE_SECS
+        {
             moving = true;
         }
 
@@ -590,6 +608,25 @@ impl Panel {
         }
 
         moving
+    }
+
+    /// chip 的点亮进度：新选中行落地后 0 → 1 渐入，旧选中行在滑动开始时 1 → 0 渐出。
+    fn chip_progress(&self, index: usize, selected: Option<usize>) -> f32 {
+        if !self.animations {
+            return f32::from(selected == Some(index));
+        }
+        let fade = style::CHIP_FADE_SECS;
+        if selected == Some(index) {
+            if self.marker_moving {
+                return 0.0;
+            }
+            (self.chip_settled_at.elapsed().as_secs_f32() / fade).clamp(0.0, 1.0)
+        } else if self.chip_from == Some(index) {
+            // 旧行：从 1 渐隐到 0
+            1.0 - (self.chip_fade_start.elapsed().as_secs_f32() / fade).clamp(0.0, 1.0)
+        } else {
+            0.0
+        }
     }
 
     /// 选中的那行是不是宽到需要左右滚动（等宽字体估算）
@@ -812,7 +849,7 @@ impl Panel {
                 badge: item.kind.badge(),
                 color: style::badge_color(item.kind),
                 selected: selected == Some(index),
-                chip_active: selected == Some(index) && !self.marker_moving,
+                chip_progress: self.chip_progress(index, selected),
                 favorite: self.app.is_favorite(item),
                 unavailable: matches!(item.control, crate::providers::Control::Unavailable),
                 number: (select_mode && index < 9).then_some(index + 1),
@@ -922,8 +959,8 @@ struct RowSnapshot {
     unavailable: bool,
     /// 选择模式下的跳转序号（1–9）
     number: Option<usize>,
-    /// chip 是否点亮（选中态）：选框滑动期间一律熄灭，避免两个彩色 chip 同时出现
-    chip_active: bool,
+    /// chip 的点亮进度（0 = 灰底灰字，1 = 类型色底深色字）
+    chip_progress: f32,
     /// 超宽时向左移动的像素（负 margin，实现左右滚动）
     shift: f32,
     /// 附注列同理
@@ -995,9 +1032,9 @@ fn render_row(
                 .items_center()
                 .justify_center()
                 .rounded(px(style::BADGE_RADIUS))
-                .bg(if row.chip_active { row.color } else { p.panel })
+                .bg(style::mix(p.panel, row.color, row.chip_progress))
                 .text_size(px(style::BADGE_SIZE))
-                .text_color(if row.chip_active { p.background } else { row.color })
+                .text_color(style::mix(row.color, p.background, row.chip_progress))
                 .child(row.badge),
         )
         .child(
@@ -1120,9 +1157,9 @@ fn render_detail_row(
                     .items_center()
                     .justify_center()
                     .rounded(px(style::BADGE_RADIUS))
-                    .bg(if row.chip_active { row.color } else { p.panel })
+                    .bg(style::mix(p.panel, row.color, row.chip_progress))
                     .text_size(px(style::BADGE_SIZE))
-                    .text_color(if row.chip_active { p.background } else { row.color })
+                    .text_color(style::mix(row.color, p.background, row.chip_progress))
                     .child(row.badge),
             )
             .child(
@@ -1183,6 +1220,9 @@ impl Render for Panel {
             if self.animations {
                 self.marker_moving = true;
             }
+            // 旧选中行的 chip 从彩色渐隐回灰
+            self.chip_from = self.last_selected;
+            self.chip_fade_start = std::time::Instant::now();
             // 滚动动画从头开始（每换一行都从「贴左边」开始走）
             self.scroll_started = std::time::Instant::now();
             if let Some(index) = selected
