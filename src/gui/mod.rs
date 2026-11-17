@@ -81,8 +81,10 @@ pub fn run(cfg: Config, theme: Theme) -> Result<()> {
                 is_resizable: true,
                 is_minimizable: true,
                 focus: true,
+                // `Blurred` 在 Windows 平台就是 `SetWindowCompositionAttribute(ACCENT_ENABLE_ACRYLICBLURBEHIND)`
+                // —— GPUI 已经内建了亚克力，不需要 fork；配合半透明底色就是真的毛玻璃。
                 window_background: if opacity < 1.0 {
-                    WindowBackgroundAppearance::Transparent
+                    WindowBackgroundAppearance::Blurred
                 } else {
                     WindowBackgroundAppearance::Opaque
                 },
