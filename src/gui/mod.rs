@@ -25,8 +25,8 @@ use std::time::Duration;
 use anyhow::Result;
 use gpui::{
     AnyElement, AppContext as _, Bounds, Context, FocusHandle, KeyDownEvent, Render, Rgba,
-    ScrollHandle, TitlebarOptions, WeakEntity, Window, WindowBackgroundAppearance, WindowBounds,
-    WindowKind, WindowOptions, div, prelude::*, px, size,
+    ScrollDelta, ScrollHandle, ScrollWheelEvent, TitlebarOptions, WeakEntity, Window,
+    WindowBackgroundAppearance, WindowBounds, WindowKind, WindowOptions, div, prelude::*, px, size,
 };
 
 use crate::app::App;
@@ -512,6 +512,35 @@ impl Panel {
         self.list_area(window, cx, p)
     }
 
+    /// 鼠标滚轮 = 上下移动选中项（和 ↑↓ 等价）
+    fn on_scroll(&mut self, event: &ScrollWheelEvent, window: &mut Window, cx: &mut Context<Self>) {
+        let lines = match event.delta {
+            // 精确像素：按一行 30px 折算
+            ScrollDelta::Pixels(delta) => f32::from(delta.y) / 30.0,
+            ScrollDelta::Lines(delta) => delta.y,
+        };
+        let steps = lines.round() as i32;
+        debug_log(&format!("wheel: delta={:?} lines={lines:.2} steps={steps}", event.delta));
+        if steps == 0 {
+            return;
+        }
+        // 向下滚 = 往下选（Windows 的滚动方向在 GPUI 里已经是「内容滚动量」，
+        // 正值表示内容向上走，所以这里取反）
+        let code = if steps > 0 {
+            crossterm::event::KeyCode::Up
+        } else {
+            crossterm::event::KeyCode::Down
+        };
+        for _ in 0..steps.unsigned_abs() {
+            self.app.on_key(crossterm::event::KeyEvent::new(
+                code,
+                crossterm::event::KeyModifiers::NONE,
+            ));
+        }
+        window.focus(&self.focus);
+        cx.notify();
+    }
+
     /// 每帧推进动画：垂直滚动、选框滑动、光标滑动。
     ///
     /// 返回「是否还在动」——调用方据此决定要不要按 60fps 继续重绘。
@@ -521,6 +550,7 @@ impl Panel {
             self.scroll_y = self.scroll_target;
             self.marker_y = self.marker_target;
             self.caret_x = self.caret_target;
+            self.marker_moving = false;
             return false;
         }
 
@@ -754,10 +784,12 @@ impl Panel {
         }
 
         div()
+            .id("list")
             .relative()
             .flex_1()
             .w_full()
             .overflow_hidden()
+            .on_scroll_wheel(cx.listener(Self::on_scroll))
             .child(inner)
             .into_any_element()
     }
@@ -1147,6 +1179,10 @@ impl Render for Panel {
         let selected = self.app.list_state.selected();
         if selected != self.last_selected {
             self.last_selected = selected;
+            // 先熄灭 chip：不然新选中行会先用「点亮」状态渲染一帧，再被 animate 关掉 → 闪
+            if self.animations {
+                self.marker_moving = true;
+            }
             // 滚动动画从头开始（每换一行都从「贴左边」开始走）
             self.scroll_started = std::time::Instant::now();
             if let Some(index) = selected
