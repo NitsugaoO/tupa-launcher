@@ -18,6 +18,7 @@ mod daemon;
 mod exec;
 mod favorites;
 mod glazewm;
+#[cfg(feature = "gui")]
 mod gui;
 mod history;
 mod i18n;
@@ -112,9 +113,15 @@ fn main() -> Result<()> {
     }
 
     // 自绘无边框窗口（和 TUI 并存，先不影响默认行为）
+    // GUI 已冷冻：只有 `--features gui` 的构建才包含它，默认构建报错提示。
     if args.iter().any(|a| a == "--gui") {
-        let theme = theme::Theme::load(&cfg);
-        return gui::run(cfg, theme);
+        #[cfg(feature = "gui")]
+        {
+            let theme = theme::Theme::load(&cfg);
+            return gui::run(cfg, theme);
+        }
+        #[cfg(not(feature = "gui"))]
+        anyhow::bail!(i18n::gui_disabled());
     }
 
     let theme = theme::Theme::load(&cfg);

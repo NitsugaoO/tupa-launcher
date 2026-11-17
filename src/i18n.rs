@@ -445,6 +445,14 @@ pub fn elevate_windows_only() -> &'static str {
     t("提权只在 Windows 上支持", "Elevation is Windows-only")
 }
 
+#[allow(dead_code)] // 只在无 gui feature 的构建里用到
+pub fn gui_disabled() -> &'static str {
+    t(
+        "本构建未编译自绘 GUI：cargo build --release --features gui",
+        "This build has no GUI: cargo build --release --features gui",
+    )
+}
+
 pub fn not_found(what: &str) -> String {
     s(|| format!("找不到 {what}"), || format!("Not found: {what}"))
 }

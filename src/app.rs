@@ -852,20 +852,11 @@ impl App {
             return;
         };
 
-        let target = match &item.action {
-            Action::Open(path) | Action::Reveal(path) => path.clone(),
-            // app 条目：解析出真实的 exe 位置（`.lnk` 会跟到目标）
-            Action::Launch { command, .. } => match crate::util::resolve_executable(command) {
-                Some(path) => path,
-                None => {
-                    self.status = Some((i18n::not_found(command), true));
-                    return;
-                }
-            },
-            // 其余动作没有可以定位的路径（网址 / 命令 / 控件 / 清理…）。
-            // 以前这里是静默 return，按下去毫无反应，看起来像坏了
-            _ => {
-                self.status = Some((i18n::cannot_reveal().to_string(), true));
+        // 哪些动作有可定位路径，由 Action 自己说（见 Action::reveal_target）
+        let target = match item.action.reveal_target() {
+            Ok(path) => path,
+            Err(message) => {
+                self.status = Some((message, true));
                 return;
             }
         };
@@ -941,6 +932,8 @@ impl App {
     }
 
     /// 光标处插入一段文本（输入法上屏用），只刷新一次
+    /// （只有自绘 GUI 的 IME commit 会调；TUI 里终端自己画预编辑）
+    #[cfg(feature = "gui")]
     pub fn insert_str(&mut self, text: &str) {
         if text.is_empty() {
             return;
