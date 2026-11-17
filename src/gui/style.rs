@@ -17,6 +17,14 @@ pub const HEIGHT_RATIO: f32 = 0.55;
 
 pub const RADIUS: f32 = 12.0;
 pub const PADDING: f32 = 12.0;
+/// 超宽行的左右滚动：像素速度、两端停顿、单程的最短时长
+pub const SCROLL_SPEED: f32 = 90.0; // px/s
+pub const SCROLL_PAUSE: f32 = 0.9; // 两端各停多久（秒）
+/// 列表展开时的淡入时长（秒）
+pub const REVEAL_SECS: f32 = 0.12;
+/// 动画帧间隔（毫秒）：需要滚动/淡入时按这个频率重绘
+pub const ANIM_FRAME_MS: u64 = 16;
+
 /// 面板自己画的边框（草绿 accent 色，1px）
 pub const BORDER: f32 = 1.0;
 /// 展开后最多显示多少行结果（超出滚动）

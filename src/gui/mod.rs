@@ -128,6 +128,12 @@ struct Panel {
     scale: f32,
     /// 面板背景不透明度（来自 `[gui] opacity`）
     opacity: f32,
+    /// 选中行变化的时间点（驱动左右滚动）
+    scroll_started: std::time::Instant,
+    /// 列表展开的时间点（驱动淡入）
+    reveal_started: std::time::Instant,
+    /// 上一帧是不是紧凑形态（用来检测「刚展开」）
+    was_compact: bool,
     /// 上一次写进调试日志的结果条数（`TUPA_GUI_LOG=<路径>` 时生效）
     logged_rows: usize,
     /// 上一次写进调试日志的输入框内容
@@ -148,8 +154,10 @@ impl Panel {
         cx.spawn_in(window, async move |this, cx| {
             let mut pending = false;
             let mut styled = false;
+            // 有滚动或展开动画在进行 → 按 60fps 重绘
+            let mut animating = false;
             loop {
-                let delay = if pending { 16 } else { 120 };
+                let delay = if pending || animating { style::ANIM_FRAME_MS } else { 120 };
                 cx.background_executor()
                     .timer(Duration::from_millis(delay))
                     .await;
@@ -181,12 +189,14 @@ impl Panel {
                         cx.notify();
                     }
 
-                    // 左右滚动：选中行超宽时每轮走一步（`App::tick` 驱动）
-                    panel.app.tick += 1;
+                    // 滚动 / 淡入进行中？
                     let scrolling = panel.needs_scroll();
-                    if scrolling {
+                    let revealing = panel.reveal_started.elapsed().as_secs_f32() < style::REVEAL_SECS;
+                    let animating = scrolling || revealing;
+                    if animating {
                         cx.notify();
                     }
+                    panel.app.tick += 1;
 
                     let was_pending = panel.app.pending;
                     panel.app.drain_events();
@@ -194,9 +204,12 @@ impl Panel {
                     if was_pending != now_pending {
                         cx.notify();
                     }
-                    now_pending
+                    (now_pending, animating)
                 }) {
-                    Ok(next) => pending = next,
+                    Ok((next_pending, next_anim)) => {
+                        pending = next_pending;
+                        animating = next_anim;
+                    }
                     Err(_) => break, // 窗口和 view 都没了
                 }
             }
@@ -218,6 +231,9 @@ impl Panel {
             row_metrics: RowMetrics { title: 0.0, note: 0.0 },
             scale: 1.0,
             opacity,
+            scroll_started: std::time::Instant::now(),
+            reveal_started: std::time::Instant::now(),
+            was_compact: true,
             logged_rows: usize::MAX,
             logged_input: String::new(),
         }
@@ -566,7 +582,8 @@ impl Panel {
         let selected = self.app.list_state.selected();
         let select_mode = self.app.select_mode;
         let advance = style::ROW_SIZE * 0.6;
-        let visible = (metrics.title / advance).max(1.0) as usize;
+        let note_advance = style::NOTE_SIZE * 0.6;
+        let elapsed = self.scroll_started.elapsed().as_secs_f32();
         self.app
             .items
             .iter()
@@ -580,22 +597,19 @@ impl Panel {
                 favorite: self.app.is_favorite(item),
                 unavailable: matches!(item.control, crate::providers::Control::Unavailable),
                 number: (select_mode && index < 9).then_some(index + 1),
-                // 只有选中行会左右滚动（跟 TUI 一样），其余行裁掉就裁掉
+                // 只有选中行会左右滚动（跟 TUI 一样），其余行裁掉就裁掉。
+                // 用像素级 ping-pong + 时间基准，60fps 下是连续移动，不再是「一格一格跳」。
                 shift: if selected == Some(index) {
                     let title = item.columns.first().map(String::as_str).unwrap_or("");
-                    let offset =
-                        crate::ui::scroll_offset(display_width(title), visible, self.app.tick);
-                    offset as f32 * advance
+                    let overflow = display_width(title) as f32 * advance - metrics.title;
+                    ping_pong(overflow, elapsed)
                 } else {
                     0.0
                 },
                 note_shift: if selected == Some(index) {
                     let note = note_text(item);
-                    let note_advance = style::NOTE_SIZE * 0.6;
-                    let note_visible = (metrics.note / note_advance).max(1.0) as usize;
-                    let offset =
-                        crate::ui::scroll_offset(display_width(&note), note_visible, self.app.tick);
-                    offset as f32 * note_advance
+                    let overflow = display_width(&note) as f32 * note_advance - metrics.note;
+                    ping_pong(overflow, elapsed)
                 } else {
                     0.0
                 },
@@ -952,6 +966,8 @@ impl Render for Panel {
         let selected = self.app.list_state.selected();
         if selected != self.last_selected {
             self.last_selected = selected;
+            // 滚动动画从头开始（每换一行都从「贴左边」开始走）
+            self.scroll_started = std::time::Instant::now();
             if let Some(index) = selected {
                 if self.app.detail {
                     self.detail_scroll.scroll_to_item(index);
@@ -960,6 +976,13 @@ impl Render for Panel {
                 }
             }
         }
+
+        // 从紧凑形态展开时，列表淡入
+        let compact_now = self.compact() && !self.help;
+        if self.was_compact && !compact_now {
+            self.reveal_started = std::time::Instant::now();
+        }
+        self.was_compact = compact_now;
 
         if self.logged_rows == usize::MAX {
             debug_log(&format!(
@@ -997,7 +1020,8 @@ impl Render for Panel {
 
         self.scale = f32::from(window.scale_factor()).max(0.5);
         let p = self.palette;
-        let compact = self.compact() && !self.help;
+        let compact = compact_now;
+        let reveal = (self.reveal_started.elapsed().as_secs_f32() / style::REVEAL_SECS).min(1.0);
 
         let mut root = div()
             .size_full()
@@ -1022,6 +1046,12 @@ impl Render for Panel {
             } else {
                 self.body(window, cx, p)
             };
+            // 展开时淡入（0 → 1，120ms）
+            let body = if reveal < 1.0 {
+                div().flex_1().w_full().opacity(reveal).child(body).into_any_element()
+            } else {
+                body
+            };
             root = root
                 .child(self.separator(p))
                 .child(body)
@@ -1029,6 +1059,28 @@ impl Render for Panel {
         }
 
         root
+    }
+}
+
+/// 左右滚动的位移（像素）：走到底 → 停一会儿 → 走回来 → 停一会儿，循环。
+fn ping_pong(overflow: f32, elapsed: f32) -> f32 {
+    if overflow <= 0.0 {
+        return 0.0;
+    }
+    let speed = style::SCROLL_SPEED;
+    let pause = style::SCROLL_PAUSE;
+    let travel = overflow / speed;
+    let cycle = (travel + pause) * 2.0;
+    let t = elapsed % cycle;
+
+    if t < travel {
+        t * speed
+    } else if t < travel + pause {
+        overflow
+    } else if t < travel + pause + travel {
+        overflow - (t - travel - pause) * speed
+    } else {
+        0.0
     }
 }
 
