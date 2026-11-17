@@ -114,6 +114,8 @@ struct Panel {
     blink_at: std::time::Instant,
     /// 输入法预编辑：`(起始字符下标, 文本)`，还没上屏的拼音
     preedit: Option<(usize, String)>,
+    /// 紧凑态下按 ↓ 手动展开的开屏列表（收藏 + 最近命令）
+    hint_open: bool,
     /// 上一次写进调试日志的结果条数（`TUPA_GUI_LOG=<路径>` 时生效）
     logged_rows: usize,
     /// 上一次写进调试日志的输入框内容
@@ -194,6 +196,7 @@ impl Panel {
             cursor_on: true,
             blink_at: std::time::Instant::now() + Duration::from_millis(500),
             preedit: None,
+            hint_open: false,
             logged_rows: usize::MAX,
             logged_input: String::new(),
         }
@@ -220,6 +223,30 @@ impl Panel {
         }
         if question {
             self.help = true;
+            window.focus(&self.focus);
+            cx.notify();
+            return;
+        }
+
+        // 紧凑态（刚呼出）：按 ↓ 才把开屏列表（收藏 + 最近命令）拉下来
+        let plain_down = matches!(
+            &key,
+            Some(k) if k.code == crossterm::event::KeyCode::Down && k.modifiers.is_empty()
+        );
+        if self.compact() && plain_down {
+            self.hint_open = true;
+            window.focus(&self.focus);
+            cx.notify();
+            return;
+        }
+
+        // 展开着的时候，Esc 先收回紧凑形态，而不是直接隐藏面板
+        let is_escape = matches!(
+            &key,
+            Some(k) if k.code == crossterm::event::KeyCode::Esc
+        );
+        if self.hint_open && is_escape {
+            self.hint_open = false;
             window.focus(&self.focus);
             cx.notify();
             return;
@@ -258,6 +285,10 @@ impl Panel {
         if (self.app.input.len(), self.app.cursor) != before {
             self.cursor_on = true;
             self.blink_at = std::time::Instant::now() + Duration::from_millis(500);
+            // 清空输入 = 回到刚呼出的紧凑形态
+            if self.app.input.is_empty() {
+                self.hint_open = false;
+            }
         }
 
         // 焦点别丢（Esc 清空输入、点列表之后都要能继续打字）
@@ -377,9 +408,11 @@ impl Panel {
         self.list_area(window, cx, p)
     }
 
-    /// 是否按「呼出只有输入框」的紧凑形态显示（空输入 + 没有补全候选）
+    /// 是否按「呼出只有输入框」的紧凑形态显示。
+    ///
+    /// 空输入 + 没有补全候选 + 没有手动按 ↓ 展开开屏列表。
     fn compact(&self) -> bool {
-        self.app.input.is_empty() && self.app.completion.is_none()
+        self.app.input.is_empty() && self.app.completion.is_none() && !self.hint_open
     }
 
     /// 窗口应该多高：紧凑时只有输入行，展开时按结果行数算（最多 MAX_VISIBLE_ROWS 行）

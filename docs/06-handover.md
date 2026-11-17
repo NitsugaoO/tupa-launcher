@@ -222,6 +222,16 @@ cargo build --release --features gui     # 产出 tupa-gui.exe + tupa-launcher.e
 4. **MAKE_OVERLAY 的时机**：`open_window` 返回时窗口还没真正上屏，此时改 EXSTYLE 无效；
    放在 `cx.spawn` 的第一轮（120ms 后）才稳定生效。
 
+### 紧凑形态（2026-11-17）
+
+呼出时窗口只有一条输入行（实测 74px），**按 `↓` 才把开屏列表（收藏 + 最近命令）拉下来**，
+清空输入或按 `Esc` 收回。高度由 `Panel::desired_height()` 算、在 `cx.spawn_in` 的轮询里
+`window.resize`（左上角不动，向下长）。
+
+- `Panel::compact()` = 输入为空 && 没有补全候选 && 没按过 `↓`
+- 紧凑态连分隔线 / 列表 / 状态栏都不画，所以窗口能缩到只剩输入行
+- 展开后继续按 `↓` 只移动选中项，高度不变（按结果行数，最多 `MAX_VISIBLE_ROWS = 12`）
+
 ### IME（2026-11-17 落地）
 
 输入框走 GPUI 的 `EntityInputHandler`（`src/gui/input.rs`）：
