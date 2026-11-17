@@ -162,8 +162,6 @@ struct Panel {
     logged_rows: usize,
     /// 上一次写进调试日志的输入框内容
     logged_input: String,
-    /// 上一次的「是否需要左右滚动」（只在变化时记日志）
-    logged_scroll: bool,
 }
 
 impl Panel {
@@ -180,10 +178,9 @@ impl Panel {
         cx.spawn_in(window, async move |this, cx| {
             let mut pending = false;
             let mut styled = false;
-            // 有滚动或展开动画在进行 → 按 60fps 重绘
-            let mut animating = false;
             loop {
-                let delay = if pending || animating { style::ANIM_FRAME_MS } else { 120 };
+                // 只负责后台查询结果的轮询；动画改由 `on_next_frame` 跟着 vsync 跑
+                let delay = if pending { 16 } else { 120 };
                 cx.background_executor()
                     .timer(Duration::from_millis(delay))
                     .await;
@@ -205,16 +202,6 @@ impl Panel {
                         cx.notify();
                     }
 
-                    // 推进垂直滚动 / 选框 / 光标动画；再叠加左右滚动与展开淡入，
-                    // 任一还在动就按 60fps 重绘
-                    let moving = panel.animate();
-                    let scrolling = panel.needs_scroll();
-                    let revealing =
-                        panel.reveal_started.elapsed().as_secs_f32() < style::REVEAL_SECS;
-                    let animating = moving || scrolling || revealing;
-                    if animating {
-                        cx.notify();
-                    }
                     panel.app.tick += 1;
 
                     let was_pending = panel.app.pending;
@@ -223,12 +210,9 @@ impl Panel {
                     if was_pending != now_pending {
                         cx.notify();
                     }
-                    (now_pending, animating)
+                    now_pending
                 }) {
-                    Ok((next_pending, next_anim)) => {
-                        pending = next_pending;
-                        animating = next_anim;
-                    }
+                    Ok(next) => pending = next,
                     Err(_) => break, // 窗口和 view 都没了
                 }
             }
@@ -268,7 +252,6 @@ impl Panel {
             was_compact: true,
             logged_rows: usize::MAX,
             logged_input: String::new(),
-            logged_scroll: false,
         }
     }
 
@@ -673,6 +656,34 @@ impl Panel {
         }
     }
 
+    /// 还有动画在跑吗（决定要不要注册下一帧回调）
+    fn animating(&self) -> bool {
+        if !self.animations {
+            return false;
+        }
+        self.marker_moving
+            || (self.scroll_target - self.scroll_y).abs() > style::SCROLL_SNAP
+            || (self.caret_target - self.caret_x).abs() > style::SCROLL_SNAP
+            || self.chip_fade_start.elapsed().as_secs_f32() < style::CHIP_FADE_SECS
+            || self.chip_settled_at.elapsed().as_secs_f32() < style::CHIP_FADE_SECS
+            || self.reveal_started.elapsed().as_secs_f32() < style::REVEAL_SECS
+            || self.needs_scroll_raw()
+    }
+
+    /// 注册下一帧：推进动画 + 重绘，链条一直到动画结束
+    fn schedule_animation(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.animating() {
+            return;
+        }
+        let entity = cx.entity().downgrade();
+        window.on_next_frame(move |_window, cx| {
+            let _ = entity.update(cx, |panel, cx| {
+                panel.animate();
+                cx.notify();
+            });
+        });
+    }
+
     /// 当前列表的行高（含行间距）。普通模式固定；detail 按最大列数算。
     fn row_height(&self) -> f32 {
         if self.app.detail {
@@ -696,20 +707,7 @@ impl Panel {
         }
     }
 
-    /// 选中的那行是不是宽到需要左右滚动（等宽字体估算）
-    fn needs_scroll(&mut self) -> bool {
-        let need = self.needs_scroll_raw();
-        if need != self.logged_scroll {
-            self.logged_scroll = need;
-            debug_log(&format!(
-                "needs_scroll={need} title_w={:.1} sel={:?}",
-                self.row_metrics.title,
-                self.app.list_state.selected()
-            ));
-        }
-        need
-    }
-
+    /// 选中的那行是不是宽到需要左右滚动（等宽字体估算，只读）
     fn needs_scroll_raw(&self) -> bool {
         if self.row_metrics.title <= 0.0 {
             return false;
@@ -1401,6 +1399,10 @@ impl Render for Panel {
                 .child(body)
                 .child(self.status_bar(p));
         }
+
+        // 动画由 vsync 驱动：还有东西在动就注册「下一帧」回调，回调里推进动画并重绘。
+        // 用定时器 notify 会和屏幕刷新（这台 120Hz）互相挤，表现就是卡卡的。
+        self.schedule_animation(window, cx);
 
         root
     }
