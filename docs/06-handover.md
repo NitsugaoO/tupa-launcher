@@ -197,8 +197,28 @@ Clash 订阅更新就是后者，下载 + 重启应用固定开销就 ~3s，5 �
 圆角 / 中文 / `SW_HIDE`→`SW_SHOW` 唤回均验证通过。调研结论见会话记录，实施计划
 跟着 `STATE.md` 走。
 
-重写期间 `--gui` 与 `[daemon] panel = "gui"` 直接报不可用（`i18n::gui_disabled`），
-TUI 照常。
+现状（2026-11-17 Step 1）：GPUI 面板骨架已能跑 —— 窗口（无边框圆角、可拖边缩放、
+不进任务栏）、输入行、结果列表、状态栏、`Esc` 隐藏、单实例唤回。要试：
+
+```bash
+cargo build --release --features gui
+./target/release/tupa-launcher.exe --gui
+```
+
+默认构建不含它（`i18n::gui_disabled`），TUI 照常。剩下的是键位补全、虚拟列表、
+卡片样式、IME、鼠标（见 `STATE.md`）。
+
+四个别踩第二遍的坑（也记在 `AGENTS.md`）：
+
+1. **`PopUp` 不可缩放**：`dwstyle = 0`，只有 `Normal` + `appears_transparent` 才带
+   `WS_THICKFRAME`；代价是 `WS_EX_APPWINDOW`，得自己换成 `WS_EX_TOOLWINDOW`。
+2. **类名和标题都认不住窗口**：GPUI 类名固定 `Zed::Window`；跨进程 `GetWindowTextW`
+   读标题只回一个字符（`Get-Process` 的 `MainWindowTitle` 却是对的）。`find_panel`
+   的 GUI 分支改成「进程名 + 有尺寸的顶层窗口」。
+3. **文本不会自动截断**：`truncate()` / `overflow_hidden()` 对文本元素无效，文字照画到
+   窗口外。列表行在 Rust 侧用 `gui::style::fit` 按显示宽度截（等宽字体，中文算 2 格）。
+4. **MAKE_OVERLAY 的时机**：`open_window` 返回时窗口还没真正上屏，此时改 EXSTYLE 无效；
+   放在 `cx.spawn` 的第一轮（120ms 后）才稳定生效。
 
 ## 7. 调试入口
 
