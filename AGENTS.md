@@ -64,8 +64,9 @@ tupa-launcher.exe --check # 所有 `[[apps]]` 都能解析
      `PopUp` 天然 TOOLWINDOW 但 `dwstyle = 0`，**不可缩放**。
   2. GPUI 窗口类名是全框架共用的 `Zed::Window`，跨进程 `GetWindowTextW` 读标题只回一个字符
      —— `util::find_panel` 的 GUI 分支只能按**进程名 + 有尺寸的顶层窗口**认人。
-  3. `truncate()` / `overflow_hidden()` 对文本元素**不裁剪**（文字照画到父元素外），
-     长文本要在 Rust 侧按显示宽度截断（`gui::style::fit`）。
+  3. `truncate()` **只对「有确定宽度」的元素生效**（`w(px(n))` / `max_w(px(n))`）；
+     `flex_1` 的容器宽度由内容撑出来，截不了，文字会照画到父元素外（实测 A/B/C 三行对照）。
+     列表列宽要给显式像素宽度再 `truncate()`；`gui::style::fit` 只在拿不到布局宽度时兜底。
   4. GPUI 没有 channel 唤醒，后台结果靠 `cx.spawn` 轮询 `App::drain_events()`
      （查询中 16ms / 空闲 120ms），拿到结果再 `cx.notify()`。
 - **`config.example.toml` 保持精简示例（2026-11-03 决定）**：只教语法，不同步本机 55 项应用。
