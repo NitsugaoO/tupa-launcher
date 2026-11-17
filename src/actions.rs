@@ -527,61 +527,15 @@ fn base64_utf16le(text: &str) -> String {
     out
 }
 
-const DARK_GET: &str = r#"
-$p = Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize' -ErrorAction Stop
-$p.AppsUseLightTheme
-"#;
+const DARK_GET: &str = include_str!("scripts/dark_get.ps1");
 
-const DARK_ON: &str = r#"
-$p = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize'
-Set-ItemProperty $p -Name AppsUseLightTheme -Value 0 -ErrorAction Stop
-Set-ItemProperty $p -Name SystemUsesLightTheme -Value 0 -ErrorAction Stop
-Add-Type -TypeDefinition @'
-using System;
-using System.Runtime.InteropServices;
-public class TupaTheme {
-    [DllImport("user32.dll", CharSet = CharSet.Auto)]
-    public static extern IntPtr SendMessageTimeout(IntPtr hWnd, uint Msg, UIntPtr wParam, string lParam, uint fuFlags, uint uTimeout, out UIntPtr lpdwResult);
-    public static void Notify() {
-        UIntPtr result;
-        SendMessageTimeout(new IntPtr(0xffff), 0x001A, UIntPtr.Zero, "ImmersiveColorSet", 2, 1000, out result);
-    }
-}
-'@
-[TupaTheme]::Notify()
-"#;
+const DARK_ON: &str = include_str!("scripts/dark_on.ps1");
 
-const DARK_OFF: &str = r#"
-$p = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize'
-Set-ItemProperty $p -Name AppsUseLightTheme -Value 1 -ErrorAction Stop
-Set-ItemProperty $p -Name SystemUsesLightTheme -Value 1 -ErrorAction Stop
-Add-Type -TypeDefinition @'
-using System;
-using System.Runtime.InteropServices;
-public class TupaTheme {
-    [DllImport("user32.dll", CharSet = CharSet.Auto)]
-    public static extern IntPtr SendMessageTimeout(IntPtr hWnd, uint Msg, UIntPtr wParam, string lParam, uint fuFlags, uint uTimeout, out UIntPtr lpdwResult);
-    public static void Notify() {
-        UIntPtr result;
-        SendMessageTimeout(new IntPtr(0xffff), 0x001A, UIntPtr.Zero, "ImmersiveColorSet", 2, 1000, out result);
-    }
-}
-'@
-[TupaTheme]::Notify()
-"#;
+const DARK_OFF: &str = include_str!("scripts/dark_off.ps1");
 
-const BRIGHTNESS_GET: &str = r#"
-$b = Get-CimInstance -Namespace root/wmi -ClassName WmiMonitorBrightness -ErrorAction Stop | Select-Object -First 1
-if (-not $b) { exit 3 }
-$b.CurrentBrightness
-"#;
+const BRIGHTNESS_GET: &str = include_str!("scripts/brightness_get.ps1");
 
-const BRIGHTNESS_SET: &str = r#"
-$v = [byte][int]$env:TUPA_VALUE
-$m = Get-CimInstance -Namespace root/wmi -ClassName WmiMonitorBrightnessMethods -ErrorAction Stop | Select-Object -First 1
-if (-not $m) { exit 3 }
-$null = Invoke-CimMethod -InputObject $m -MethodName WmiSetBrightness -Arguments @{ Timeout = [uint32]1; Brightness = $v } -ErrorAction Stop
-"#;
+const BRIGHTNESS_SET: &str = include_str!("scripts/brightness_set.ps1");
 
 // ---------------------------------------------------------------------------
 // 电池养护模式：直接调 Vantage 的 IdeaBatteryAgent.dll（不需要管理员）
@@ -591,42 +545,13 @@ $null = Invoke-CimMethod -InputObject $m -MethodName WmiSetBrightness -Arguments
 // 它的托管程序集提供了 Get/SetBatteryChargeMode，反射调用即可。
 // ---------------------------------------------------------------------------
 
-const BATTERY_BOOTSTRAP: &str = r#"
-$ErrorActionPreference = 'Stop'
-$root = Join-Path $env:ProgramData 'Lenovo\Vantage\Addins\IdeaNotebookAddin'
-$dir = Get-ChildItem -LiteralPath $root -Directory -ErrorAction Stop |
-    Sort-Object { try { [version]$_.Name } catch { [version]'0.0' } } -Descending |
-    Select-Object -First 1
-if (-not $dir) { throw 'IdeaNotebookAddin not installed' }
-$battery = Join-Path $dir.FullName 'IdeaBatteryAgent.dll'
-if (-not (Test-Path -LiteralPath $battery)) { throw 'IdeaBatteryAgent.dll not found' }
-foreach ($name in 'Newtonsoft.Json.dll','Lenovo.Vantage.RpcCommon.dll','Lenovo.Vantage.RpcClient.dll','Lenovo.VantageService.Utilities.dll','Lenovo.VantageService.UtilitiesExtensions.dll','BatteryManagementContract.dll','BatteryInformationContract.dll','PowerContract.dll') {
-    $path = Join-Path $dir.FullName $name
-    if (Test-Path -LiteralPath $path) { try { [Reflection.Assembly]::LoadFrom($path) | Out-Null } catch {} }
-}
-$assembly = [Reflection.Assembly]::LoadFrom($battery)
-$type = $assembly.GetType('IdeaNotebookAddin.BatteryAgent')
-$agent = $type.GetMethod('GetInstance', [Reflection.BindingFlags]'Public,Static,Instance').Invoke($null, @())
-"#;
+const BATTERY_BOOTSTRAP: &str = include_str!("scripts/battery_bootstrap.ps1");
 
-const BATTERY_GET_BODY: &str = r#"
-$response = $type.GetMethod('GetBatteryChargeMode').Invoke($agent, @())
-$response.BatteryChargeMode
-"#;
+const BATTERY_GET_BODY: &str = include_str!("scripts/battery_get_body.ps1");
 
-const BATTERY_ON_BODY: &str = r#"
-$request = [Activator]::CreateInstance([Lenovo.Modern.Contracts.BatteryManagement.BatteryMgmtRequest])
-$request.BatteryChargeMode = [Lenovo.Modern.Contracts.BatteryManagement.BatteryChargeModeType]::Storage
-$response = $type.GetMethod('SetBatteryChargeMode').Invoke($agent, @($request))
-$response.BatteryChargeMode
-"#;
+const BATTERY_ON_BODY: &str = include_str!("scripts/battery_on_body.ps1");
 
-const BATTERY_OFF_BODY: &str = r#"
-$request = [Activator]::CreateInstance([Lenovo.Modern.Contracts.BatteryManagement.BatteryMgmtRequest])
-$request.BatteryChargeMode = [Lenovo.Modern.Contracts.BatteryManagement.BatteryChargeModeType]::Normal
-$response = $type.GetMethod('SetBatteryChargeMode').Invoke($agent, @($request))
-$response.BatteryChargeMode
-"#;
+const BATTERY_OFF_BODY: &str = include_str!("scripts/battery_off_body.ps1");
 
 // ---------------------------------------------------------------------------
 // Lenovo Vantage 电源模式（IdeaPowerAgent.dll，普通用户权限）
@@ -635,39 +560,7 @@ $response.BatteryChargeMode
 // GetITSMode / SetITSMode（见 docs/08-vantage-power-mode.md）。
 // ---------------------------------------------------------------------------
 
-const VANTAGE_POWER_BOOTSTRAP: &str = r#"
-$ErrorActionPreference = 'Stop'
-$vantageRoot = Join-Path $env:ProgramData 'Lenovo\Vantage\Addins\IdeaNotebookAddin'
-$vantageDir = $null
-$vantageType = $null
-$vantageAgent = $null
-try {
-    $vantageDir = Get-ChildItem -LiteralPath $vantageRoot -Directory -ErrorAction Stop |
-        Sort-Object { try { [version]$_.Name } catch { [version]'0.0' } } -Descending |
-        Select-Object -First 1
-} catch { $vantageDir = $null }
-if ($vantageDir) {
-    foreach ($name in 'Newtonsoft.Json.dll','Lenovo.Vantage.RpcCommon.dll','Lenovo.Vantage.RpcClient.dll','Lenovo.VantageService.Utilities.dll','Lenovo.VantageService.UtilitiesExtensions.dll','PowerContract.dll') {
-        $path = Join-Path $vantageDir.FullName $name
-        if (Test-Path -LiteralPath $path) { try { [Reflection.Assembly]::LoadFrom($path) | Out-Null } catch {} }
-    }
-    $vantageAssembly = [Reflection.Assembly]::LoadFrom((Join-Path $vantageDir.FullName 'IdeaPowerAgent.dll'))
-    $vantageType = $vantageAssembly.GetType('IdeaNotebookAddin.PowerAgent')
-    $vantageAgent = $vantageType.GetMethod('GetInstance', [Reflection.BindingFlags]'Public,Static,Instance').Invoke($null, @())
-}
-function Read-VantageMode {
-    if (-not $vantageType) { return $null }
-    $request = [Activator]::CreateInstance([Lenovo.Modern.Contracts.Power.PowerSettingsRequest])
-    $response = $vantageType.GetMethod('GetITSMode').Invoke($vantageAgent, @($request))
-    return [string]$response.ItsMode
-}
-function Write-VantageMode([string]$mode) {
-    if (-not $vantageType) { return }
-    $request = [Activator]::CreateInstance([Lenovo.Modern.Contracts.Power.PowerSettingsRequest])
-    $request.ItsMode = [Lenovo.Modern.Contracts.Power.ItsModeType]$mode
-    $null = $vantageType.GetMethod('SetITSMode').Invoke($vantageAgent, @($request))
-}
-"#;
+const VANTAGE_POWER_BOOTSTRAP: &str = include_str!("scripts/vantage_power_bootstrap.ps1");
 
 // ---------------------------------------------------------------------------
 // 节能模式 = Lenovo Vantage 的「静音省电」+ Windows 11 Energy Saver
@@ -686,125 +579,19 @@ function Write-VantageMode([string]$mode) {
 // 最坏结果是「没生效」而不是「切错了别的东西」。
 // ---------------------------------------------------------------------------
 
-const ENERGY_SAVER_BOOTSTRAP: &str = r#"
-$ErrorActionPreference = 'Stop'
-Add-Type @'
-using System;
-using System.Text;
-using System.Runtime.InteropServices;
-public static class TupaEnergy {
-    [StructLayout(LayoutKind.Sequential)] public struct POINT { public int X; public int Y; }
-    static int _cursorX, _cursorY; static bool _cursorSaved;
-    [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
-    [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetClassName(IntPtr h, StringBuilder sb, int max);
-    [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
-    [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
-    [DllImport("user32.dll")] public static extern bool GetCursorPos(out POINT p);
-    [DllImport("user32.dll")] public static extern void mouse_event(uint flags, uint dx, uint dy, uint data, UIntPtr extra);
-    [DllImport("user32.dll")] public static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra);
-    [DllImport("user32.dll")] public static extern int GetSystemMetrics(int index);
-    [DllImport("user32.dll")] public static extern uint GetDpiForSystem();
-    public static void WinA() {
-        keybd_event(0x5B,0,0,UIntPtr.Zero); keybd_event(0x41,0,0,UIntPtr.Zero);
-        keybd_event(0x41,0,2,UIntPtr.Zero); keybd_event(0x5B,0,2,UIntPtr.Zero);
-    }
-    public static string FgClass() {
-        var sb = new StringBuilder(256);
-        GetClassName(GetForegroundWindow(), sb, 256);
-        return sb.ToString();
-    }
-    public static void Click(int x, int y) {
-        SetCursorPos(x, y);
-        System.Threading.Thread.Sleep(120);
-        mouse_event(0x0002, 0, 0, 0, UIntPtr.Zero);
-        mouse_event(0x0004, 0, 0, 0, UIntPtr.Zero);
-    }
-    public static void SaveCursor() {
-        POINT p;
-        if (GetCursorPos(out p)) { _cursorX = p.X; _cursorY = p.Y; _cursorSaved = true; }
-    }
-    public static void RestoreCursor() {
-        if (!_cursorSaved) { return; }
-        _cursorSaved = false;
-        SetCursorPos(_cursorX, _cursorY);
-    }
-}
-'@
-[TupaEnergy]::SetProcessDPIAware() | Out-Null
-$key = 'HKLM:\SYSTEM\CurrentControlSet\Control\Power'
-function Get-State { (Get-ItemProperty $key -Name EnergySaverState).EnergySaverState }
-function Is-Open { [TupaEnergy]::FgClass() -eq 'ControlCenterWindow' }
-function Wait-Open {
-    for ($i = 0; $i -lt 40; $i++) { if (Is-Open) { return $true }; Start-Sleep -Milliseconds 50 }
-    return $false
-}
-function Wait-State([int]$want) {
-    for ($i = 0; $i -lt 30; $i++) { if ((Get-State) -eq $want) { return $true }; Start-Sleep -Milliseconds 50 }
-    return $false
-}
-# 快速设置里「节能模式」按钮的中心：相对屏幕右下角的逻辑像素偏移，按 DPI 缩放
-function Click-Energy {
-    $scale = [TupaEnergy]::GetDpiForSystem() / 96.0
-    $x = [int]([TupaEnergy]::GetSystemMetrics(0) - 89 * $scale)
-    $y = [int]([TupaEnergy]::GetSystemMetrics(1) - 311 * $scale)
-    [TupaEnergy]::Click($x, $y)
-}
-"#;
+const ENERGY_SAVER_BOOTSTRAP: &str = include_str!("scripts/energy_saver_bootstrap.ps1");
 
 /// 合并后的状态：Vantage 是「静音省电」**并且** Windows Energy Saver 打开才算开
-const ENERGY_SAVER_GET_COMBINED: &str = r#"
-$state = 0
-try { $state = (Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Power' -Name EnergySaverState).EnergySaverState } catch {}
-$mode = $null
-try { $mode = Read-VantageMode } catch {}
-$vantageOk = (-not $mode) -or ($mode -eq 'MmcCool')
-if ($vantageOk -and ($state -eq 1)) { 'on' } else { 'off' }
-"#;
+const ENERGY_SAVER_GET_COMBINED: &str = include_str!("scripts/energy_saver_get_combined.ps1");
 
 /// 切 Vantage 的部分（Energy Saver 那段复用原来的 ON/OFF body）
-const ENERGY_SAVER_VANTAGE_ON: &str = r#"
-$mode = $null
-try { $mode = Read-VantageMode } catch {}
-if ($mode -and $mode -ne 'MmcCool') { Write-VantageMode 'MmcCool' }
-"#;
+const ENERGY_SAVER_VANTAGE_ON: &str = include_str!("scripts/energy_saver_vantage_on.ps1");
 
-const ENERGY_SAVER_VANTAGE_OFF: &str = r#"
-$mode = $null
-try { $mode = Read-VantageMode } catch {}
-if ($mode -and $mode -ne 'ItsAuto') { Write-VantageMode 'ItsAuto' }
-"#;
+const ENERGY_SAVER_VANTAGE_OFF: &str = include_str!("scripts/energy_saver_vantage_off.ps1");
 
-const ENERGY_SAVER_ON_BODY: &str = r#"
-$want = 1
-if ((Get-State) -eq $want) { 'on'; exit 0 }
-if (-not (Is-Open)) { [TupaEnergy]::WinA(); if (-not (Wait-Open)) { throw 'quick settings did not open' } }
-try {
-    [TupaEnergy]::SaveCursor()
-    Start-Sleep -Milliseconds 150
-    Click-Energy
-    if (-not (Wait-State $want)) { throw 'energy saver did not change (quick settings layout changed?)' }
-} finally {
-    [TupaEnergy]::RestoreCursor()
-    if (Is-Open) { [TupaEnergy]::WinA() }
-}
-'on'
-"#;
+const ENERGY_SAVER_ON_BODY: &str = include_str!("scripts/energy_saver_on_body.ps1");
 
-const ENERGY_SAVER_OFF_BODY: &str = r#"
-$want = 2
-if ((Get-State) -eq $want) { 'off'; exit 0 }
-if (-not (Is-Open)) { [TupaEnergy]::WinA(); if (-not (Wait-Open)) { throw 'quick settings did not open' } }
-try {
-    [TupaEnergy]::SaveCursor()
-    Start-Sleep -Milliseconds 150
-    Click-Energy
-    if (-not (Wait-State $want)) { throw 'energy saver did not change (quick settings layout changed?)' }
-} finally {
-    [TupaEnergy]::RestoreCursor()
-    if (Is-Open) { [TupaEnergy]::WinA() }
-}
-'off'
-"#;
+const ENERGY_SAVER_OFF_BODY: &str = include_str!("scripts/energy_saver_off_body.ps1");
 
 // ---------------------------------------------------------------------------
 // ---------------------------------------------------------------------------
@@ -815,119 +602,18 @@ try {
 // 单靠内核 API reload 会丢掉端口 / TUN / 规则集等它合并出来的设置。
 // ---------------------------------------------------------------------------
 
-const CLASH_INFO_GET: &str = r#"
-$ErrorActionPreference = 'Stop'
-[Console]::OutputEncoding = [Text.Encoding]::UTF8
-$appDir = Join-Path $env:APPDATA 'mihomo-party'
-$profileYaml = Join-Path $appDir 'profile.yaml'
-if (-not (Test-Path -LiteralPath $profileYaml)) { throw 'mihomo-party profile.yaml not found' }
-$current = ''
-$items = @{}
-$id = ''
-foreach ($line in Get-Content -LiteralPath $profileYaml -Encoding UTF8) {
-    if ($line -match '^\s*-\s*id:\s*(\S+)') { $id = $matches[1]; $items[$id] = @{ name = ''; updated = 0 } }
-    elseif ($id -and $line -match '^\s+name:\s*(.+)$') { $items[$id].name = $matches[1].Trim() }
-    elseif ($id -and $line -match '^\s+updated:\s*(\d+)') { $items[$id].updated = [int64]$matches[1] }
-    elseif ($line -match '^current:\s*(\S+)') { $current = $matches[1] }
-}
-if (-not $current -or -not $items.ContainsKey($current)) { throw 'no current profile' }
-$item = $items[$current]
-$name = if ($item.name) { $item.name } else { $current }
-if ($item.updated -le 0) { Write-Output "$name · 从未更新"; exit 0 }
-$span = (Get-Date) - [DateTimeOffset]::FromUnixTimeMilliseconds($item.updated).LocalDateTime
-$age = if ($span.TotalMinutes -lt 1) { '刚刚' }
-    elseif ($span.TotalHours -lt 1) { '{0:N0} 分钟前' -f $span.TotalMinutes }
-    elseif ($span.TotalDays -lt 1) { '{0:N0} 小时前' -f $span.TotalHours }
-    else { '{0:N0} 天前' -f $span.TotalDays }
-Write-Output "$name · $age"
-"#;
+const CLASH_INFO_GET: &str = include_str!("scripts/clash_info_get.ps1");
 
-const CLASH_UPDATE: &str = r#"
-$ErrorActionPreference = 'Stop'
-[Console]::OutputEncoding = [Text.Encoding]::UTF8
-$appDir = Join-Path $env:APPDATA 'mihomo-party'
-$profileYaml = Join-Path $appDir 'profile.yaml'
-if (-not (Test-Path -LiteralPath $profileYaml)) { throw 'mihomo-party profile.yaml not found' }
-
-$current = ''
-$items = @{}
-$id = ''
-foreach ($line in Get-Content -LiteralPath $profileYaml -Encoding UTF8) {
-    if ($line -match '^\s*-\s*id:\s*(\S+)') { $id = $matches[1]; $items[$id] = @{ name = ''; url = ''; updated = 0 } }
-    elseif ($id -and $line -match '^\s+name:\s*(.+)$') { $items[$id].name = $matches[1].Trim() }
-    elseif ($id -and $line -match '^\s+url:\s*(\S+)') { $items[$id].url = $matches[1].Trim() }
-    elseif ($id -and $line -match '^\s+updated:\s*(\d+)') { $items[$id].updated = [int64]$matches[1] }
-    elseif ($line -match '^current:\s*(\S+)') { $current = $matches[1] }
-}
-if (-not $current -or -not $items.ContainsKey($current)) { throw 'no current profile' }
-$item = $items[$current]
-if (-not $item.url) { throw '当前订阅没有 URL（本地配置无法在线更新）' }
-
-$response = Invoke-WebRequest -Uri $item.url -UseBasicParsing -TimeoutSec 30 -Headers @{
-    'User-Agent' = 'clash.meta/mihomo-party'
-}
-$content = $response.Content
-if ($content -notmatch '(?m)^(proxies|proxy-providers):') {
-    throw '下载到的内容不像 Clash 配置（缺少 proxies / proxy-providers）'
-}
-
-$profileFile = Join-Path $appDir ("profiles\$current.yaml")
-if (Test-Path -LiteralPath $profileFile) { Copy-Item -LiteralPath $profileFile -Destination "$profileFile.bak" -Force }
-[IO.File]::WriteAllText($profileFile, $content, (New-Object Text.UTF8Encoding($false)))
-
-$lines = Get-Content -LiteralPath $profileYaml -Encoding UTF8
-$now = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
-$inCurrent = $false
-for ($i = 0; $i -lt $lines.Count; $i++) {
-    if ($lines[$i] -match '^\s*-\s*id:\s*(\S+)') {
-        $inCurrent = ($matches[1] -eq $current)
-    } elseif ($inCurrent -and $lines[$i] -match '^(\s*)updated:') {
-        $lines[$i] = $matches[1] + 'updated: ' + $now
-        $inCurrent = $false
-    }
-}
-[IO.File]::WriteAllLines($profileYaml, $lines, (New-Object Text.UTF8Encoding($false)))
-
-$exe = $null
-try {
-    $command = (Get-ItemProperty 'HKCU:\Software\Classes\clash\shell\open\command' -ErrorAction Stop).'(default)'
-    $exe = ($command -split '"')[1]
-} catch {}
-if (-not $exe -or -not (Test-Path -LiteralPath $exe)) {
-    $exe = 'C:\Program Files\Clash Party\Clash Party.exe'
-}
-Get-Process -Name 'Clash Party' -ErrorAction SilentlyContinue | Stop-Process -Force
-Start-Sleep -Milliseconds 800
-Start-Process -FilePath $exe
-Start-Sleep -Seconds 2
-Write-Output '已更新并重启 Clash Party'
-"#;
+const CLASH_UPDATE: &str = include_str!("scripts/clash_update.ps1");
 
 // 保持唤醒：nosleep（D:\Softwares\nosleep\nosleep.exe）
 // ---------------------------------------------------------------------------
 
-const KEEP_AWAKE_GET: &str = r#"
-$ErrorActionPreference = 'Stop'
-if (Get-Process nosleep -ErrorAction SilentlyContinue) { 'on' } else { 'off' }
-"#;
+const KEEP_AWAKE_GET: &str = include_str!("scripts/keep_awake_get.ps1");
 
-const KEEP_AWAKE_ON: &str = r#"
-$ErrorActionPreference = 'Stop'
-if (-not (Get-Process nosleep -ErrorAction SilentlyContinue)) {
-    Start-Process 'D:\Softwares\nosleep\nosleep.exe' -ArgumentList '--tray','--startup'
-    Start-Sleep -Milliseconds 800
-}
-if (-not (Get-Process nosleep -ErrorAction SilentlyContinue)) { throw 'nosleep did not start' }
-'on'
-"#;
+const KEEP_AWAKE_ON: &str = include_str!("scripts/keep_awake_on.ps1");
 
-const KEEP_AWAKE_OFF: &str = r#"
-$ErrorActionPreference = 'Stop'
-Get-Process nosleep -ErrorAction SilentlyContinue | Stop-Process -Force
-Start-Sleep -Milliseconds 300
-if (Get-Process nosleep -ErrorAction SilentlyContinue) { throw 'nosleep is still running' }
-'off'
-"#;
+const KEEP_AWAKE_OFF: &str = include_str!("scripts/keep_awake_off.ps1");
 
 #[cfg(test)]
 mod tests {
