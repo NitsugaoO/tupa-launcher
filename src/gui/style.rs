@@ -23,7 +23,7 @@ pub const SCROLL_PAUSE: f32 = 0.6; // 两端各停多久（秒）
 /// 列表上下滚动：每帧向目标偏移逼近的比例（0..1，越大越快）
 pub const SCROLL_EASE: f32 = 0.28;
 /// 选框 / 光标滑动的缓动系数（比滚动稍快，跟手一点）
-pub const MOVE_EASE: f32 = 0.35;
+pub const MOVE_EASE: f32 = 0.55;
 /// 位移小于这个像素数就吸附到目标
 pub const SCROLL_SNAP: f32 = 0.4;
 

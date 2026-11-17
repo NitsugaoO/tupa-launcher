@@ -189,16 +189,6 @@ impl Panel {
                     make_overlay_window();
                 }
 
-                // 高度跟内容走：空输入只有一条输入行，出结果后向下展开。
-                // 用 Win32 改（不经 `Window::resize`），否则会在 update 内部同步 relayout 而重入。
-                if let Ok((wanted, scale)) =
-                    this.update(cx, |panel, _cx| (panel.desired_height(), panel.scale))
-                    && wanted > 0.0
-                {
-                    #[cfg(windows)]
-                    crate::util::resize_panel_height(wanted * scale);
-                }
-
                 match this.update(cx, |panel, cx| {
                     // 光标闪烁：到点就翻一次（移动光标后 `blink_at` 会被推后）
                     let now = std::time::Instant::now();
@@ -416,12 +406,17 @@ impl Panel {
                 self.caret_height = line_height;
                 self.caret_top = (style::INPUT_HEIGHT - self.caret_height) / 2.0;
                 {
-                    use std::sync::atomic::{AtomicUsize, Ordering};
-                    static N: AtomicUsize = AtomicUsize::new(0);
-                    if N.fetch_add(1, Ordering::Relaxed) < 2 {
+                    // 只在几何变化时记一行（对比紧凑态 / 展开态）
+                    if (self.caret_height - line_height).abs() > 0.05
+                        || (self.caret_top - (style::INPUT_HEIGHT - line_height) / 2.0).abs() > 0.05
+                    {
                         debug_log(&format!(
-                            "caret_h={:.1} caret_top={:.1} prompt_w={:.1} ascent={:.1} descent={:.1}",
-                            self.caret_height, self.caret_top, prompt_width, ascent, descent
+                            "caret 变化: h {:.1} -> {:.1}, top {:.1} -> {:.1} (line={:.1})",
+                            self.caret_height,
+                            line_height,
+                            self.caret_top,
+                            (style::INPUT_HEIGHT - line_height) / 2.0,
+                            line_height
                         ));
                     }
                 }
@@ -1188,7 +1183,21 @@ impl Render for Panel {
             ));
         }
 
-        self.scale = f32::from(window.scale_factor()).max(0.5);
+        self.scale = window.scale_factor().max(0.5);
+
+        // 高度跟内容走（紧凑态只有输入行、出结果后向下展开）。
+        // 用 `window.on_next_frame` 推后一帧再 resize：直接在 render 里调会触发
+        // 同步 relayout/render → "cannot update Panel while it is already being updated"。
+        // 尺寸是**逻辑像素**，GPUI 自己会处理 DPI（Win32 SetWindowPos 那条路走不通：
+        // 请求 132px 实际窗口还是 66px，说明系统按 DPI 又缩了一次）。
+        let wanted = self.desired_height();
+        let current = f32::from(window.bounds().size.height);
+        if (current - wanted).abs() > 1.0 {
+            let width = window.bounds().size.width;
+            window.on_next_frame(move |window, _cx| {
+                window.resize(size(width, px(wanted)));
+            });
+        }
         let p = self.palette;
         let compact = compact_now;
         let reveal = (self.reveal_started.elapsed().as_secs_f32() / style::REVEAL_SECS).min(1.0);
