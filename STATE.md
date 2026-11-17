@@ -27,6 +27,9 @@ updated: 2026-11-17 · code: `f40b08f`（GPUI 面板全线打通：独立 exe + 
   - 视觉：chip 胶囊两档（灰底 + 类型色字 / 选中反白）、行高 28、半透明开关 `[gui] opacity`
   - 与 WM 的关系：GlazeWM 里 `tupa-gui` 是 **`ignore`**（浮层不归 workspace 管 —— 被接管会被
     tiling 挤压、切 workspace 时被 `SW_HIDE`）；尺寸由 GPUI 按主屏 62%×55% 居中算
+  - **主入口已切到 GUI**（2026-11-17 晚）：`[gui] hotkey = "alt+\`"`，开机自启是
+    `启动	upa-gui.lnk`；原来的 `tupa-launcher-daemon.lnk` 改名 `.disabled`（守护进程 + TUI
+    不再自启，TUI 仍可手动 `cargo run --release` 跑）。守护进程在跑时会占着热键，切换前先停它
   - 踩过的坑（4 条 GPUI 行为 + 2 条崩溃）都记在 `AGENTS.md`，别重踩
 
 - 版本 `Cargo.toml` **0.9.0**（`:blog` 删了旧 `:new`，升了一个次版本）
@@ -252,5 +255,5 @@ updated: 2026-11-17 · code: `f40b08f`（GPUI 面板全线打通：独立 exe + 
 | 生效配置 | `~/.config/tupa-launcher/{config,actions,theme}.toml`（改完下次启动生效，**不用编译**） |
 | 用户数据 | `~/.config/tupa-launcher/{favorites,history}.json` |
 | 守护进程日志 | `%TEMP%\tupa-launcher-daemon.log` |
-| 开机自启 | 启动文件夹 `tupa-launcher-daemon.lnk` |
+| 开机自启 | 启动文件夹 `tupa-gui.lnk`（GUI 面板）；`tupa-launcher-daemon.lnk.disabled` 是停用的旧守护进程 |
 | 面板窗口规则 | GlazeWM `window_rules`（浮动 / 62%×55% / 居中） |

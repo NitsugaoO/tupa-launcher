@@ -56,6 +56,9 @@ tupa-launcher.exe --check # 所有 `[[apps]]` 都能解析
 - 命令关键字是 **`set`**（历史上叫 switch，已改名）；文档示例写默认前缀 `:`，
   用户本机 `config.toml` 改成了 `@`，别把两者搞混。
 - **面板渲染只走 `ui::draw`**（TUI 与 GUI 共用），别在 GUI 里另写一套布局。
+- **主入口是 `tupa-gui.exe`**（2026-11-17 晚起）：热键 `[gui] hotkey`（本机 `alt+\``）、
+  开机自启 `启动	upa-gui.lnk`。守护进程 + TUI 已停用（`tupa-launcher-daemon.lnk.disabled`），
+  TUI 只能手动跑。改 GUI 之前先确认守护进程没在跑，否则它会占着热键让 GUI 注册失败。
 - **两个可执行文件，别混**（2026-11-17 起）：`src/lib.rs` 放全部模块（`pub mod`），
   `src/main.rs` → `tupa-launcher.exe`（TUI + 守护进程，不链接 gpui），
   `src/gui_main.rs` → `tupa-gui.exe`（GPUI 面板 + 托盘 + 热键，`required-features = ["gui"]`，
