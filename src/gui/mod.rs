@@ -385,18 +385,21 @@ impl Panel {
                     .child(before.to_owned()),
             );
 
-        if self.cursor_on {
-            row = row.child(
-                div()
-                    .w(px(style::CURSOR_WIDTH))
-                    .h(px(style::CURSOR_HEIGHT))
-                    .flex_shrink_0()
-                    .bg(p.accent),
-            );
-        }
+        let cursor = |p: Palette| {
+            div()
+                .w(px(style::CURSOR_WIDTH))
+                .h(px(style::CURSOR_HEIGHT))
+                .flex_shrink_0()
+                .bg(p.accent)
+        };
 
-        // 输入法预编辑（拼音还没上屏）：插在光标处，画成带底色的临时文本
-        if let Some((_, text)) = &self.preedit {
+        // 光标位置：没有预编辑时在光标处；有预编辑（拼音未上屏）时挪到拼音**后面**，
+        // 这样打字/选词时光标跟着组合串走，而不是死在拼音左边。
+        let preedit = self.preedit.as_ref().map(|(_, text)| text.clone());
+        if self.cursor_on && preedit.is_none() {
+            row = row.child(cursor(p));
+        }
+        if let Some(text) = preedit {
             row = row.child(
                 div()
                     .px(px(1.))
@@ -404,8 +407,11 @@ impl Panel {
                     .bg(p.panel)
                     .text_size(px(style::INPUT_SIZE))
                     .text_color(p.fg)
-                    .child(text.clone()),
+                    .child(text),
             );
+            if self.cursor_on {
+                row = row.child(cursor(p));
+            }
         }
 
         row.child(
@@ -577,8 +583,19 @@ impl Panel {
                 // 只有选中行会左右滚动（跟 TUI 一样），其余行裁掉就裁掉
                 shift: if selected == Some(index) {
                     let title = item.columns.first().map(String::as_str).unwrap_or("");
-                    let offset = crate::ui::scroll_offset(display_width(title), visible, self.app.tick);
+                    let offset =
+                        crate::ui::scroll_offset(display_width(title), visible, self.app.tick);
                     offset as f32 * advance
+                } else {
+                    0.0
+                },
+                note_shift: if selected == Some(index) {
+                    let note = note_text(item);
+                    let note_advance = style::NOTE_SIZE * 0.6;
+                    let note_visible = (metrics.note / note_advance).max(1.0) as usize;
+                    let offset =
+                        crate::ui::scroll_offset(display_width(&note), note_visible, self.app.tick);
+                    offset as f32 * note_advance
                 } else {
                     0.0
                 },
@@ -674,6 +691,8 @@ struct RowSnapshot {
     number: Option<usize>,
     /// 超宽时向左移动的像素（负 margin，实现左右滚动）
     shift: f32,
+    /// 附注列同理
+    note_shift: f32,
 }
 
 /// 行内固定列的宽度（`number` 只在选择模式下占位）
@@ -694,11 +713,7 @@ fn render_row(
     panel: &WeakEntity<Panel>,
 ) -> AnyElement {
     let title = row.columns.first().cloned().unwrap_or_default();
-    let note = if row.columns.len() > 1 {
-        row.columns[row.columns.len() - 1].clone()
-    } else {
-        String::new()
-    };
+    let note = note_text_for_row(row);
     let fg = if row.unavailable { p.faint } else { p.fg };
 
     let mut card = div()
@@ -775,13 +790,20 @@ fn render_row(
                 ),
         )
         .child(
+            // 附注列：其余列拼起来，选中行超宽时同样左右滚动
             div()
                 .w(px(metrics.note))
                 .flex_shrink_0()
-                .truncate()
-                .text_size(px(style::NOTE_SIZE))
-                .text_color(p.dim)
-                .child(note),
+                .overflow_hidden()
+                .whitespace_nowrap()
+                .child(
+                    div()
+                        .ml(px(-row.note_shift))
+                        .whitespace_nowrap()
+                        .text_size(px(style::NOTE_SIZE))
+                        .text_color(p.dim)
+                        .child(note),
+                ),
         )
         .on_click({
             let panel = panel.clone();
@@ -1008,6 +1030,25 @@ impl Render for Panel {
 
         root
     }
+}
+
+/// 除了第一列之外的所有列，用 " · " 拼起来
+fn note_text(item: &crate::providers::Item) -> String {
+    item.columns
+        .iter()
+        .skip(1)
+        .map(String::as_str)
+        .collect::<Vec<_>>()
+        .join(" · ")
+}
+
+fn note_text_for_row(row: &RowSnapshot) -> String {
+    row.columns
+        .iter()
+        .skip(1)
+        .map(String::as_str)
+        .collect::<Vec<_>>()
+        .join(" · ")
 }
 
 /// 文本的「显示宽度」（宽字符算 2）

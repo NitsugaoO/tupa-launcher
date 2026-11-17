@@ -30,7 +30,7 @@ pub const FONT_WEIGHT: FontWeight = FontWeight::NORMAL;
 pub const INPUT_HEIGHT: f32 = 40.0;
 pub const INPUT_SIZE: f32 = 15.0;
 /// 光标块的尺寸（`app.cursor` 处那根竖线）
-pub const CURSOR_WIDTH: f32 = 2.0;
+pub const CURSOR_WIDTH: f32 = 1.0;
 pub const CURSOR_HEIGHT: f32 = 18.0;
 /// 结果行：卡片 30、间距 4、圆角 7、字号 13（YASB 那种紧凑感）
 pub const ROW_HEIGHT: f32 = 28.0;
