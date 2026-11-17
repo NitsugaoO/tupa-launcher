@@ -615,21 +615,39 @@ impl Panel {
 
     /// chip 的点亮进度：新选中行落地后 0 → 1 渐入，旧选中行在滑动开始时 1 → 0 渐出。
     fn chip_progress(&self, index: usize, selected: Option<usize>) -> f32 {
+        {
+            use std::sync::atomic::{AtomicUsize, Ordering};
+            static N: AtomicUsize = AtomicUsize::new(0);
+            if N.fetch_add(1, Ordering::Relaxed) < 40
+                && (selected == Some(index) || self.chip_from == Some(index))
+            {
+                debug_log(&format!(
+                    "chip: idx={index} sel={selected:?} from={:?} moving={} y={:.1} -> {:.2}",
+                    self.chip_from,
+                    self.marker_moving,
+                    self.marker_y,
+                    self.chip_progress_raw(index, selected)
+                ));
+            }
+        }
+        self.chip_progress_raw(index, selected)
+    }
+
+    fn chip_progress_raw(&self, index: usize, selected: Option<usize>) -> f32 {
         if !self.animations {
             return f32::from(selected == Some(index));
         }
         let fade = style::CHIP_FADE_SECS;
         if selected == Some(index) {
             if !self.marker_moving {
-                return (self.chip_settled_at.elapsed().as_secs_f32() / fade).clamp(0.0, 1.0);
+                // 落地后从 85% 续到 100%
+                let rest = (self.chip_settled_at.elapsed().as_secs_f32() / fade).clamp(0.0, 1.0);
+                return 0.85 + rest * 0.15;
             }
-            // 滑动中就不等落地了：离目标越近越亮（最多 85%，剩下的落地后补满）。
-            // 这里必须用「选中行自己的目标 y」而不是 `marker_target`：后者要到 list_area
-            // 里才更新，第一帧还是旧行的位置 → gap=0 → 新 chip 会先亮一下再掉回灰。
-            let row_h = style::ROW_HEIGHT + style::ROW_GAP;
-            let target = index as f32 * row_h;
-            let gap = ((target - self.marker_y).abs() / row_h).clamp(0.0, 1.0);
-            (1.0 - gap / 0.6).clamp(0.0, 1.0) * 0.85
+            // 滑动中：**按时间**渐入（不用「离目标多远」——滑动太快，距离曲线两三帧就冲完，
+            // 看起来像闪一下）。延迟 40ms 起头，140ms 内到 85%，剩下 15% 落地后补满。
+            let elapsed = self.chip_fade_start.elapsed().as_secs_f32();
+            ((elapsed - 0.04).max(0.0) / fade).clamp(0.0, 1.0) * 0.85
         } else if self.chip_from == Some(index) {
             // 旧行：从 1 渐隐到 0
             1.0 - (self.chip_fade_start.elapsed().as_secs_f32() / fade).clamp(0.0, 1.0)
