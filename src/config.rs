@@ -32,6 +32,12 @@ pub struct Gui {
 
     /// 是否显示托盘图标（关掉就只剩热键 + 窗口）
     pub tray: bool,
+
+    /// 面板背景不透明度（1.0 = 完全不透明；0.9 能透出后面的壁纸/窗口，但不模糊）
+    ///
+    /// 真正的亚克力模糊做不到：GPUI 用 `WS_EX_NOREDIRECTIONBITMAP` + DirectComposition
+    /// 自绘，DWM 不给这种窗口合成背景，Windhawk 的 translucent-windows 也注入不进去。
+    pub opacity: f32,
 }
 
 impl Default for Gui {
@@ -39,6 +45,7 @@ impl Default for Gui {
         Gui {
             hotkey: "alt+0".to_string(),
             tray: true,
+            opacity: 1.0,
         }
     }
 }

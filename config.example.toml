@@ -37,6 +37,10 @@ command_prefix = ":"
 hotkey = "alt+0"
 # 是否显示托盘图标（左键显示/隐藏，右键菜单：显示面板 / 退出）
 tray = true
+# 面板背景不透明度：1.0 = 完全不透明，0.88 能透出后面的壁纸/窗口
+# （没有模糊——GPUI 的窗口是 DirectComposition 自绘，DWM 不给它合成背景，
+#  Windhawk 的 translucent-windows 也注入不进去）
+opacity = 1.0
 
 [blog]
 # 博客仓库根目录（package.json 和 source/_posts 在这里）；留空 = ~/blog

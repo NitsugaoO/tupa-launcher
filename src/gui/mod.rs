@@ -48,6 +48,7 @@ pub fn run(cfg: Config, theme: Theme) -> Result<()> {
         return Ok(());
     }
 
+    let opacity = cfg.gui.opacity.clamp(0.3, 1.0);
     let app = App::new(cfg, theme);
 
     gpui::Application::new().run(move |cx| {
@@ -80,10 +81,14 @@ pub fn run(cfg: Config, theme: Theme) -> Result<()> {
                 is_resizable: true,
                 is_minimizable: true,
                 focus: true,
-                window_background: WindowBackgroundAppearance::Opaque,
+                window_background: if opacity < 1.0 {
+                    WindowBackgroundAppearance::Transparent
+                } else {
+                    WindowBackgroundAppearance::Opaque
+                },
                 ..Default::default()
             },
-            move |window, cx| cx.new(|cx| Panel::new(app, window, cx)),
+            move |window, cx| cx.new(|cx| Panel::new(app, opacity, window, cx)),
         );
         if let Err(error) = result {
             eprintln!("[tupa-launcher] 创建 GPUI 窗口失败：{error:#}");
@@ -121,6 +126,8 @@ struct Panel {
     row_metrics: RowMetrics,
     /// 窗口 DPI 缩放（改高度时要把逻辑像素换成物理像素）
     scale: f32,
+    /// 面板背景不透明度（来自 `[gui] opacity`）
+    opacity: f32,
     /// 上一次写进调试日志的结果条数（`TUPA_GUI_LOG=<路径>` 时生效）
     logged_rows: usize,
     /// 上一次写进调试日志的输入框内容
@@ -128,7 +135,7 @@ struct Panel {
 }
 
 impl Panel {
-    fn new(mut app: App, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    fn new(mut app: App, opacity: f32, window: &mut Window, cx: &mut Context<Self>) -> Self {
         // 开屏（收藏 + 最近命令）要一次查询，provider 在工作线程里跑
         app.refresh();
 
@@ -210,6 +217,7 @@ impl Panel {
             hint_open: false,
             row_metrics: RowMetrics { title: 0.0, note: 0.0 },
             scale: 1.0,
+            opacity,
             logged_rows: usize::MAX,
             logged_input: String::new(),
         }
@@ -973,7 +981,7 @@ impl Render for Panel {
             .size_full()
             .flex()
             .flex_col()
-            .bg(p.background)
+            .bg(style::with_alpha(p.background, self.opacity))
             .rounded(px(style::RADIUS))
             .border(px(style::BORDER))
             .border_color(p.accent)

@@ -57,6 +57,14 @@ pub const ACCENT_BAR: f32 = 3.0;
 /// 列表区顶部留白（别让第一行贴着分隔线）
 pub const LIST_TOP: f32 = 4.0;
 
+/// 给颜色套一个不透明度（1.0 = 原样）
+pub fn with_alpha(color: Rgba, alpha: f32) -> Rgba {
+    Rgba {
+        a: alpha.clamp(0.0, 1.0),
+        ..color
+    }
+}
+
 /// ratatui 的 `Color` → GPUI `Rgba`（只处理 `Rgb`，其余回退到背景色）
 pub fn rgba(color: Color, fallback: Color) -> Rgba {
     match color {
