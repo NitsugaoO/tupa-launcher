@@ -19,26 +19,31 @@ pub const PADDING: f32 = 12.0;
 pub const FONT: &str = "JetBrains Maple Mono";
 pub const FONT_WEIGHT: FontWeight = FontWeight::NORMAL;
 
-/// 输入行：高 44、字号 16
-pub const INPUT_HEIGHT: f32 = 44.0;
-pub const INPUT_SIZE: f32 = 16.0;
-/// 结果行：高 34、字号 14、卡片圆角 8
-pub const ROW_HEIGHT: f32 = 34.0;
-pub const ROW_GAP: f32 = 2.0;
-pub const ROW_RADIUS: f32 = 8.0;
-pub const ROW_SIZE: f32 = 14.0;
-/// 徽标 chip：宽 52、高 20、圆角 4、字号 11
-pub const BADGE_WIDTH: f32 = 52.0;
-pub const BADGE_HEIGHT: f32 = 20.0;
-pub const BADGE_RADIUS: f32 = 4.0;
-pub const BADGE_SIZE: f32 = 11.0;
+/// 输入行：高 40、字号 15
+pub const INPUT_HEIGHT: f32 = 40.0;
+pub const INPUT_SIZE: f32 = 15.0;
+/// 光标块的尺寸（`app.cursor` 处那根竖线）
+pub const CURSOR_WIDTH: f32 = 2.0;
+pub const CURSOR_HEIGHT: f32 = 18.0;
+/// 结果行：卡片 30、间距 4、圆角 7、字号 13（YASB 那种紧凑感）
+pub const ROW_HEIGHT: f32 = 30.0;
+pub const ROW_GAP: f32 = 4.0;
+pub const ROW_RADIUS: f32 = 7.0;
+pub const ROW_SIZE: f32 = 13.0;
+/// 徽标 chip：宽 50、高 18、圆角 9（胶囊）、字号 10
+pub const BADGE_WIDTH: f32 = 50.0;
+pub const BADGE_HEIGHT: f32 = 18.0;
+pub const BADGE_RADIUS: f32 = 9.0;
+pub const BADGE_SIZE: f32 = 10.0;
 /// 附注（副标题 / 末列）
-pub const NOTE_SIZE: f32 = 12.0;
-/// 状态栏：高 26、字号 11
-pub const STATUS_HEIGHT: f32 = 26.0;
+pub const NOTE_SIZE: f32 = 11.0;
+/// 状态栏：高 24、字号 11
+pub const STATUS_HEIGHT: f32 = 24.0;
 pub const STATUS_SIZE: f32 = 11.0;
 /// 选中行左侧的强调条宽度
 pub const ACCENT_BAR: f32 = 3.0;
+/// 列表区顶部留白（别让第一行贴着分隔线）
+pub const LIST_TOP: f32 = 4.0;
 
 /// ratatui 的 `Color` → GPUI `Rgba`（只处理 `Rgb`，其余回退到背景色）
 pub fn rgba(color: Color, fallback: Color) -> Rgba {
@@ -52,6 +57,8 @@ pub fn rgba(color: Color, fallback: Color) -> Rgba {
 #[derive(Clone, Copy)]
 pub struct Palette {
     pub background: Rgba,
+    /// 比背景略亮一档：hover 底色、未选中 chip 的底色
+    pub panel: Rgba,
     pub overlay: Rgba,
     pub border: Rgba,
     pub fg: Rgba,
@@ -68,6 +75,7 @@ impl Palette {
         let background = rgba(theme.background, theme.background);
         Self {
             background,
+            panel: rgba(theme.panel, theme.background),
             overlay: rgba(theme.overlay, theme.background),
             border: rgba(theme.border, theme.background),
             fg: rgba(theme.fg, theme.background),
@@ -99,6 +107,3 @@ pub fn badge_color(kind: crate::providers::Kind) -> Rgba {
 
 /// 输入行左侧的提示符
 pub const PROMPT: &str = "❯ ";
-
-/// 光标：等宽字的一格宽（Step 1 先用静态竖线，Step 3 换成动画块）
-pub const CURSOR: &str = "▏";

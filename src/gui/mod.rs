@@ -30,6 +30,7 @@ use gpui::{
 
 use crate::app::App;
 use crate::config::Config;
+use crate::i18n;
 use crate::theme::Theme;
 use crate::util::PanelKind;
 
@@ -90,6 +91,10 @@ struct Panel {
     scroll: UniformListScrollHandle,
     /// 上一帧的选中项，用来判断要不要跟随滚动
     last_selected: Option<usize>,
+    /// `?` 打开的快捷键帮助浮层
+    help: bool,
+    /// 光标是否显示（500ms 翻转一次，模拟闪烁）
+    cursor_on: bool,
     /// 上一次写进调试日志的结果条数（`TUPA_GUI_LOG=<路径>` 时生效）
     logged_rows: usize,
 }
@@ -108,11 +113,21 @@ impl Panel {
         cx.spawn(async move |this, cx| {
             let mut pending = false;
             let mut styled = false;
+            let mut last_blink = std::time::Instant::now();
             loop {
                 let delay = if pending { 16 } else { 120 };
                 cx.background_executor()
                     .timer(Duration::from_millis(delay))
                     .await;
+
+                // 光标闪烁：500ms 一次，顺便让状态栏的「加载中」有机会刷新
+                if last_blink.elapsed() >= Duration::from_millis(500) {
+                    last_blink = std::time::Instant::now();
+                    let _ = this.update(cx, |panel, cx| {
+                        panel.cursor_on = !panel.cursor_on;
+                        cx.notify();
+                    });
+                }
 
                 // 窗口已经真正上屏了，这时改 EXSTYLE 才生效（APPWINDOW → TOOLWINDOW）
                 if !styled {
@@ -143,12 +158,39 @@ impl Panel {
             focus,
             scroll: UniformListScrollHandle::new(),
             last_selected: None,
+            help: false,
+            cursor_on: true,
             logged_rows: usize::MAX,
         }
     }
 
     fn handle_key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(key) = keys::to_key(&event.keystroke) {
+        let key = keys::to_key(&event.keystroke);
+        let question = matches!(
+            key,
+            Some(crossterm::event::KeyEvent {
+                code: crossterm::event::KeyCode::Char('?'),
+                ..
+            })
+        );
+
+        // 帮助浮层：`?` 开关，其它任意键关掉（Esc 也关）
+        if self.help {
+            if !question {
+                self.help = false;
+            }
+            window.focus(&self.focus);
+            cx.notify();
+            return;
+        }
+        if question {
+            self.help = true;
+            window.focus(&self.focus);
+            cx.notify();
+            return;
+        }
+
+        if let Some(key) = key {
             self.app.on_key(key);
         }
 
@@ -170,8 +212,17 @@ impl Panel {
 
     /// 输入行：`❯ ` + 输入内容 + 光标（Step 3 换成真光标 + 水平滚动）
     fn input_row(&self, p: Palette) -> AnyElement {
-        let input = self.app.input.clone();
-        div()
+        // 光标按 `app.cursor` 拆开，前后各画一段，中间是竖线
+        let at = self
+            .app
+            .input
+            .char_indices()
+            .nth(self.app.cursor)
+            .map(|(index, _)| index)
+            .unwrap_or(self.app.input.len());
+        let (before, after) = self.app.input.split_at(at);
+
+        let mut row = div()
             .h(px(style::INPUT_HEIGHT))
             .flex()
             .flex_row()
@@ -187,15 +238,26 @@ impl Panel {
                 div()
                     .text_size(px(style::INPUT_SIZE))
                     .text_color(p.fg)
-                    .child(input),
-            )
-            .child(
+                    .child(before.to_owned()),
+            );
+
+        if self.cursor_on {
+            row = row.child(
                 div()
-                    .text_size(px(style::INPUT_SIZE))
-                    .text_color(p.accent)
-                    .child(style::CURSOR),
-            )
-            .into_any_element()
+                    .w(px(style::CURSOR_WIDTH))
+                    .h(px(style::CURSOR_HEIGHT))
+                    .flex_shrink_0()
+                    .bg(p.accent),
+            );
+        }
+
+        row.child(
+            div()
+                .text_size(px(style::INPUT_SIZE))
+                .text_color(p.fg)
+                .child(after.to_owned()),
+        )
+        .into_any_element()
     }
 
     fn separator(&self, p: Palette) -> AnyElement {
@@ -234,15 +296,23 @@ impl Panel {
         let count = rows.len();
         let panel = cx.entity().downgrade();
 
-        uniform_list("results", count, move |range, _window, _cx| {
-            range
-                .map(|index| render_row(&rows[index], p, title_width, note_width, &panel))
-                .collect()
-        })
-        .flex_1()
-        .w_full()
-        .track_scroll(self.scroll.clone())
-        .into_any_element()
+        div()
+            .flex_1()
+            .w_full()
+            .flex()
+            .flex_col()
+            .child(div().h(px(style::LIST_TOP)).flex_shrink_0())
+            .child(
+                uniform_list("results", count, move |range, _window, _cx| {
+                    range
+                        .map(|index| render_row(&rows[index], p, title_width, note_width, &panel))
+                        .collect()
+                })
+                .flex_1()
+                .w_full()
+                .track_scroll(self.scroll.clone()),
+            )
+            .into_any_element()
     }
 
     /// 把当前结果快照成「一行一个结构体」，供 `uniform_list` 的闭包使用
@@ -268,6 +338,45 @@ impl Panel {
             .collect()
     }
 
+    /// `?` 打开的键位说明（替换列表区）
+    fn help_panel(&self, p: Palette) -> AnyElement {
+        let mut list = div().w_full().flex().flex_col().gap(px(7.)).py(px(8.));
+        for (keys, description) in i18n::gui_help() {
+            list = list.child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(14.))
+                    .child(
+                        div()
+                            .w(px(150.))
+                            .flex_shrink_0()
+                            .text_color(p.accent)
+                            .child(keys),
+                    )
+                    .child(div().text_color(p.fg).child(description)),
+            );
+        }
+
+        div()
+            .flex_1()
+            .w_full()
+            .flex()
+            .flex_col()
+            .child(
+                div()
+                    .py(px(4.))
+                    .text_size(px(style::STATUS_SIZE))
+                    .text_color(p.dim)
+                    .child(i18n::t(
+                        "快捷键（按任意键关闭）",
+                        "Keyboard shortcuts (any key closes)",
+                    )),
+            )
+            .child(list)
+            .into_any_element()
+    }
+
     /// 状态栏：左 = 状态消息 / provider 说明，右 = 选中位置
     fn status_bar(&self, p: Palette) -> AnyElement {
         let (left, color) = match &self.app.status {
@@ -275,7 +384,7 @@ impl Panel {
             Some((message, false)) => (message.clone(), p.good),
             None => (self.app.active_description().to_owned(), p.muted),
         };
-        let right = match self.app.list_state.selected() {
+        let position = match self.app.list_state.selected() {
             Some(index) => format!("{}/{}", index + 1, self.app.items.len()),
             None => String::new(),
         };
@@ -287,7 +396,19 @@ impl Panel {
             .justify_between()
             .text_size(px(style::STATUS_SIZE))
             .child(div().text_color(color).child(left))
-            .child(div().text_color(p.faint).child(right))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(10.))
+                    .child(div().text_color(p.faint).child(position))
+                    // 键位说明进二级菜单：按 `?` 打开
+                    .child(
+                        div()
+                            .text_color(p.dim)
+                            .child(i18n::t("? 键位", "? keys")),
+                    ),
+            )
             .into_any_element()
     }
 }
@@ -323,7 +444,7 @@ fn render_row(
         .px(px(8.))
         .rounded(px(style::ROW_RADIUS))
         .whitespace_nowrap()
-        .hover(|style| style.bg(p.overlay));
+        .hover(|style| style.bg(p.panel));
 
     if row.selected {
         card = card.bg(p.overlay);
@@ -337,6 +458,7 @@ fn render_row(
             .bg(if row.selected { p.accent } else { p.background }),
     )
     .child(
+        // chip：未选中是灰底灰字（YASB 那种胶囊），选中行反白成类型色底 + 深色字
         div()
             .w(px(style::BADGE_WIDTH))
             .h(px(style::BADGE_HEIGHT))
@@ -345,9 +467,9 @@ fn render_row(
             .items_center()
             .justify_center()
             .rounded(px(style::BADGE_RADIUS))
-            .bg(p.background)
+            .bg(if row.selected { row.color } else { p.panel })
             .text_size(px(style::BADGE_SIZE))
-            .text_color(row.color)
+            .text_color(if row.selected { p.background } else { p.muted })
             .child(row.badge),
     )
     .child(
@@ -435,7 +557,11 @@ impl Render for Panel {
             .on_key_down(cx.listener(Self::handle_key))
             .child(self.input_row(p))
             .child(self.separator(p))
-            .child(self.list_area(window, cx, p))
+            .child(if self.help {
+                self.help_panel(p)
+            } else {
+                self.list_area(window, cx, p)
+            })
             .child(self.status_bar(p))
     }
 }

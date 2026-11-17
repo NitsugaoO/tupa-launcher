@@ -455,6 +455,38 @@ pub fn elevate_windows_only() -> &'static str {
 }
 
 #[allow(dead_code)] // 只在无 gui feature 的构建里用到
+/// GPUI 面板里 `?` 打开的键位表（`(按键, 说明)`）
+pub fn gui_help() -> Vec<(&'static str, &'static str)> {
+    match lang() {
+        Lang::Zh => vec![
+            ("↑ / ↓", "移动选择"),
+            ("Enter", "执行当前项"),
+            ("Tab", "补全命令 / 参数"),
+            ("Ctrl+↑ / Ctrl+↓", "命令历史"),
+            ("Ctrl+E", "在文件管理器中定位"),
+            ("Ctrl+D", "收藏 / 取消收藏"),
+            ("Ctrl+Tab", "详细信息模式"),
+            ("Shift+Tab", "选择模式（1-9 跳转）"),
+            ("Esc", "清空输入；开屏时隐藏面板"),
+            ("Alt+0", "显示 / 隐藏面板（全局热键）"),
+            ("?", "打开 / 关闭这份说明"),
+        ],
+        Lang::En => vec![
+            ("↑ / ↓", "move selection"),
+            ("Enter", "run the selected item"),
+            ("Tab", "complete command / argument"),
+            ("Ctrl+↑ / Ctrl+↓", "command history"),
+            ("Ctrl+E", "reveal in file explorer"),
+            ("Ctrl+D", "toggle favorite"),
+            ("Ctrl+Tab", "detail mode"),
+            ("Shift+Tab", "select mode (1-9 jumps)"),
+            ("Esc", "clear input; hide the panel at home"),
+            ("Alt+0", "show / hide the panel (global hotkey)"),
+            ("?", "toggle this help"),
+        ],
+    }
+}
+
 pub fn gui_moved() -> &'static str {
     t(
         "GUI 面板已经是独立程序：运行同目录的 tupa-gui.exe",
