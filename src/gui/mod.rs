@@ -1249,8 +1249,7 @@ impl Render for Panel {
             if self.animations {
                 self.marker_moving = true;
             }
-            // 旧选中行的 chip 从彩色渐隐回灰
-            self.chip_from = self.last_selected;
+            // 旧选中行的 chip 从彩色渐隐回灰（`chip_from` 上面已经记好，别再覆盖成新值）
             self.chip_fade_start = std::time::Instant::now();
             // 滚动动画从头开始（每换一行都从「贴左边」开始走）
             self.scroll_started = std::time::Instant::now();
