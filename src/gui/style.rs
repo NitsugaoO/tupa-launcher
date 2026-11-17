@@ -44,9 +44,10 @@ pub const FONT_WEIGHT: FontWeight = FontWeight::NORMAL;
 /// 输入行：高 40、字号 15
 pub const INPUT_HEIGHT: f32 = 40.0;
 pub const INPUT_SIZE: f32 = 15.0;
-/// 光标块的尺寸（`app.cursor` 处那根竖线）
+/// 光标块的尺寸（`app.cursor` 处那根竖线）。
+/// 高度跟字号一致（15px），比 18 更贴合字形上下边界——之前高出字头一截，看着像错位。
 pub const CURSOR_WIDTH: f32 = 1.0;
-pub const CURSOR_HEIGHT: f32 = 18.0;
+pub const CURSOR_HEIGHT: f32 = 15.0;
 /// 结果行：卡片 30、间距 4、圆角 7、字号 13（YASB 那种紧凑感）
 pub const ROW_HEIGHT: f32 = 28.0;
 pub const ROW_GAP: f32 = 3.0;

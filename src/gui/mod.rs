@@ -377,7 +377,7 @@ impl Panel {
     }
 
     /// 输入行：`❯ ` + 输入内容 + 光标（Step 3 换成真光标 + 水平滚动）
-    fn input_row(&mut self, p: Palette, cx: &mut Context<Self>) -> AnyElement {
+    fn input_row(&mut self, window: &Window, p: Palette, cx: &mut Context<Self>) -> AnyElement {
         // 光标按 `app.cursor` 拆开，前后各画一段
         let at = self
             .app
@@ -388,16 +388,15 @@ impl Panel {
             .unwrap_or(self.app.input.len());
         let (before, after) = self.app.input.split_at(at);
 
-        // 光标的目标位置：提示符 + 已输入 + 预编辑（中文预编辑时光标要跟着拼音走）
-        let advance = style::INPUT_SIZE * 0.6;
+        // 光标的目标位置：提示符 + 已输入 + 预编辑（全部按真实字形宽度量，不猜格数）
         let preedit = self.preedit.as_ref().map(|(_, text)| text.clone());
+        let prompt_width = text_width(window, style::PROMPT, style::INPUT_SIZE);
+        let before_width = text_width(window, before, style::INPUT_SIZE);
         let preedit_width = preedit
             .as_ref()
-            .map(|text| display_width(text) as f32 * advance)
+            .map(|text| text_width(window, text, style::INPUT_SIZE))
             .unwrap_or(0.0);
-        self.caret_target = style::PROMPT_CHARS * advance
-            + display_width(before) as f32 * advance
-            + preedit_width;
+        self.caret_target = prompt_width + before_width + preedit_width;
 
         let mut row = div()
             .relative()
@@ -652,6 +651,22 @@ impl Panel {
         self.scroll_y = self.scroll_y.clamp(0.0, self.scroll_max);
 
         // 选框滑动的目标位置
+        {
+            use std::sync::atomic::{AtomicUsize, Ordering};
+            static N: AtomicUsize = AtomicUsize::new(0);
+            if N.fetch_add(1, Ordering::Relaxed) < 5 {
+                debug_log(&format!(
+                    "marker: sel={:?} row_h={} scroll_y={:.1} target={:.1} cur={:.1} rows={} viewport={:.1}",
+                    self.app.list_state.selected(),
+                    row_h,
+                    self.scroll_y,
+                    self.marker_target,
+                    self.marker_y,
+                    rows.len(),
+                    self.scroll_viewport
+                ));
+            }
+        }
         self.marker_target = self
             .app
             .list_state
@@ -1167,7 +1182,7 @@ impl Render for Panel {
             .text_color(p.fg)
             .track_focus(&self.focus)
             .on_key_down(cx.listener(Self::handle_key))
-            .child(self.input_row(p, cx));
+            .child(self.input_row(window, p, cx));
 
         // 紧凑形态（刚呼出、还没输入）：只有一条输入行，分隔线 / 列表 / 状态栏都不画
         if !compact {
@@ -1231,6 +1246,25 @@ fn note_text_for_row(row: &RowSnapshot) -> String {
         .map(String::as_str)
         .collect::<Vec<_>>()
         .join(" · ")
+}
+
+/// 用真实字形排版量一段文本的宽度（不猜「一格多少像素」，`❯` 这种全角字符也准）
+fn text_width(window: &Window, text: &str, size: f32) -> f32 {
+    if text.is_empty() {
+        return 0.0;
+    }
+    let run = gpui::TextRun {
+        len: text.len(),
+        font: gpui::font(style::FONT),
+        color: gpui::black(),
+        background_color: None,
+        underline: None,
+        strikethrough: None,
+    };
+    let shaped = window
+        .text_system()
+        .shape_line(text.to_string().into(), px(size), &[run], None);
+    f32::from(shaped.width)
 }
 
 /// 文本的「显示宽度」（宽字符算 2）
