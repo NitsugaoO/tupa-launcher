@@ -623,9 +623,12 @@ impl Panel {
             if !self.marker_moving {
                 return (self.chip_settled_at.elapsed().as_secs_f32() / fade).clamp(0.0, 1.0);
             }
-            // 滑动中就不等落地了：离目标越近越亮（最多 85%，剩下的落地后补满）
+            // 滑动中就不等落地了：离目标越近越亮（最多 85%，剩下的落地后补满）。
+            // 这里必须用「选中行自己的目标 y」而不是 `marker_target`：后者要到 list_area
+            // 里才更新，第一帧还是旧行的位置 → gap=0 → 新 chip 会先亮一下再掉回灰。
             let row_h = style::ROW_HEIGHT + style::ROW_GAP;
-            let gap = ((self.marker_target - self.marker_y).abs() / row_h).clamp(0.0, 1.0);
+            let target = index as f32 * row_h;
+            let gap = ((target - self.marker_y).abs() / row_h).clamp(0.0, 1.0);
             (1.0 - gap / 0.6).clamp(0.0, 1.0) * 0.85
         } else if self.chip_from == Some(index) {
             // 旧行：从 1 渐隐到 0
