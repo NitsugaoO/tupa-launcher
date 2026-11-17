@@ -61,9 +61,12 @@ pub const BADGE_WIDTH: f32 = 50.0;
 pub const BADGE_HEIGHT: f32 = 18.0;
 pub const BADGE_RADIUS: f32 = 9.0;
 pub const BADGE_SIZE: f32 = 10.0;
+/// 行内横向间距 / 左右内边距（小一点，列表整体更靠左）
+pub const ROW_GAP_X: f32 = 6.0;
+pub const ROW_PAD_X: f32 = 6.0;
 /// 选择模式下的序号列 / 收藏星标列
 pub const NUMBER_WIDTH: f32 = 18.0;
-pub const STAR_WIDTH: f32 = 16.0;
+pub const STAR_WIDTH: f32 = 14.0;
 /// detail 模式每一行的行高
 pub const DETAIL_LINE: f32 = 20.0;
 /// 附注（副标题 / 末列）

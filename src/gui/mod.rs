@@ -164,6 +164,8 @@ struct Panel {
     logged_rows: usize,
     /// 上一次写进调试日志的输入框内容
     logged_input: String,
+    /// 上一次的「是否需要左右滚动」（只在变化时记日志）
+    logged_scroll: bool,
 }
 
 impl Panel {
@@ -269,6 +271,7 @@ impl Panel {
             was_compact: true,
             logged_rows: usize::MAX,
             logged_input: String::new(),
+            logged_scroll: false,
         }
     }
 
@@ -657,7 +660,20 @@ impl Panel {
     }
 
     /// 选中的那行是不是宽到需要左右滚动（等宽字体估算）
-    fn needs_scroll(&self) -> bool {
+    fn needs_scroll(&mut self) -> bool {
+        let need = self.needs_scroll_raw();
+        if need != self.logged_scroll {
+            self.logged_scroll = need;
+            debug_log(&format!(
+                "needs_scroll={need} title_w={:.1} sel={:?}",
+                self.row_metrics.title,
+                self.app.list_state.selected()
+            ));
+        }
+        need
+    }
+
+    fn needs_scroll_raw(&self) -> bool {
         if self.row_metrics.title <= 0.0 {
             return false;
         }
@@ -729,9 +745,15 @@ impl Panel {
         // 列宽按真实窗口宽度算（等宽字体 + truncate 由 GPUI 按像素裁）
         let total = f32::from(window.bounds().size.width) - style::PADDING * 2.0;
         let note_width = (total * 0.32).clamp(80.0, 240.0);
+        let number = if self.app.select_mode {
+            style::NUMBER_WIDTH
+        } else {
+            0.0
+        };
         let fixed = style::ACCENT_BAR
-            + 8.0 * 3.0
-            + style::NUMBER_WIDTH
+            + style::ROW_PAD_X * 2.0
+            + style::ROW_GAP_X * 2.0
+            + number
             + style::STAR_WIDTH
             + style::BADGE_WIDTH;
         let metrics = RowMetrics {
@@ -830,16 +852,10 @@ impl Panel {
                     .w_full()
                     .h(px(style::ROW_HEIGHT))
                     .rounded(px(style::ROW_RADIUS))
-                    .bg(p.overlay)
-                    .child(
-                        // 左侧强调条
-                        div()
-                            .w(px(style::ACCENT_BAR))
-                            .h_full()
-                            .rounded_tl(px(style::ROW_RADIUS))
-                            .rounded_bl(px(style::ROW_RADIUS))
-                            .bg(p.accent),
-                    ),
+                    // 左侧绿条用边框画：不占内容宽度，列表能整体左移
+                    .border_l(px(style::ACCENT_BAR))
+                    .border_color(p.accent)
+                    .bg(p.overlay),
             );
         }
 
@@ -1022,8 +1038,8 @@ fn render_row(
         .flex()
         .flex_row()
         .items_center()
-        .gap(px(8.))
-        .px(px(8.))
+        .gap(px(style::ROW_GAP_X))
+        .px(px(style::ROW_PAD_X))
         .rounded(px(style::ROW_RADIUS))
         .whitespace_nowrap()
         .hover(|style| style.bg(p.panel));
@@ -1032,15 +1048,6 @@ fn render_row(
     // 否则会和 marker 叠成两层（会看到高亮位置偏移、边缘发亮）
     let card = card
         .child(div().w(px(style::ACCENT_BAR)).h_full())
-        .child(
-            // 选择模式（Shift+Tab）下的 1-9 跳转序号
-            div()
-                .w(px(style::NUMBER_WIDTH))
-                .flex_shrink_0()
-                .text_size(px(style::NOTE_SIZE))
-                .text_color(p.dim)
-                .child(row.number.map(|n| n.to_string()).unwrap_or_default()),
-        )
         .child(
             // 收藏星标（未收藏也占位，保证列对齐）
             div()
