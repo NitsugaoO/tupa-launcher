@@ -32,8 +32,12 @@ pub const CHIP_FADE_SECS: f32 = 0.14;
 
 /// 列表展开时的淡入时长（秒）
 pub const REVEAL_SECS: f32 = 0.12;
-/// 动画帧间隔（毫秒）：需要滚动/淡入时按这个频率重绘
-pub const ANIM_FRAME_MS: u64 = 16;
+/// 动画帧间隔（毫秒）。
+///
+/// 这台机器是 120Hz 屏，16ms（62fps）只能跑一半刷新，看起来一顿一顿；
+/// 8ms（125fps）让 GPUI 按 vsync present，动画才跟得上屏。高刷屏调更小意义不大，
+/// 因为最终还是被 present 的 vsync 卡住。
+pub const ANIM_FRAME_MS: u64 = 8;
 
 /// 面板自己画的边框（草绿 accent 色，1px）
 pub const BORDER: f32 = 1.0;
