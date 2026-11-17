@@ -26,6 +26,15 @@ pub fn is_zh() -> bool {
 }
 
 /// 按当前语言取一段文本
+/// 按配置里的 `general.language` 设定界面语言（任何输出之前调用）
+pub fn apply(cfg: &crate::config::Config) {
+    set_lang(if cfg.general.language.eq_ignore_ascii_case("en") {
+        Lang::En
+    } else {
+        Lang::Zh
+    });
+}
+
 pub fn t(zh: &'static str, en: &'static str) -> &'static str {
     match lang() {
         Lang::Zh => zh,
@@ -446,10 +455,17 @@ pub fn elevate_windows_only() -> &'static str {
 }
 
 #[allow(dead_code)] // 只在无 gui feature 的构建里用到
+pub fn gui_moved() -> &'static str {
+    t(
+        "GUI 面板已经是独立程序：运行同目录的 tupa-gui.exe",
+        "The GUI panel is its own executable now: run tupa-gui.exe",
+    )
+}
+
 pub fn gui_disabled() -> &'static str {
     t(
-        "自绘 GUI 正在用 GPUI 重写，暂时不可用（TUI 正常）",
-        "The self-drawn GUI is being rewritten with GPUI and is unavailable for now (TUI still works)",
+        "本构建未编译自绘 GUI：cargo build --release --features gui",
+        "This build has no GUI: cargo build --release --features gui",
     )
 }
 

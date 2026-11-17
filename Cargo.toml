@@ -3,12 +3,35 @@ name = "tupa-launcher"
 version = "0.9.0"
 edition = "2024"
 
+[lib]
+name = "tupa_launcher"
+path = "src/lib.rs"
+
+[[bin]]
+name = "tupa-launcher"
+path = "src/main.rs"
+
+# GPUI 面板：独立进程 + 自带托盘/热键，见 `src/gui_main.rs`。
+# `required-features` 让默认 `cargo build` 完全不碰 gpui。
+[[bin]]
+name = "tupa-gui"
+path = "src/gui_main.rs"
+required-features = ["gui"]
+
+[features]
+# 自绘 GUI（GPUI，`src/gui/`）：默认不编译，省掉 GPUI 庞大依赖树的编译时间。
+# 要用 `--gui` 时显式 `cargo build --release --features gui`。
+gui = ["dep:gpui"]
+
 [dependencies]
 anyhow = "1.0.104"
 crossterm = "0.29.0"
 dirs = "7.0.0"
 encoding_rs = "0.8.42"
 fuzzy-matcher = "0.3.7"
+# GPUI 是 pre-1.0，固定小版号，升级单独一次提交（
+# 2026-11 官方已宣布不再为独立应用加功能，跟 Zed 自身需求走）。
+gpui = { version = "=0.2.2", optional = true }
 open = { version = "5.4.4", features = ["shellexecute-on-windows"] }
 ratatui = "0.30.2"
 rusqlite = { version = "0.40.2", features = ["bundled"] }
@@ -17,4 +40,4 @@ serde_json = "1.0.154"
 toml = "1.1.8"
 unicode-width = "0.2.2"
 windows = { version = "0.62.2", features = ["Win32_UI_Shell", "Win32_System_Com", "Win32_System_Ole", "Win32_System_Variant", "Win32_Storage_FileSystem"] }
-windows-sys = { version = "0.61.2", features = ["Win32_UI_Accessibility", "Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Shell", "Win32_System_LibraryLoader", "Win32_System_Threading", "Win32_System_Console", "Win32_System_DataExchange", "Win32_System_Memory", "Win32_System_SystemInformation"] }
+windows-sys = { version = "0.61.2", features = ["Win32_UI_Accessibility", "Win32_Graphics_Gdi", "Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Shell", "Win32_System_LibraryLoader", "Win32_System_Threading", "Win32_System_Console", "Win32_System_DataExchange", "Win32_System_Memory", "Win32_System_SystemInformation"] }

@@ -261,10 +261,7 @@ pub fn wezterm_gui() -> Option<PathBuf> {
 pub const PANEL_TITLE: &str = "tupa-launcher";
 /// 自绘面板的进程名
 #[cfg(windows)]
-pub const PANEL_EXE: &str = "tupa-launcher.exe";
-/// 自绘面板的窗口类名（winit 注册）
-#[cfg(windows)]
-pub const PANEL_CLASS: &str = "TupaLauncherWindow";
+pub const PANEL_EXE: &str = "tupa-gui.exe";
 /// Windows Terminal 的窗口类名（TUI 面板藏在它里面）
 #[cfg(windows)]
 pub const WT_CLASS: &str = "CASCADIA_HOSTING_WINDOW_CLASS";
@@ -298,7 +295,8 @@ fn is_panel_title(title: &str) -> bool {
 /// - TUI + WezTerm：窗口类是 `tupa-launcher`（`--class` 指定），**类名即唯一标识**，
 ///   不再看标题（WezTerm 的标题会跟着前台进程跑，认不住）
 /// - TUI + Windows Terminal：窗口类是 `CASCADIA_HOSTING_WINDOW_CLASS`，还要标题前缀匹配
-/// - GUI：窗口类是 `TupaLauncherWindow`，进程是 `tupa-launcher.exe`
+/// - GUI（GPUI）：窗口类名是全框架共用的 `Zed::Window`（不可控），只能靠
+///   **进程名 `tupa-launcher.exe` + 标题**认人
 ///
 /// 后两种必须按标题锁定，否则 pi 的 `π - tupa-launcher` 会被误判。
 #[cfg(windows)]
@@ -325,13 +323,21 @@ unsafe extern "system" fn enum_panel_proc(
 
     let class = window_class(hwnd);
     let want_gui = PANEL_KIND.load(Ordering::SeqCst) == 1;
-    let is_wezterm = !want_gui && class == WEZTERM_CLASS;
-    let class_ok = if want_gui {
-        class == PANEL_CLASS
-    } else {
-        is_wezterm || class == WT_CLASS
-    };
-    if !class_ok {
+
+    // GUI（GPUI）两条路都走不通：窗口类名是全框架共用的 `Zed::Window`，
+    // 标题从别的进程读也不可靠（实测 `GetWindowTextW` 只回一个字符）。
+    // 但面板进程只有一个可见顶层窗口 —— 按「进程名 + 可见 + 有尺寸」认人。
+    if want_gui {
+        return if is_gui_panel(hwnd) {
+            FOUND_PANEL.store(hwnd as usize, Ordering::SeqCst);
+            0
+        } else {
+            1
+        };
+    }
+
+    let is_wezterm = class == WEZTERM_CLASS;
+    if !is_wezterm && class != WT_CLASS {
         return 1;
     }
 
@@ -352,11 +358,6 @@ unsafe extern "system" fn enum_panel_proc(
         return 1;
     }
 
-    // 自绘窗口再核一次进程名：类名理论上已经够了，这里只防万一
-    if want_gui && !window_process_is_panel(hwnd) {
-        return 1;
-    }
-
     FOUND_PANEL.store(hwnd as usize, Ordering::SeqCst);
     0 // 找到就停
 }
@@ -371,6 +372,25 @@ fn window_class(hwnd: windows_sys::Win32::Foundation::HWND) -> String {
         return String::new();
     }
     String::from_utf16_lossy(&buffer[..len as usize])
+}
+
+/// 这个窗口是我们的 GUI 面板吗（进程名 + 有尺寸）？
+///
+/// **不能要求 `IsWindowVisible`**：`Esc` 隐藏面板后还要能靠热键找到它。
+/// GPUI 内部会建 0 尺寸的辅助窗口，用尺寸把它们滤掉。
+#[cfg(windows)]
+fn is_gui_panel(hwnd: windows_sys::Win32::Foundation::HWND) -> bool {
+    use windows_sys::Win32::Foundation::RECT;
+    use windows_sys::Win32::UI::WindowsAndMessaging::GetWindowRect;
+
+    let mut rect = RECT::default();
+    if unsafe { GetWindowRect(hwnd, &mut rect) } == 0 {
+        return false;
+    }
+    if rect.right <= rect.left || rect.bottom <= rect.top {
+        return false;
+    }
+    window_process_is_panel(hwnd)
 }
 
 /// 这个窗口属于 `tupa-launcher.exe` 吗？
