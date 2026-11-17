@@ -1,6 +1,6 @@
 # tupa-launcher 状态
 
-updated: 2026-11-18 · code: `6c3f97f`（卡片第二行竖线分隔 · 滚动与选框同步）· main 领先 origin/main 10 个提交（未 push）
+updated: 2026-11-18 · code: `637feea`（修深滚空白 · 滚动动画/滚轮步长）· main 领先 origin/main 13 个提交（未 push）
 
 > 判断本文件是否过期：比较 `code` 与 `git log -1 --format=%h -- src Cargo.toml`。
 > 只改文档的提交不算过期。
