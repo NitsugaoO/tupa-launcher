@@ -7,26 +7,9 @@
 //! tupa-launcher --help
 //! ```
 
-mod actions;
-mod app;
-mod clipboard;
-mod config;
-mod destlist;
-mod explorer_watch;
+use tupa_launcher::{actions, app, config, exec, i18n, providers, theme, ui, util};
 #[cfg(windows)]
-mod daemon;
-mod exec;
-mod favorites;
-mod glazewm;
-#[cfg(feature = "gui")]
-mod gui;
-mod history;
-mod i18n;
-mod providers;
-mod serve;
-mod theme;
-mod ui;
-mod util;
+use tupa_launcher::daemon;
 
 use std::path::Path;
 use std::time::Duration;
@@ -42,7 +25,7 @@ fn main() -> Result<()> {
     // 语言要在任何输出之前确定（包括 --help）
     let loaded = config::Config::load();
     if let Ok(cfg) = &loaded {
-        apply_language(cfg);
+        i18n::apply(cfg);
     }
 
     if args.iter().any(|a| a == "-h" || a == "--help") {
@@ -112,15 +95,9 @@ fn main() -> Result<()> {
         return cli_query(&cfg, &line);
     }
 
-    // 自绘窗口（GPUI，默认构建不含）：`cargo build --release --features gui`
+    // 面板已经拆成独立程序（tupa-gui.exe），这里只提示一句
     if args.iter().any(|a| a == "--gui") {
-        #[cfg(feature = "gui")]
-        {
-            let theme = theme::Theme::load(&cfg);
-            return gui::run(cfg, theme);
-        }
-        #[cfg(not(feature = "gui"))]
-        anyhow::bail!(i18n::gui_disabled());
+        anyhow::bail!(i18n::gui_moved());
     }
 
     let theme = theme::Theme::load(&cfg);
@@ -257,14 +234,6 @@ fn cli_query(cfg: &config::Config, line: &str) -> Result<()> {
         }
     }
     Ok(())
-}
-
-fn apply_language(cfg: &config::Config) {
-    i18n::set_lang(if cfg.general.language.eq_ignore_ascii_case("en") {
-        i18n::Lang::En
-    } else {
-        i18n::Lang::Zh
-    });
 }
 
 fn print_help() {
