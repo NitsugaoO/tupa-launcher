@@ -13,7 +13,10 @@
 //! 入口是 [`super::pi::PiSessions`]（同一个 provider，`clean` 只是一个修饰符）。
 
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::time::SystemTime;
+
+use anyhow::{bail, Context, Result};
 
 use super::pi::{self, Meta};
 use super::{Action, CleanMode, CleanOp, Item, Kind};
@@ -226,9 +229,116 @@ fn fmt_size(bytes: u64) -> String {
     }
 }
 
+// ---------- 执行（从 exec.rs 挪来：清理的「列」和「办」聚合在一个文件里） ----------
+
+/// 会话文件的显示名（提示文案用）
+fn session_name(path: &Path) -> String {
+    path.file_name()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_else(|| path.display().to_string())
+}
+
+/// 处理一个 pi 会话文件（[`Action::CleanSession`] 的实现）。
+///
+/// - 归档 / 恢复都是**移动**（可逆），目标已存在时绝不覆盖（恢复会加 `-restored-HHmmss`）
+/// - 删除优先 `trash` CLI（进系统回收站）；不可用时才真正删掉（与 pi 内置一致）
+pub(crate) fn run_session(path: &Path, mode: CleanMode) -> Result<String> {
+    let root = agent_dir().context(i18n::no_agent_dir())?;
+    let name = session_name(path);
+
+    match mode {
+        CleanMode::Archive => {
+            let target = archive_target(&root, path).context(i18n::clean_not_a_session())?;
+            if target.exists() {
+                bail!("{}", i18n::clean_target_exists(&target.display().to_string()));
+            }
+            if let Some(dir) = target.parent() {
+                std::fs::create_dir_all(dir).with_context(|| {
+                    i18n::cannot("创建目录", "create folder", &dir.display().to_string())
+                })?;
+            }
+            std::fs::rename(path, &target)
+                .with_context(|| i18n::cannot("归档", "archive", &path.display().to_string()))?;
+            Ok(i18n::clean_archived(&name))
+        }
+        CleanMode::Trash => {
+            let ok = Command::new("trash")
+                .arg(path)
+                .status()
+                .map(|s| s.success())
+                .unwrap_or(false);
+            if !ok {
+                std::fs::remove_file(path).with_context(|| {
+                    i18n::cannot("删除", "delete", &path.display().to_string())
+                })?;
+            }
+            Ok(i18n::clean_trashed(&name))
+        }
+        CleanMode::Restore => {
+            let target = restore_target(&root, path).context(i18n::clean_not_a_session())?;
+            let target = if target.exists() { unique_target(&target) } else { target };
+            if let Some(dir) = target.parent() {
+                std::fs::create_dir_all(dir).with_context(|| {
+                    i18n::cannot("创建目录", "create folder", &dir.display().to_string())
+                })?;
+            }
+            std::fs::rename(path, &target)
+                .with_context(|| i18n::cannot("恢复", "restore", &path.display().to_string()))?;
+            Ok(i18n::clean_restored(&session_name(&target)))
+        }
+    }
+}
+
+/// 批量执行（[`Action::CleanBatch`]）：失败的项不中断，最后汇总
+pub(crate) fn run_batch(ops: &[CleanOp]) -> Result<String> {
+    let mut archived = 0usize;
+    let mut trashed = 0usize;
+    let mut failed = 0usize;
+    for op in ops {
+        match run_session(&op.path, op.mode) {
+            Ok(_) => match op.mode {
+                CleanMode::Archive => archived += 1,
+                CleanMode::Trash => trashed += 1,
+                CleanMode::Restore => {}
+            },
+            Err(_) => failed += 1,
+        }
+    }
+    Ok(i18n::clean_batch_done(archived, trashed, failed))
+}
+
+/// 重名时加 `-restored-<HHMMSS>` 后缀
+fn unique_target(target: &Path) -> PathBuf {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+        % 86_400;
+    let stamp = format!("{:02}{:02}{:02}", secs / 3600, (secs % 3600) / 60, secs % 60);
+    let stem = target
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    target.with_file_name(format!("{stem}-restored-{stamp}.jsonl"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unique_target_keeps_stem_and_adds_suffix() {
+        let target = Path::new("C:/agent/sessions/--proj--/2026-10-01_x.jsonl");
+        let got = unique_target(target);
+        let name = got.file_name().unwrap().to_string_lossy().into_owned();
+        assert!(name.starts_with("2026-10-01_x-restored-"), "实际：{name}");
+        assert!(name.ends_with(".jsonl"));
+    }
+
+    #[test]
+    fn session_name_falls_back_to_path() {
+        assert_eq!(session_name(Path::new("C:/a/b.jsonl")), "b.jsonl");
+    }
 
     fn meta(mtime: SystemTime, favorite: bool, messages: u32, keywords: &[&str]) -> Meta {
         Meta {

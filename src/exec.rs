@@ -1,13 +1,16 @@
 //! 执行动作：打开文件、启动程序、定位路径
+//!
+//! 只放「进程 / 窗口 / shell」这一层的通用能力，加本地服务编排（serve_and_open /
+//! serve_stop）和开关分发（SetControl）；各动作自己的业务实现在各自的模块里：
+//! 文章创建在 [`crate::providers::blog`]，会话清理在 [`crate::providers::clean`]。
 
-use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Command;
 
 use anyhow::{Context, Result, bail};
 
 use crate::i18n;
-use crate::providers::{clean, Action, CleanMode};
+use crate::providers::Action;
 use crate::serve;
 use crate::util::{detached_command, which};
 
@@ -81,9 +84,9 @@ pub fn run(action: &Action) -> Result<String> {
             spawn_console(command, dir.as_deref())?;
             Ok(i18n::launched(command))
         }
-        // 新建博客文章：写 front matter，然后用 VSCode 打开
+        // 新建博客文章：写 front matter，然后用 VSCode 打开（实现在 providers/blog.rs）
         Action::CreateBlogPost { path, title } => {
-            create_blog_post(path, title)?;
+            crate::providers::blog::create_post(path, title)?;
             Ok(i18n::blog_post_created(&short_name(path)))
         }
         // 博客管理页：已在跑就只开浏览器，没跑就后台启动再等就绪
@@ -99,93 +102,11 @@ pub fn run(action: &Action) -> Result<String> {
         }
         // 开关 / 选项 / 数值：交给 actions.toml 里的命令
         Action::SetControl { id, value } => crate::actions::apply(id, value),
-        // pi 会话清理：归档 / 回收站 / 恢复
-        Action::CleanSession { path, mode } => clean_session(path, *mode),
+        // pi 会话清理：归档 / 回收站 / 恢复（实现在 providers/clean.rs）
+        Action::CleanSession { path, mode } => crate::providers::clean::run_session(path, *mode),
         // 批量：一次跑完（每项仍是同样的归档 / 回收站逻辑）
-        Action::CleanBatch { ops } => clean_batch(ops),
+        Action::CleanBatch { ops } => crate::providers::clean::run_batch(ops),
     }
-}
-
-/// 新建一篇博客文章（父目录不存在就建，已存在则报错、不覆盖），写完在编辑器里打开
-fn create_blog_post(path: &Path, title: &str) -> Result<()> {
-    create_new_file(path, &front_matter(title))?;
-    open_in_editor(path, 1)
-}
-
-/// 新建一个文件并写入内容（已存在则报错，绝不覆盖）
-fn create_new_file(path: &Path, contents: &str) -> Result<()> {
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir).with_context(|| {
-            i18n::cannot("创建目录", "create folder", &dir.display().to_string())
-        })?;
-    }
-    let mut file = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(path)
-        .with_context(|| i18n::cannot("新建", "create", &path.display().to_string()))?;
-    file.write_all(contents.as_bytes())
-        .with_context(|| i18n::cannot("写入", "write", &path.display().to_string()))?;
-    Ok(())
-}
-
-/// Hexo 的 front matter（标题里的引号 / 反斜杠要转义，否则 YAML 会解析错）
-fn front_matter(title: &str) -> String {
-    let quoted = title.replace('\\', "\\\\").replace('"', "\\\"");
-    format!(
-        "---\ntitle: \"{quoted}\"\ndate: {}\ntags:\n---\n",
-        local_timestamp()
-    )
-}
-
-/// 本地时间 `YYYY-MM-DD HH:MM:SS`（Hexo 的 front matter 用这个格式）
-fn local_timestamp() -> String {
-    #[cfg(windows)]
-    {
-        use windows_sys::Win32::Foundation::SYSTEMTIME;
-        use windows_sys::Win32::System::SystemInformation::GetLocalTime;
-
-        let mut time = SYSTEMTIME::default();
-        // GetLocalTime 只读系统时间，不会失败
-        unsafe { GetLocalTime(&mut time) };
-        format!(
-            "{:04}-{:02}-{:02} {:02}:{:02}:{:02}",
-            time.wYear, time.wMonth, time.wDay, time.wHour, time.wMinute, time.wSecond
-        )
-    }
-    #[cfg(not(windows))]
-    {
-        // 非 Windows 只用来编译 / 跑测试，UTC 时间够用
-        utc_timestamp()
-    }
-}
-
-/// UTC 版本（非 Windows 兜底）：`YYYY-MM-DD HH:MM:SS`
-#[cfg(not(windows))]
-fn utc_timestamp() -> String {
-    let secs = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-
-    // Howard Hinnant 的 days → civil date（不引额外依赖）
-    let z = (secs / 86_400) as i64 + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z - era * 146_097;
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let day = doy - (153 * mp + 2) / 5 + 1;
-    let month = if mp < 10 { mp + 3 } else { mp - 9 };
-    let year = yoe + era * 400 + i64::from(month <= 2);
-    let rest = secs % 86_400;
-
-    format!(
-        "{year:04}-{month:02}-{day:02} {:02}:{:02}:{:02}",
-        rest / 3600,
-        (rest % 3600) / 60,
-        rest % 60
-    )
 }
 
 /// 本地服务的统一处理：**端口在跑就只开浏览器，没跑先起进程、等就绪再开**。
@@ -511,7 +432,7 @@ fn spawn_executable(path: &Path, args: &[String]) -> Result<()> {
 /// 在编辑器里打开指定文件的某一行。
 ///
 /// 优先用 VSCode 的 `code --goto file:line`；没有就退回系统默认程序。
-fn open_in_editor(file: &Path, line: usize) -> Result<()> {
+pub(crate) fn open_in_editor(file: &Path, line: usize) -> Result<()> {
     let spec = format!("{}:{line}", file.display());
 
     if let Some(code) = which("code") {
@@ -583,45 +504,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn unique_target_keeps_stem_and_adds_suffix() {
-        let target = Path::new("C:/agent/sessions/--proj--/2026-10-01_x.jsonl");
-        let got = unique_target(target);
-        let name = got.file_name().unwrap().to_string_lossy().into_owned();
-        assert!(name.starts_with("2026-10-01_x-restored-"), "实际：{name}");
-        assert!(name.ends_with(".jsonl"));
-    }
-
-    #[test]
-    fn session_name_falls_back_to_path() {
-        assert_eq!(session_name(Path::new("C:/a/b.jsonl")), "b.jsonl");
-    }
-
-    #[test]
-    fn blog_post_is_created_once() {
-        let dir = std::env::temp_dir().join(format!("tupa-blog-test-{}", std::process::id()));
-        let path = dir.join("source").join("_posts").join("hello.md");
-
-        create_new_file(&path, &front_matter("Hello"))
-            .expect("第一次应该能创建（连父目录一起）");
-        let text = std::fs::read_to_string(&path).unwrap();
-        assert!(text.starts_with("---\ntitle: \"Hello\"\ndate: "), "实际：{text}");
-        assert!(text.ends_with("tags:\n---\n"), "实际：{text}");
-
-        assert!(
-            create_new_file(&path, "x").is_err(),
-            "已存在时不应该覆盖"
-        );
-
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn front_matter_escapes_quotes() {
-        let text = front_matter("a: \"b\"");
-        assert!(text.contains("title: \"a: \\\"b\\\"\""), "实际：{text}");
-    }
-
-    #[test]
     fn base64_matches_known_vectors() {
         assert_eq!(base64(b""), "");
         assert_eq!(base64(b"f"), "Zg==");
@@ -648,90 +530,4 @@ mod tests {
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '/' | '=')));
     }
-}
-
-/// 会话文件的显示名（提示文案用）
-fn session_name(path: &Path) -> String {
-    path.file_name()
-        .map(|s| s.to_string_lossy().into_owned())
-        .unwrap_or_else(|| path.display().to_string())
-}
-
-/// 处理一个 pi 会话文件。
-///
-/// - 归档 / 恢复都是**移动**（可逆），目标已存在时绝不覆盖（恢复会加 `-restored-HHmmss`）
-/// - 删除优先 `trash` CLI（进系统回收站）；不可用时才真正删掉（与 pi 内置一致）
-fn clean_session(path: &Path, mode: CleanMode) -> Result<String> {
-    let root = clean::agent_dir().context(i18n::no_agent_dir())?;
-    let name = session_name(path);
-
-    match mode {
-        CleanMode::Archive => {
-            let target =
-                clean::archive_target(&root, path).context(i18n::clean_not_a_session())?;
-            if target.exists() {
-                bail!("{}", i18n::clean_target_exists(&target.display().to_string()));
-            }
-            if let Some(dir) = target.parent() {
-                std::fs::create_dir_all(dir)
-                    .with_context(|| i18n::cannot("创建目录", "create folder", &dir.display().to_string()))?;
-            }
-            std::fs::rename(path, &target)
-                .with_context(|| i18n::cannot("归档", "archive", &path.display().to_string()))?;
-            Ok(i18n::clean_archived(&name))
-        }
-        CleanMode::Trash => {
-            let ok = Command::new("trash").arg(path).status().map(|s| s.success()).unwrap_or(false);
-            if !ok {
-                std::fs::remove_file(path)
-                    .with_context(|| i18n::cannot("删除", "delete", &path.display().to_string()))?;
-            }
-            Ok(i18n::clean_trashed(&name))
-        }
-        CleanMode::Restore => {
-            let target =
-                clean::restore_target(&root, path).context(i18n::clean_not_a_session())?;
-            let target = if target.exists() { unique_target(&target) } else { target };
-            if let Some(dir) = target.parent() {
-                std::fs::create_dir_all(dir)
-                    .with_context(|| i18n::cannot("创建目录", "create folder", &dir.display().to_string()))?;
-            }
-            std::fs::rename(path, &target)
-                .with_context(|| i18n::cannot("恢复", "restore", &path.display().to_string()))?;
-            Ok(i18n::clean_restored(&session_name(&target)))
-        }
-    }
-}
-
-/// 批量执行：失败的项不中断，最后汇总
-fn clean_batch(ops: &[crate::providers::CleanOp]) -> Result<String> {
-    let mut archived = 0usize;
-    let mut trashed = 0usize;
-    let mut failed = 0usize;
-    for op in ops {
-        match clean_session(&op.path, op.mode) {
-            Ok(_) => match op.mode {
-                CleanMode::Archive => archived += 1,
-                CleanMode::Trash => trashed += 1,
-                CleanMode::Restore => {}
-            },
-            Err(_) => failed += 1,
-        }
-    }
-    Ok(i18n::clean_batch_done(archived, trashed, failed))
-}
-
-/// 重名时加 `-restored-<HHMMSS>` 后缀
-fn unique_target(target: &Path) -> PathBuf {
-    let secs = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs()
-        % 86_400;
-    let stamp = format!("{:02}{:02}{:02}", secs / 3600, (secs % 3600) / 60, secs % 60);
-    let stem = target
-        .file_stem()
-        .map(|s| s.to_string_lossy().into_owned())
-        .unwrap_or_default();
-    target.with_file_name(format!("{stem}-restored-{stamp}.jsonl"))
 }

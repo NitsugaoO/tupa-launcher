@@ -22,8 +22,11 @@
 //!
 //! 新建文章**不覆盖**：同名文件已存在时直接打开它，列表里也会标出来。
 
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
+
+use anyhow::{Context, Result};
 
 use super::{Action, Column, Item, Kind, Provider, ServeTarget};
 use crate::config::Config;
@@ -341,9 +344,118 @@ fn post_file_name(raw: &str) -> Option<String> {
     })
 }
 
+// ---------- 执行（从 exec.rs 挪来：文章创建只服务这个 provider） ----------
+
+/// 新建一篇博客文章（父目录不存在就建，已存在则报错、不覆盖），写完在编辑器里打开
+pub(crate) fn create_post(path: &Path, title: &str) -> Result<()> {
+    create_new_file(path, &front_matter(title))?;
+    crate::exec::open_in_editor(path, 1)
+}
+
+/// 新建一个文件并写入内容（已存在则报错，绝不覆盖）
+fn create_new_file(path: &Path, contents: &str) -> Result<()> {
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).with_context(|| {
+            i18n::cannot("创建目录", "create folder", &dir.display().to_string())
+        })?;
+    }
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+        .with_context(|| i18n::cannot("新建", "create", &path.display().to_string()))?;
+    file.write_all(contents.as_bytes())
+        .with_context(|| i18n::cannot("写入", "write", &path.display().to_string()))?;
+    Ok(())
+}
+
+/// Hexo 的 front matter（标题里的引号 / 反斜杠要转义，否则 YAML 会解析错）
+fn front_matter(title: &str) -> String {
+    let quoted = title.replace('\\', "\\\\").replace('"', "\\\"");
+    format!(
+        "---\ntitle: \"{quoted}\"\ndate: {}\ntags:\n---\n",
+        local_timestamp()
+    )
+}
+
+/// 本地时间 `YYYY-MM-DD HH:MM:SS`（Hexo 的 front matter 用这个格式）
+fn local_timestamp() -> String {
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::Foundation::SYSTEMTIME;
+        use windows_sys::Win32::System::SystemInformation::GetLocalTime;
+
+        let mut time = SYSTEMTIME::default();
+        // GetLocalTime 只读系统时间，不会失败
+        unsafe { GetLocalTime(&mut time) };
+        format!(
+            "{:04}-{:02}-{:02} {:02}:{:02}:{:02}",
+            time.wYear, time.wMonth, time.wDay, time.wHour, time.wMinute, time.wSecond
+        )
+    }
+    #[cfg(not(windows))]
+    {
+        // 非 Windows 只用来编译 / 跑测试，UTC 时间够用
+        utc_timestamp()
+    }
+}
+
+/// UTC 版本（非 Windows 兑底）：`YYYY-MM-DD HH:MM:SS`
+#[cfg(not(windows))]
+fn utc_timestamp() -> String {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+
+    // Howard Hinnant 的 days → civil date（不引额外依赖）
+    let z = (secs / 86_400) as i64 + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = yoe + era * 400 + i64::from(month <= 2);
+    let rest = secs % 86_400;
+
+    format!(
+        "{year:04}-{month:02}-{day:02} {:02}:{:02}:{:02}",
+        rest / 3600,
+        (rest % 3600) / 60,
+        rest % 60
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn blog_post_is_created_once() {
+        let dir = std::env::temp_dir().join(format!("tupa-blog-test-{}", std::process::id()));
+        let path = dir.join("source").join("_posts").join("hello.md");
+
+        create_new_file(&path, &front_matter("Hello"))
+            .expect("第一次应该能创建（连父目录一起）");
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.starts_with("---\ntitle: \"Hello\"\ndate: "), "实际：{text}");
+        assert!(text.ends_with("tags:\n---\n"), "实际：{text}");
+
+        assert!(
+            create_new_file(&path, "x").is_err(),
+            "已存在时不应该覆盖"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn front_matter_escapes_quotes() {
+        let text = front_matter("a: \"b\"");
+        assert!(text.contains("title: \"a: \\\"b\\\"\""), "实际：{text}");
+    }
 
     #[test]
     fn keeps_chinese_titles_as_file_names() {
