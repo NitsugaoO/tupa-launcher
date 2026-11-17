@@ -98,6 +98,8 @@ struct Panel {
     help: bool,
     /// 光标是否显示（500ms 翻转一次，模拟闪烁）
     cursor_on: bool,
+    /// 下一次翻转光标的时间点（移动光标后重置，让它先亮着）
+    blink_at: std::time::Instant,
     /// 输入法预编辑：`(起始字符下标, 文本)`，还没上屏的拼音
     preedit: Option<(usize, String)>,
     /// 上一次写进调试日志的结果条数（`TUPA_GUI_LOG=<路径>` 时生效）
@@ -120,21 +122,12 @@ impl Panel {
         cx.spawn(async move |this, cx| {
             let mut pending = false;
             let mut styled = false;
-            let mut last_blink = std::time::Instant::now();
             loop {
                 let delay = if pending { 16 } else { 120 };
                 cx.background_executor()
                     .timer(Duration::from_millis(delay))
                     .await;
 
-                // 光标闪烁：500ms 一次，顺便让状态栏的「加载中」有机会刷新
-                if last_blink.elapsed() >= Duration::from_millis(500) {
-                    last_blink = std::time::Instant::now();
-                    let _ = this.update(cx, |panel, cx| {
-                        panel.cursor_on = !panel.cursor_on;
-                        cx.notify();
-                    });
-                }
 
                 // 窗口已经真正上屏了，这时改 EXSTYLE 才生效（APPWINDOW → TOOLWINDOW）
                 if !styled {
@@ -144,6 +137,14 @@ impl Panel {
                 }
 
                 match this.update(cx, |panel, cx| {
+                    // 光标闪烁：到点就翻一次（移动光标后 `blink_at` 会被推后）
+                    let now = std::time::Instant::now();
+                    if now >= panel.blink_at {
+                        panel.cursor_on = !panel.cursor_on;
+                        panel.blink_at = now + Duration::from_millis(500);
+                        cx.notify();
+                    }
+
                     let was_pending = panel.app.pending;
                     panel.app.drain_events();
                     let now_pending = panel.app.pending;
@@ -168,6 +169,7 @@ impl Panel {
             last_selected: None,
             help: false,
             cursor_on: true,
+            blink_at: std::time::Instant::now() + Duration::from_millis(500),
             preedit: None,
             logged_rows: usize::MAX,
             logged_input: String::new(),
@@ -200,6 +202,7 @@ impl Panel {
             return;
         }
 
+        let before = (self.app.input.len(), self.app.cursor);
         if let Some(key) = key {
             // 普通字符由 IME / input handler 通过 `replace_text_in_range` 送进来，
             // 这里再 insert 一次就成双份了。只有选择模式的 1–9 要自己处理。
@@ -228,9 +231,31 @@ impl Panel {
             return;
         }
 
+        // 光标动了（←→ / Home / End / 打字）就让它先亮着，再重新开始闪
+        if (self.app.input.len(), self.app.cursor) != before {
+            self.cursor_on = true;
+            self.blink_at = std::time::Instant::now() + Duration::from_millis(500);
+        }
+
         // 焦点别丢（Esc 清空输入、点列表之后都要能继续打字）
         window.focus(&self.focus);
         cx.notify();
+    }
+
+    /// 双击列表项 = 按回车（执行当前项）
+    fn run_selected(&mut self, cx: &mut Context<Self>) {
+        self.app.on_key(crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Enter,
+            crossterm::event::KeyModifiers::NONE,
+        ));
+        if self.app.should_hide {
+            self.app.should_hide = false;
+            #[cfg(windows)]
+            crate::util::hide_panel(PanelKind::Gui);
+        }
+        if self.app.should_quit {
+            cx.quit();
+        }
     }
 
     /// 输入行：`❯ ` + 输入内容 + 光标（Step 3 换成真光标 + 水平滚动）
@@ -608,9 +633,17 @@ fn render_row(
         .on_click({
             let panel = panel.clone();
             let index = row.index;
-            move |_event, _window, cx| {
+            move |event, _window, cx| {
+                // 双击 = 回车：`MouseDownEvent.click_count` 由平台给，不用自己计时
+                let double_click = matches!(
+                    event,
+                    gpui::ClickEvent::Mouse(mouse) if mouse.down.click_count >= 2
+                );
                 let _ = panel.update(cx, |panel, cx| {
                     panel.app.list_state.select(Some(index));
+                    if double_click {
+                        panel.run_selected(cx);
+                    }
                     cx.notify();
                 });
             }
@@ -718,9 +751,16 @@ fn render_detail_row(
         .on_click({
             let panel = panel.clone();
             let index = row.index;
-            move |_event, _window, cx| {
+            move |event, _window, cx| {
+                let double_click = matches!(
+                    event,
+                    gpui::ClickEvent::Mouse(mouse) if mouse.down.click_count >= 2
+                );
                 let _ = panel.update(cx, |panel, cx| {
                     panel.app.list_state.select(Some(index));
+                    if double_click {
+                        panel.run_selected(cx);
+                    }
                     cx.notify();
                 });
             }
@@ -874,6 +914,42 @@ fn make_overlay_window() {
             0,
             0,
             SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
+        );
+
+        tune_dwm(hwnd);
+    }
+}
+
+/// 关掉系统圆角与 1px 窗口边框。
+///
+/// 内容自己画的是 12px 圆角，Win11 的 DWM 圆角半径比它小，两者叠在一起
+/// 就会看到「边框没跟着圆角」的一圈弧线。索性让 DWM 不画，圆角交给内容。
+#[cfg(windows)]
+fn tune_dwm(hwnd: windows_sys::Win32::Foundation::HWND) {
+    use windows_sys::Win32::Graphics::Dwm::{
+        DWMWA_BORDER_COLOR, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_DONOTROUND,
+        DwmSetWindowAttribute,
+    };
+
+    // DWMWCP_DONOTROUND = 1
+    let corner: i32 = DWMWCP_DONOTROUND;
+    unsafe {
+        DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_WINDOW_CORNER_PREFERENCE as u32,
+            (&corner as *const i32).cast(),
+            std::mem::size_of::<i32>() as u32,
+        );
+    }
+
+    // DWMWA_COLOR_NONE：不画窗口边框
+    let no_border: u32 = 0xFFFF_FFFE;
+    unsafe {
+        DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_BORDER_COLOR as u32,
+            (&no_border as *const u32).cast(),
+            std::mem::size_of::<u32>() as u32,
         );
     }
 }

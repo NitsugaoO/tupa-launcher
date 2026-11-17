@@ -26,8 +26,8 @@ pub const INPUT_SIZE: f32 = 15.0;
 pub const CURSOR_WIDTH: f32 = 2.0;
 pub const CURSOR_HEIGHT: f32 = 18.0;
 /// 结果行：卡片 30、间距 4、圆角 7、字号 13（YASB 那种紧凑感）
-pub const ROW_HEIGHT: f32 = 30.0;
-pub const ROW_GAP: f32 = 4.0;
+pub const ROW_HEIGHT: f32 = 28.0;
+pub const ROW_GAP: f32 = 3.0;
 pub const ROW_RADIUS: f32 = 7.0;
 pub const ROW_SIZE: f32 = 13.0;
 /// 徽标 chip：宽 50、高 18、圆角 9（胶囊）、字号 10
