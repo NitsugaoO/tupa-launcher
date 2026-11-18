@@ -48,7 +48,7 @@
   - 包名 / exe：`tupa-launcher` / `tupa-launcher.exe`
   - 配置目录：`~/.config/tupa-launcher/`（已从旧的迁移过来）
   - WT profile 名 / tabTitle：`tupa-launcher`
-  - 自启：启动文件夹里的 `tupa-gui.lnk`（旧守护进程的 `tupa-launcher-daemon.lnk.disabled` 已停用）
+  - 自启：启动文件夹里的 `tupa-gui.lnk`（旧守护进程的 `tupa-launcher-daemon.lnk` 已移出启动文件夹）
 
 ## 原计划（v0.3 已全部实现，保留设计记录）
 

@@ -58,8 +58,9 @@ cargo build --release --features gui     # 默认 cargo build 不产出它
 想停掉就 `taskkill /IM tupa-gui.exe /F`，或删掉那个快捷方式（右键托盘 → 退出 也行）。
 
 守护进程 + TUI 的实现还在，可以手动跑（`./target/release/tupa-launcher.exe --daemon`），
-但它已不是日常入口 —— **热键只能被一个进程注册**，两边同时跑会抢，所以开机自启里的
-`tupa-launcher-daemon.lnk` 已改名 `.disabled`。它的热键在 `[daemon]` 里：
+但它已不是日常入口 —— **热键只能被一个进程注册**，两边同时跑会抢，所以旧的
+`tupa-launcher-daemon.lnk` 已**移出启动文件夹**（删到回收站；不要用改扩展名的方式「停用」——
+Explorer 会把启动文件夹里任何文件交给文件关联，本机 `.disabled` 会弹 NanaZip 报错）。它的热键在 `[daemon]` 里：
 
 | 热键 | 怎么来的 |
 |---|---|

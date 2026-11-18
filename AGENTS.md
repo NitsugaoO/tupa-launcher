@@ -71,8 +71,14 @@ cargo clippy --release --features gui    # 零警告；必须带 feature，否�
   用户本机 `config.toml` 改成了 `@`，别把两者搞混。
 - **面板渲染只走 `ui::draw`**（TUI 与 GUI 共用），别在 GUI 里另写一套布局。
 - **主入口是 `tupa-gui.exe`**（2026-11-17 晚起）：热键 `[gui] hotkey`（本机 `alt+\``）、
-  开机自启 `Startup\tupa-gui.lnk`。守护进程 + TUI 已停用（`tupa-launcher-daemon.lnk.disabled`），
+  开机自启 `Startup\tupa-gui.lnk`。守护进程 + TUI 已停用（旧的 `tupa-launcher-daemon.lnk`
+  **已移出启动文件夹、删到回收站**，见下面那条坑），
   TUI 只能手动跑。改 GUI 之前先确认守护进程没在跑，否则它会占着热键让 GUI 注册失败。
+- **停用启动项要把它移出启动文件夹，别改扩展名**（2026-11-18 坑）：Explorer 枚举
+  `Startup\` 时对目录里**每个文件**都 ShellExecute，`.lnk.disabled` 不是快捷方式 → 走文件关联
+  （本机 `.disabled` 只登记过 NanaZip → 每次登录弹「无法作为压缩包打开」）。
+  旧守护进程那份已删到回收站；判断「是不是又被执行了」看
+  `HKCU\...\RunNotification\StartupTNoti<文件名> = 4`。
 - **两个可执行文件，别混**（2026-11-17 起）：`src/lib.rs` 放全部模块（`pub mod`），
   `src/main.rs` → `tupa-launcher.exe`（TUI + 守护进程，不链接 gpui），
   `src/gui_main.rs` → `tupa-gui.exe`（GPUI 面板 + 托盘 + 热键，`required-features = ["gui"]`，
@@ -156,10 +162,16 @@ cargo clippy --release --features gui    # 零警告；必须带 feature，否�
      「？」，`keys::to_key` 得归一。现在靠 `Panel::text_blocked()`（help 期间 +
      切隐后 50ms）在 input handler 里吞掉那次提交，并补了「输入框为空时 ? 当帮助键」。
  15. **两种列表形态共用一套虚拟滚动**：默认两行卡片（`render_card_row`，标题行 +
-     路径/分组行，行高 `CARD_HEIGHT + ROW_GAP`、最多 `CARD_VISIBLE_ROWS` 条），
-     `Ctrl+Tab` 切单行对齐表（`render_row`，`ROW_HEIGHT + ROW_GAP`、`MAX_VISIBLE_ROWS` 条）。
-     改行高 / 可视条数必须同时改 `row_height()` + `max_visible_rows()` + `desired_height()`；
-     三者不一致就是「最后一行被窗口底边裁掉」或「选框越往下偏得越多」。
+     路径/分组行，行高 `CARD_HEIGHT + ROW_GAP`），`Ctrl+Tab` 切单行对齐表（`render_row`，
+     `ROW_HEIGHT + ROW_GAP`）。
+     **可视条数不写死**：`max_visible_rows()` 用 `max_height`（= `MAX_HEIGHT_RATIO` × 屏高）
+     减去与 `desired_height()` 同一份 chrome（PADDING / BORDER / INPUT / LIST_TOP / STATUS）
+     后除以 `row_height()` 反算，`CARD_VISIBLE_ROWS` / `MAX_VISIBLE_ROWS` 只当上限。
+     改动这三处（`row_height()` / `max_visible_rows()` / `desired_height()`）时必须口径一致，
+     否则就是「最后一行被窗口底边裁掉」或「选框越往下偏得越多」。
+     **选框提前一行滚动**：`style::SCROLL_MARGIN_ROWS`（= 1）只当**触发阈值**，
+     目标是「刚好留出 margin」再 `clamp` 到 `scroll_max`。把 margin 直接加进
+     `bottom - viewport` 又不 clamp，触底就会多滚出一行空白（旧版就是这么搞的）。
      卡片右列（状态 / 次数 / 时间）宽度按内容量，**不能写死**——「云上极速 · 13 小时前」
      写死 72px 就只剩「云上极速」。**卡片本身不铺底色**（2026-11-18）：要的是两行结构，
      不是一张张色块；底色只给 hover 和 marker。

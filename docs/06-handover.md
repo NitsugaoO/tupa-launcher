@@ -166,6 +166,7 @@ Control::{Run, Toggle{value}, Choice{options,index}, Number{value,min,max,step,s
 | `SetWinEventHook` 的事件区间 | 写成 `SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_OBJECT_SHOW, …)` 看着像「监听两个事件」，实际是 **[0x0003, 0x8002] 区间**，几乎把所有事件都订上了：系统不停往注册线程推消息，循环里再无条件枚举一次 → 实测 **2.6% CPU**。要几个事件就注册几个窄区间（min == max） |
 | WinEventHook 必须在有消息循环的线程 | `WINEVENT_OUTOFCONTEXT` 的回调是**靠 `DispatchMessage` 分发**的。守护进程主循环只 `GetMessage` 不 `DispatchMessage`，所以 `explorer_watch` 自己开一条线程、自己 `PeekMessage` + `DispatchMessage`，不去动主循环 |
 | 事件回调不能太贵 | 回调里只置位 `AtomicBool`；`ShellWindows` 枚举（有窗口时 ~5 ms）放到监听线程里，并且**只在命中 `CabinetWClass` 或兑底超时才做** —— 终端 / 浏览器的标题变化也会把消息推进来 |
+| **别用改扩展名停用启动文件夹的项**（2026-11-18 实测踩到） | `tupa-launcher-daemon.lnk` 改成 `.lnk.disabled` 看着「停用了」，但 Explorer 枚举启动文件夹时对**目录里的每个文件**都做一次 ShellExecute；`.lnk` 会执行目标，`.lnk.disabled` 不是快捷方式 → 走文件关联。本机 `.disabled` 唯一登记过的打开方式是 NanaZip，于是**每次登录都弹「无法作为压缩包打开文件」**。证据：`HKCU\...\RunNotification\StartupTNoti<文件名> = 4`（4 = 本次登录已启动过）、`HKCU\...\FileExts\.disabled\OpenWithList`。正确做法：把文件**移出**启动文件夹（或删到回收站），别靠改名 |
 
 ## 5. 开关引擎（v0.7 已完成）
 
@@ -230,7 +231,8 @@ cargo build --release --features gui     # 产出 tupa-gui.exe + tupa-launcher.e
 
 - `Panel::compact()` = 输入为空 && 没有补全候选 && 没按过 `↓`
 - 紧凑态连分隔线 / 列表 / 状态栏都不画，所以窗口能缩到只剩输入行
-- 展开后继续按 `↓` 只移动选中项，高度不变（按结果行数，最多 `MAX_VISIBLE_ROWS = 12`）
+- 展开后继续按 `↓` 只移动选中项，高度不变（按结果行数；条数由 `Panel::max_visible_rows()`
+  按 `MAX_HEIGHT_RATIO`（本机 0.72 屏高）反算，常量 `CARD_VISIBLE_ROWS` / `MAX_VISIBLE_ROWS` 只当上限）
 
 ### IME（2026-11-17 落地）
 
