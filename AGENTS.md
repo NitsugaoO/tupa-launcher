@@ -112,6 +112,17 @@ cargo clippy --release --features gui    # 零警告；必须带 feature，否�
      - 判据不要靠壁纸：用**棋盘格**铺底再截图（`copyfromscreen`，`PrintWindow` 抓不到
        DComp 合成结果）。探针在 `examples/acrylic_probe.rs`（`backdrop` / `host` /
        `sb2..sb4`），细节与结论见 `docs/06-handover.md` §6「窗口模糊」。
+     - **圆角要裁窗口，不是裁内容**（2026-11-18）：亚克力是 DWM 按整个窗口矩形画的，
+       GPUI 的 `.rounded()` 只裁内容 → 四角会漏模糊。做法在 `src/gui/frame.rs`：
+       去掉 `WS_EX_NOREDIRECTIONBITMAP`（否则 `SetWindowRgn` 被静默忽略）+
+       `SetWindowRgn` 圆角 + 尺寸变化时重裁。region 必须用
+       `GetWindowRect` + `GetClientRect` + `ClientToScreen` 算**客户区**
+       （gpui 给 `WS_THICKFRAME` 留了左右 7px / 上下 4px 热区，按窗口算就会「大一圈」，
+       按 `viewport_size()` 算会裁掉右侧和底部的边框）。应用时机要放在**首帧渲染**，
+       `open_window` 的闭包里调太早（gpui 之后还会 show/resize，把 frame 状态重置）。
+     - 窗口外观相关的三个 DWM 属性（`NCRENDERING_POLICY` / `BORDER_COLOR` /
+       `VISIBLE_FRAME_BORDER_THICKNESS`）在这台机器上**返回成功但无效**，
+       圆角外那 1~2px 描边去不掉，别再花时间。
      - 独立结论（仍然成立，别再试）：`CreateHostBackdropBrush` 在 Win32 上依赖
        `DWMWA_USE_HOSTBACKDROPBRUSH` 且自带模糊，可作为**后备方案**（要换 WinRT 合成树）；
        `CreateBackdropBrush` 只「透」不糊；`DWMWA_SYSTEMBACKDROP_TYPE` 在 DComp 窗口上

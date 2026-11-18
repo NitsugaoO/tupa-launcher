@@ -263,6 +263,34 @@ cargo build --release --features gui     # 产出 tupa-gui.exe + tupa-launcher.e
    变成整窗黑玻璃；上游 0.3.8 也补了同一条 `if is_acrylic && color.3 == 0 { color.3 = 1 }`。
    所以我们不改 gpui 源码，调完覆盖它即可。
 
+#### 圆角与窗口形状（2026-11-18）
+
+亚克力是 **DWM 按整个窗口矩形**画的，而面板内容只在内部画 `.rounded(12)` ——
+所以窗口本身是方的，四个角会漏出模糊（看起来像「阴影/亚克力溢出圆角」）。做法：
+
+1. **去掉 `WS_EX_NOREDIRECTIONBITMAP`**。实测带着它时 `SetWindowRgn` 和
+   `DWMWA_WINDOW_CORNER_PREFERENCE` 都返回成功却毫无效果，DWM 忽略窗口形状；
+   去掉后 GPUI 的 D3D11 + DComp 渲染照常（`CreateTargetForHwnd` 不依赖那个 ex-style）。
+2. `SetWindowRgn(CreateRoundRectRgn(...))` 按 `style::RADIUS` 裁圆角；
+   **`SetWindowRgn` 不跟随窗口缩放**，所以 `Panel::render` 里比较上一次的物理尺寸，
+   变了就重裁。
+3. region 用 `GetWindowRect` + `GetClientRect` + `ClientToScreen` 算出**客户区**：
+   gpui 在 `WM_NCCALCSIZE` 里给 `WS_THICKFRAME` 留了 resize 热区（实测左右各 7px、
+   上下各 4px），
+   - 按「窗口矩形」裁 → 亚克力比内容大一圈；
+   - 按 `window.viewport_size()` 裁 → 少算偏移，右侧和底部的边框被裁掉一半。
+4. 应用时机放在**首帧渲染**（`Panel::render` 第一次，`frame::apply`），不要放
+   `open_window` 的闭包 —— 后者太早，gpui 之后还会 show/resize，把 DWM 的 frame
+   状态（边框、阴影）重置回去。
+
+**去不掉的残留**：圆角外侧还有 1~2px 浅色描边，是 DWM 在**窗口矩形外**画的装饰
+（`PrintWindow` 抓窗口自身时看不到它，说明不在客户区里）。三个相关属性
+`DWMWA_NCRENDERING_POLICY` / `DWMWA_BORDER_COLOR` / `DWMWA_VISIBLE_FRAME_BORDER_THICKNESS`
+都试过，返回值都是成功，视觉毫无变化。深色壁纸下基本看不见，别再花时间。
+
+另外 `[gui] always_on_top`（默认 true）用 `SetWindowPos(HWND_TOPMOST)` 实现 ——
+GlazeWM 里 `tupa-gui` 是 `ignore`，不置顶就会被普通窗口压住。
+
 #### 之前为什么判成「做不到」（教训）
 
 真因是 **节能模式**（`GetSystemPowerStatus().SystemStatusFlag == 1`）和
