@@ -52,14 +52,45 @@ pub fn enable(window: &Window) -> Result<()> {
 
 /// 系统当前能不能真的给窗口做亚克力。
 ///
-/// 两种情况下 DWM 会**静默降级成不透明的浅色底**（`enable` 照样返回成功）：
+/// 三种情况下 DWM 会**静默降级成不透明的深/浅底色**（`enable` 照样返回成功）：
 /// - 设置 → 个性化 → 颜色 → 关掉「透明效果」
-/// - 节能模式（电池保养）开启时，系统强制关透明
+/// - 节电模式（Battery Saver）开启时，系统强制关透明
+/// - **节能电源计划**（Power saver，`a1841308-...`）：Windows 直接关掉视觉特效
 ///
-/// 降级后如果面板还按半透明画，浅色文字就直接糊在白色上（2026-11-18 用户截图）。
-/// 所以每秒钟轮询一次，不可用时自己铺不透明底色。
+/// 降级后如果面板还按半透明画，`#272e33` 的底色叠在黑底上就变成了近黑（用户看到的
+/// 就是“纯黑”而不是灰）。所以每秒钟轮询一次，不可用时自己铺不透明底色。
 pub fn transparency_available() -> bool {
-    transparency_setting() && !battery_saver()
+    transparency_setting() && !battery_saver() && !power_saver_plan()
+}
+
+/// 活动电源计划是不是「节能」（Power saver）。
+///
+/// 只看 `EnableTransparency` 和节电标志测不出来 —— 节能计划下两者都正常，
+/// 但 DWM 已经不画亚克力了。
+fn power_saver_plan() -> bool {
+    use windows::Win32::System::Registry::{HKEY_LOCAL_MACHINE, RRF_RT_REG_SZ, RegGetValueW};
+    use windows::core::w;
+
+    let mut buf = [0u16; 128];
+    let mut size = std::mem::size_of_val(&buf) as u32;
+    let status = unsafe {
+        RegGetValueW(
+            HKEY_LOCAL_MACHINE,
+            w!(r"SYSTEM\CurrentControlSet\Control\Power\User\PowerSchemes"),
+            w!("ActivePowerScheme"),
+            RRF_RT_REG_SZ,
+            None,
+            Some(buf.as_mut_ptr().cast()),
+            Some(&mut size),
+        )
+    };
+    if status.is_err() {
+        return false;
+    }
+    let len = (size as usize / 2).saturating_sub(1);
+    let guid = String::from_utf16_lossy(&buf[..len]);
+    guid.trim()
+        .eq_ignore_ascii_case("a1841308-3541-4fab-bc81-f71556f20b4a")
 }
 
 /// `HKCU\...\Themes\Personalize\EnableTransparency`（读不到就当开着）
