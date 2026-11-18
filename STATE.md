@@ -1,6 +1,6 @@
 # tupa-launcher 状态
 
-updated: 2026-11-18 · code: `438a31e`（亚克力 + 圆角 + 失焦光标 · 两行卡片 · 窗口高 0.68 + 提前两行滚动 · 应用图标 + mini chip + 文件/网页/Steam 图标 + 全类型图标 + 历史死链回填）
+updated: 2026-11-18 · code: `654e914`（亚克力 + 圆角 + 失焦光标 · 两行卡片 · 窗口高 0.68 + 提前两行滚动 · 应用图标 + mini chip + 文件/网页/Steam 图标 + 全类型图标 + 历史死链回填）
 
 > 判断本文件是否过期：比较 `code` 与 `git log -1 --format=%h -- src Cargo.toml`。
 > 只改文档的提交不算过期。
@@ -13,6 +13,21 @@ updated: 2026-11-18 · code: `438a31e`（亚克力 + 圆角 + 失焦光标 · �
 
 ## 阶段
 
+- **图标覆盖率 72/75（2026-11-18 晚）**：`tupa-launcher.exe --icons` 能逐条报出
+  每个 app 的图标来源。本轮修好的：MSIX（wt / pwsh / CeleClip → symlink 跟到包内
+  真 exe → `shell:AppsFolder\<PFN>!App`）、Scoop shim（`shims\x.exe` → `apps\x\<ver>`）、
+  UWP（`ms-windows-store:` / `ms-settings:` → AUMID）、Steam 封面语言变体
+  （`library_600x900_schinese.jpg`）。开始菜单索引从 `Start Menu\Programs` 提到
+  `Start Menu`（顶层 .lnk 也算），名字比对支持「去括号 / 取括号内」。
+  剩 3 个：`GenP`（配置指向的 exe 已不存在）、`Big Walk` / `How to Fish`
+  （本地无封面，走 CDN 兜底，见下）。
+- **Steam 封面 CDN 兜底（2026-11-18 晚）**：本地 librarycache 没有图时，后台线程拉
+  `cdn.akamai.steamstatic.com/steam/apps/<appid>/header.jpg`，缓存到
+  `~/.config/tupa-launcher/icons/steam/<appid>.bin`（空文件 = 404 不重试）。
+  `favicon::https_get` 是泛化后的 `http_get(host, port, secure, path)`，两边共用。
+- **选框 / hover 改淡填充（2026-11-18 晚）**：`row_selected` 固定 alpha 0.2、
+  `row_hover` = `opacity*0.35`（夹 0.1..0.3）。原因：叠色只能增加不透明度，
+  0.6 的填充合成到 0.84，亚克力只剩 16%，肉眼就是「完全不透」；选中识别交给左侧绿条。
 - **Steam 游戏图标（2026-11-18 晚）**：`steam://rungameid/<appid>` → 读注册表
   `HKCU\Software\Valve\Steam\SteamPath` → `userdata/<id>/config/grid/<appid>p.png`
   （用户自定义）优先，其次 `appcache/librarycache/<appid>/` 的
