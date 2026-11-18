@@ -337,6 +337,41 @@ pub struct Item {
 }
 
 impl Item {
+    /// 把历史 / 收藏里的 `Action::Launch` 重新绑定到**当前配置**。
+    ///
+    /// 为什么需要：`history.json` 存的是执行那一刻的完整快照（`Launch` 里是那条
+    /// `.lnk` 的绝对路径）。软件换路径（scoop → 官方版）、升级后旧 lnk 被删，
+    /// 历史就成了死链 —— 2026-11-18 实测木机有两条（OBS / DeepSeek Harness）。
+    /// 这里按条目**标题**在 `[[apps]]` 里找同名项，换成配置里的 command。
+    ///
+    /// 只动 `Launch`：`Open` / `OpenUrl` 是用户当时选的**具体路径 / 网址**，
+    /// 配置改了也不应该被替换。修过之后两条同名历史（`obs` 与 `OBS`）
+    /// action 会变成同一个，调用方的去重会自然合并它们。
+    ///
+    /// 返回是否改过（调用方想先重算副标题时用）。
+    pub fn rebind_launch(&mut self, apps: &[crate::config::AppEntry]) -> bool {
+        let (command, elevated) = match &self.action {
+            Action::Launch {
+                command, elevated, ..
+            } => (command.clone(), *elevated),
+            _ => return false,
+        };
+        // 打不开才修：`resolve_executable` 会先看文件、再搜 PATH，
+        // 不存在的同一条只要一次 stat，几十条历史总共也就几毫秒
+        if crate::util::resolve_executable(&command).is_some() {
+            return false;
+        }
+        let Some(entry) = apps.iter().find(|entry| entry.name == self.title()) else {
+            return false;
+        };
+        self.action = Action::Launch {
+            command: entry.command.clone(),
+            args: entry.args.clone(),
+            elevated,
+        };
+        true
+    }
+
     pub fn new(kind: Kind, columns: Vec<String>, action: Action) -> Self {
         Item {
             kind,
@@ -763,6 +798,60 @@ pub fn match_prefix<'a>(candidates: impl IntoIterator<Item = &'a str>, query: &s
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn app_entry(name: &str, command: &str) -> crate::config::AppEntry {
+        crate::config::AppEntry {
+            name: name.to_string(),
+            command: command.to_string(),
+            args: Vec::new(),
+            keywords: Vec::new(),
+        }
+    }
+
+    fn launch_item(title: &str, command: &str) -> Item {
+        Item::new(
+            Kind::App,
+            vec![title.to_string(), "obs64.exe".to_string()],
+            Action::Launch {
+                command: command.to_string(),
+                args: Vec::new(),
+                elevated: false,
+            },
+        )
+    }
+
+    #[test]
+    fn rebind_dead_launch_to_same_titled_config_entry() {
+        // 历史里指向已被删掉的 Scoop 版 lnk（2026-11-18 本机实况）
+        let mut item = launch_item("OBS Studio", r"C:\gone\Scoop Apps\OBS Studio.lnk");
+        let apps = vec![app_entry("OBS Studio", r"C:\good\OBS Studio.lnk")];
+
+        assert!(item.rebind_launch(&apps), "死链应该被回填");
+        match &item.action {
+            Action::Launch { command, .. } => assert_eq!(command, r"C:\good\OBS Studio.lnk"),
+            other => panic!("不该变成 {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rebind_leaves_working_and_non_launch_items_alone() {
+        let apps = vec![app_entry("wt", "wt")];
+        // 1) 能解析的不动
+        let mut working = launch_item("wt", "wt");
+        assert!(!working.rebind_launch(&apps));
+
+        // 2) 同名配置项不存在的也不动（文件真的没了，回填也救不了）
+        let mut orphan = launch_item("Nothing Here", r"C:\gone\nothing.exe");
+        assert!(!orphan.rebind_launch(&apps));
+
+        // 3) 非 Launch 不动：Open 是用户当时选的**具体路径**
+        let mut opened = Item::new(
+            Kind::Dir,
+            vec!["Downloads".to_string()],
+            Action::Open(PathBuf::from(r"C:\gone")),
+        );
+        assert!(!opened.rebind_launch(&apps));
+    }
 
     fn infos() -> Vec<ProviderInfo> {
         ["app", "ev", "web", ":"]

@@ -20,12 +20,15 @@ use crate::history;
 
 pub struct Hist {
     max: usize,
+    /// 当前 `[[apps]]`：历史里的死链要按标题回填到这里
+    apps: Vec<crate::config::AppEntry>,
 }
 
 impl Hist {
     pub fn new(cfg: &Config) -> Self {
         Hist {
             max: cfg.general.max_results,
+            apps: cfg.apps.clone(),
         }
     }
 }
@@ -67,6 +70,12 @@ impl Hist {
                 }
             };
             rows.push((score, index, history::to_item(entry)));
+        }
+
+        // 死链回填到当前配置（软件换路径后旧 lnk 没了）。
+        // **必须在下面的去重之前**：回填后同名条目的 action 才会一致
+        for (_, _, item) in &mut rows {
+            item.rebind_launch(&self.apps);
         }
 
         // 带关键词时按得分排序（同分保持「最近在前」）

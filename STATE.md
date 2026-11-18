@@ -13,6 +13,13 @@ updated: 2026-11-18 · code: `ab74244`（亚克力 + 圆角 + 失焦光标 · �
 
 ## 阶段
 
+- **历史死链回填（2026-11-18）**：开屏 / `@hist` 里指向已删 `.lnk` 的应用条目（本机 OBS 的
+  scoop 旧链、DeepSeek Harness 的旧链）现在是**展示前按标题回填当前 `[[apps]]`**
+  （`Item::rebind_launch`，只动 `Launch`，且在去重之前调）—— 两条同名历史会被合并成一条，
+  图标也顺带回来了。同时清了 `history.json` 里 5 条真死链（`@ev tools\timeline-tui.cmd`、
+  `@ev my-dot.`、`@go Downloads/blog/Themes` 三条相对路径），备份 `history.json.bak-20261118-141813`。
+  审计脚本：`python` 逐条看 `Action` 能不能解析（路径存在 / `which` / 协议前缀）。
+
 - **应用图标（2026-11-18 晚）**：App 行（以及任何 `Action::Launch` 的行）在类型列画
   **20×20 应用图标，顶替 chip**；取不到才画回胶囊。实现在 `src/gui/appicon.rs`：
   `IShellItemImageFactory::GetImage(96×96)` → `GetDIBits`（`biHeight` 负 = 自顶向下、32bpp）

@@ -34,6 +34,8 @@ pub struct Home {
     frecency: bool,
     /// 剪贴板里是路径 / 网址时，开屏第一行给一条「跳过去」的条目
     clipboard: bool,
+    /// 当前 `[[apps]]`：历史里的死链要按标题回填到这里
+    apps: Vec<crate::config::AppEntry>,
 }
 
 impl Home {
@@ -42,6 +44,7 @@ impl Home {
             max: cfg.general.max_results,
             frecency: cfg.general.frecency,
             clipboard: cfg.general.clipboard,
+            apps: cfg.apps.clone(),
         }
     }
 }
@@ -162,6 +165,11 @@ impl Provider for Home {
                 Some(latest) => refreshed(&favorite, latest),
                 None => favorite,
             })
+            // 收藏里也可能是死链（软件换路径了）—— 同样按标题回填当前配置
+            .map(|mut item| {
+                item.rebind_launch(&self.apps);
+                item
+            })
             .collect();
         if self.frecency {
             // sort_by_key 是稳定排序：从没点过的（0 分）保持文件里的顺序
@@ -194,6 +202,12 @@ impl Provider for Home {
             .iter()
             .filter(|entry| keyword.is_empty() || matcher.fuzzy_match(&entry.line, keyword).is_some())
             .map(history::to_item)
+            // 死链先回填到当前配置：必须在**去重之前**做，否则 `obs` 与 `OBS`
+            // 两条指向不同 lnk 的同名历史会被当成两个不同条目都列出来
+            .map(|mut item| {
+                item.rebind_launch(&self.apps);
+                item
+            })
             .filter(|item| {
                 // 收藏里已经有的就别在历史里再列一遍
                 if seen.contains(&item.action) {

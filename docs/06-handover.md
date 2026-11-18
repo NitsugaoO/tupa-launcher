@@ -166,6 +166,7 @@ Control::{Run, Toggle{value}, Choice{options,index}, Number{value,min,max,step,s
 | `SetWinEventHook` 的事件区间 | 写成 `SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_OBJECT_SHOW, …)` 看着像「监听两个事件」，实际是 **[0x0003, 0x8002] 区间**，几乎把所有事件都订上了：系统不停往注册线程推消息，循环里再无条件枚举一次 → 实测 **2.6% CPU**。要几个事件就注册几个窄区间（min == max） |
 | WinEventHook 必须在有消息循环的线程 | `WINEVENT_OUTOFCONTEXT` 的回调是**靠 `DispatchMessage` 分发**的。守护进程主循环只 `GetMessage` 不 `DispatchMessage`，所以 `explorer_watch` 自己开一条线程、自己 `PeekMessage` + `DispatchMessage`，不去动主循环 |
 | 事件回调不能太贵 | 回调里只置位 `AtomicBool`；`ShellWindows` 枚举（有窗口时 ~5 ms）放到监听线程里，并且**只在命中 `CabinetWClass` 或兑底超时才做** —— 终端 / 浏览器的标题变化也会把消息推进来 |
+| 历史里的应用条目变成死链 | `history.json` 存的是执行那一刻的**完整快照**：`Action::Launch` 里是那条 `.lnk` 的绝对路径。软件换路径（scoop → 官方版：2026-11-18 实测 OBS / DeepSeek Harness 各一条）、旧 lnk 被删，历史就打不开了，而且开屏会同时出现两条同名（`obs` 与 `OBS`，副标题都是 `obs64.exe`，看着像「裸命令」）。做法：`Item::rebind_launch(&apps)` 在**展示前**按标题回填当前 `[[apps]]`（只动 `Launch` —— `Open` / `OpenUrl` 是用户当时选的具体路径 / 网址，不能替换）；**必须在去重之前**调，否则两条同名的仍会同时列出来。同名字型也解释了「图标时有时无」：死链解析不到 exe |
 | **别用改扩展名停用启动文件夹的项**（2026-11-18 实测踩到） | `tupa-launcher-daemon.lnk` 改成 `.lnk.disabled` 看着「停用了」，但 Explorer 枚举启动文件夹时对**目录里的每个文件**都做一次 ShellExecute；`.lnk` 会执行目标，`.lnk.disabled` 不是快捷方式 → 走文件关联。本机 `.disabled` 唯一登记过的打开方式是 NanaZip，于是**每次登录都弹「无法作为压缩包打开文件」**。证据：`HKCU\...\RunNotification\StartupTNoti<文件名> = 4`（4 = 本次登录已启动过）、`HKCU\...\FileExts\.disabled\OpenWithList`。正确做法：把文件**移出**启动文件夹（或删到回收站），别靠改名 |
 
 ## 5. 开关引擎（v0.7 已完成）
