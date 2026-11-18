@@ -1,6 +1,6 @@
 # tupa-launcher 状态
 
-updated: 2026-11-18 · code: `4852b28`（显示层两行卡片 · 输入框选区/剪贴板 · 滚动修复 · 模糊探针）
+updated: 2026-11-18 · code: `7594d0c`（亚克力 + 窗口圆角 + 失焦光标 · 显示层两行卡片 · 滚动修复）
 
 > 判断本文件是否过期：比较 `code` 与 `git log -1 --format=%h -- src Cargo.toml`。
 > 只改文档的提交不算过期。
@@ -19,6 +19,8 @@ updated: 2026-11-18 · code: `4852b28`（显示层两行卡片 · 输入框选�
   `src/gui/acrylic.rs` 再补一次 `SetWindowCompositionAttribute`
   （**gradient alpha 必须是 1**；GPUI 0.2.2 传的是 0，会变成整窗黑玻璃）。
   **不用 fork GPUI、不用 Win2D、不写 blur shader。**
+  ← 修正（2026-11-18 晚）：模糊本身确实没改 GPUI 渲染，但为了窗口 insets 后来还是
+    vendor 了一份 gpui（`vendor/gpui`，见下一条），这句里的「不用 fork」只对 blur 成立。
   之前判成「做不到」的真因是**节能模式**（`GetSystemPowerStatus().SystemStatusFlag == 1`）
   或系统「透明效果」关闭：那时 DWM 把 Acrylic / Mica / host backdrop 全降级成不透明纯色，
   所有材质 API 都「调用成功但没效果」。排查顺序、探针对照表、Zed / ELYTerminal 的做法
@@ -35,6 +37,9 @@ updated: 2026-11-18 · code: `4852b28`（显示层两行卡片 · 输入框选�
   `[gui] always_on_top`（默认 true）走 TOPMOST；
   **顺序**：`SWP_FRAMECHANGED` 会把 composition attribute 重置成 alpha = 0（黑玻璃），
   亚克力的 alpha = 1 补丁必须在 `frame::apply` 之后打（首帧里）。
+- **失焦与光标（2026-11-18）**：窗口不激活时**光标隐藏**、且不推帧（轮询里读
+  `window.is_window_active()`），重新聚焦后恢复 500ms 闪烁。
+  本机 `[gui] opacity` 调到 0.6（纯配置，不在仓库）。
 - **显示层：两行卡片（2026-11-18）**：普通模式从「标题 + 一条 ` · ` 拼起来的附注」
   改成**两行卡片**（第一行 标题 + 右侧状态/次数/时间，第二行 路径/分组 dim 小字），
   `Ctrl+Tab` 切**单行密度表**（一屏 12 条）。要点：
