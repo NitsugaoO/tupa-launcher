@@ -74,6 +74,9 @@ pub const ROW_SIZE: f32 = 13.0;
 /// 应用图标边长（逻辑像素）。有图标时它**顶替** chip 占那一列（列宽仍是
 /// `BADGE_WIDTH`，所以列宽计算不用动）。
 pub const ICON_SIZE: f32 = 20.0;
+/// Nerd Font 字形图标的字号（文件 / 文件夹 / 网页）。
+/// 比行文字（13）大一点，字形细节才看得清；16 也刚好在 `ICON_SIZE` 的槽里。
+pub const GLYPH_SIZE: f32 = 16.0;
 /// mini chip：卡片第二行、图标下面那个小的类型标签（`app` / `file`）。
 /// **只在该行有图标时画** —— 没图标的行第一行已经是 chip，没必要写两遍。
 pub const MINI_CHIP_WIDTH: f32 = 40.0;

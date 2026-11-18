@@ -191,20 +191,33 @@ cargo clippy --release --features gui    # 零警告；必须带 feature，否�
   例外是选择模式的 `1`–`9`（走私有的 `App::on_key`）。
   注册点在 `gui::input_row` 里那个 **1×1 绝对定位 `canvas`**：`window.handle_input` 只能在
   paint 阶段调，而 0×0 的元素不会 paint（踩过，handler 就永远注册不上）。
- 18. **应用图标在 GUI 侧做，不污染 `Item` / provider**（2026-11-18）：行数据里已经有
-     `Action::Launch { command }`，`util::resolve_executable` 能解 `.lnk` 也能搜 PATH，
-     所以 `RowSnapshot.icon` 直接在 `snapshot()` 里按 action 取即可，TUI 一行不用改。
-     四个必须记住的点（细节见 `docs/06-handover.md` §6「应用图标」）：
+ 18. **图标有三层来源，`RowIcon` 枚举（2026-11-18）**：位图（应用 / favicon）> Nerd Font
+     字形（文件 / 目录 / 网页）> chip（`cfg` / `run` / 老 `hist`）。行数据里已经有
+     `Action`，所以 `RowSnapshot.icon` 在 `snapshot()` 里算就行，TUI 一行不用改。
+     五个必须记住的点（细节见 `docs/06-handover.md` §6「图标」）：
      - 取图用 `IShellItemImageFactory::GetImage`（可指定尺寸），不用 `SHGetFileInfoW`（只有 32px）
      - `GetDIBits` 里 `biHeight` 给**负数**（自顶向下），32bpp 出来就是 GPUI 要的 BGRA；
-       **别再 swap 一次红蓝**
+       **别再 swap 一次红蓝**（favicon 解码同理）
      - 老式图标 alpha 全 0 必须当不透明处理（不然整块透明，像图标丢失）
      - 只给「可视区附近」的行提取（`Panel::prefetch_icons`），且**失败也缓存**；
-       别在 `snapshot()` 里遍历全部条目，74 个应用全会让首屏迟滞
+       别在 `snapshot()` 里遍历全部条目
      - 图标顶替 chip 但**列宽不变**（仍是 `BADGE_WIDTH`）；卡片第二行的 mini chip 用与
        第一行镜像的 flex 结构（number / star / `BADGE_WIDTH` + 同一个 gap），副标题因此自动对齐
      - 图标源有三层兜底（`appicon::exe_for`）：直接 `.exe` → `.cmd` / **无扩展名 shim**
        向上找同名 `.exe`（不做这步 VSCode 会是「白纸 + 齿轮」）→ 开始菜单 `.lnk` 索引
+   19. **文件图标不用图片，用 Nerd Font 字形**（2026-11-18）：字体 `JetBrains Maple Mono`
+     自带完整 Nerd Font 图标集（18MB 的原因），`src/gui/glyphs.rs` 里直接给 PUA 码点。
+     **码点抄 eza**（`src/output/icons.rs`，按语言给专属图标），别自己拍脑袋；
+     换字体要重量（字里没有的字形显示成豆腐块 —— PowerShell + GDI+ 把码点画成 PNG
+     看一眼即可，再加单测兜住）。已知坑：`F60F`（fa-markdown）在这个字体里是斜线方块，
+     用 `F48A`。
+   20. **favicon 只能异步、用 WinHTTP、必须缓存失败**（2026-11-18）：
+     `src/gui/favicon.rs` 在 `prefetch_icons` 里 spawn 线程跑（WinHTTP 阻塞，
+     放渲染线程会把面板卡住），结果走 mpsc 回轮询里 drain。取图顺序
+     `/favicon.ico` → 首页 `<link rel="icon">`（实测 `pwn.college` 前者是 404，
+     少了第二步一个图标都拿不到）。缓存存原始字节、**失败写空文件**否则每次呼出都重试；
+     站点 key 要带**非默认端口**（`127.0.0.1:5173` 与 `:4000` 是两个服务）。
+     开关是 `[gui] web_icons = "favicon" | "globe"`（`globe` 完全无网络请求）。
 - **托盘/热键在后台线程，别塞进 GPUI**：`Application::run` 占住主线程，所以 `src/tray.rs`
   自己开线程跑 message-only 窗口 + `Shell_NotifyIconW` + `RegisterHotKey`，面板显隐直接用
   `ShowWindow` 操作 HWND（`util::find_panel`），不碰 GPUI 状态。托盘菜单用

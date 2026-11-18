@@ -17,12 +17,14 @@
 pub mod icon;
 mod acrylic;
 mod appicon;
+mod favicon;
 mod frame;
+mod glyphs;
 mod input;
 mod keys;
 mod style;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -60,6 +62,8 @@ pub fn run(cfg: Config, theme: Theme) -> Result<()> {
     let acrylic_on = cfg.gui.acrylic;
     let always_on_top = cfg.gui.always_on_top;
     let rounded = cfg.gui.rounded;
+    // 默认 `favicon`：抓站点图标，拉不到回落成地球。`globe` 就完全不联网
+    let web_favicon = !cfg.gui.web_icons.eq_ignore_ascii_case("globe");
     let app = App::new(cfg, theme);
 
     gpui::Application::new().run(move |cx| {
@@ -129,6 +133,7 @@ pub fn run(cfg: Config, theme: Theme) -> Result<()> {
                             always_on_top,
                             acrylic: acrylic_on,
                             rounded,
+                            web_favicon,
                         },
                         max_height,
                         window,
@@ -223,6 +228,14 @@ struct Panel {
     /// 应用图标缓存：配置里的 `command`（含 `.lnk`）→ 图标。
     /// **提取失败也存 `None`**，否则裸命令（`wt` / `ms-settings:`）每次刷新都重跑 COM。
     icons: HashMap<String, Option<Arc<RenderImage>>>,
+    /// `[gui] web_icons = "favicon"`：网页行抓站点图标
+    web_favicon: bool,
+    /// 域名 → favicon 位图（拉到的才会进来）
+    favicons: HashMap<String, Arc<RenderImage>>,
+    /// 已发起请求的域名：失败的也算（空缓存文件就是「别重试」的标记）
+    favicon_pending: HashSet<String>,
+    favicon_tx: std::sync::mpsc::Sender<(String, Option<Arc<RenderImage>>)>,
+    favicon_rx: std::sync::mpsc::Receiver<(String, Option<Arc<RenderImage>>)>,
     /// 选中行变化的时间点（驱动左右滚动）
     scroll_started: std::time::Instant,
     /// 列表展开的时间点（驱动淡入）
@@ -243,6 +256,8 @@ struct Surface {
     always_on_top: bool,
     acrylic: bool,
     rounded: bool,
+    /// `[gui] web_icons = "favicon"`：网页行抓站点图标（后台线程，见 [`favicon`]）
+    web_favicon: bool,
 }
 
 impl Panel {
@@ -259,7 +274,10 @@ impl Panel {
             always_on_top,
             acrylic: acrylic_on,
             rounded,
+            web_favicon,
         } = surface;
+        // favicon 在后台线程抓（WinHTTP 是阻塞的），结果从 channel 回主线程
+        let (favicon_tx, favicon_rx) = std::sync::mpsc::channel();
         // 开屏（收藏 + 最近命令）要一次查询，provider 在工作线程里跑
         app.refresh();
 
@@ -310,6 +328,19 @@ impl Panel {
 
                     let was_pending = panel.app.pending;
                     panel.app.drain_events();
+                    // favicon：后台线程抓完就从 channel 收回来（拉不回来的不放进来，
+                    // 行上继续显示地球）
+                    let mut got_favicon = false;
+                    while let Ok((host, icon)) = panel.favicon_rx.try_recv() {
+                        panel.favicon_pending.remove(&host);
+                        if let Some(icon) = icon {
+                            panel.favicons.insert(host, icon);
+                            got_favicon = true;
+                        }
+                    }
+                    if got_favicon {
+                        cx.notify();
+                    }
                     let now_pending = panel.app.pending;
                     if was_pending != now_pending {
                         cx.notify();
@@ -368,6 +399,11 @@ impl Panel {
             opacity,
             max_height,
             icons: HashMap::new(),
+            web_favicon,
+            favicons: HashMap::new(),
+            favicon_pending: HashSet::new(),
+            favicon_tx,
+            favicon_rx,
             scroll_started: std::time::Instant::now(),
             reveal_started: std::time::Instant::now(),
             was_compact: true,
@@ -971,6 +1007,17 @@ impl Panel {
     ///
     /// 只跑 首行-2 .. 首行+可视条数+2 这一段（首屏 ~15 个），滚动时新出现的行
     /// 下一帧补上，已缓存的直接命中。**失败也缓存**，裸命令不会每帧重试。
+    /// 网页行的图标：favicon 到位就给位图，否则（或 `web_icons = "globe"`）给地球。
+    fn web_icon(&self, url: &str) -> RowIcon {
+        if self.web_favicon
+            && let Some(site) = favicon::Site::from_url(url)
+            && let Some(icon) = self.favicons.get(&site.key)
+        {
+            return RowIcon::Image(icon.clone());
+        }
+        RowIcon::Glyph(glyphs::GLOBE)
+    }
+
     fn prefetch_icons(&mut self) {
         if self.app.items.is_empty() {
             return;
@@ -979,15 +1026,40 @@ impl Panel {
         let first = (self.scroll_y / row_h).floor() as usize;
         let end = (first + self.max_visible_rows() + 2).min(self.app.items.len());
         for i in first.saturating_sub(2)..end {
-            let (command, title) = match &self.app.items[i].action {
-                Action::Launch { command, .. } => (command.clone(), self.app.items[i].title().to_string()),
-                _ => continue,
-            };
-            if self.icons.contains_key(&command) {
-                continue;
+            // 先 clone 出来，才能在不借用 `items` 的情况下改 `icons` / `favicons`
+            let action = self.app.items[i].action.clone();
+            let title = self.app.items[i].title().to_string();
+
+            match action {
+                Action::Launch { command, .. } => {
+                    if self.icons.contains_key(&command) {
+                        continue;
+                    }
+                    let icon = appicon_for(&command, &title);
+                    self.icons.insert(command, icon);
+                }
+                Action::OpenUrl(url) => {
+                    if !self.web_favicon {
+                        continue;
+                    }
+                    let Some(site) = favicon::Site::from_url(&url) else {
+                        continue;
+                    };
+                    if self.favicons.contains_key(&site.key)
+                        || self.favicon_pending.contains(&site.key)
+                    {
+                        continue;
+                    }
+                    self.favicon_pending.insert(site.key.clone());
+                    let tx = self.favicon_tx.clone();
+                    std::thread::spawn(move || {
+                        let key = site.key.clone();
+                        let icon = favicon::icon_for(&site);
+                        let _ = tx.send((key, icon));
+                    });
+                }
+                _ => {}
             }
-            let icon = appicon_for(&command, &title);
-            self.icons.insert(command, icon);
         }
     }
 
@@ -1340,8 +1412,20 @@ impl Panel {
                 columns: item.columns.clone(),
                 badge: item.kind.badge(),
                 icon: match &item.action {
-                    Action::Launch { command, .. } => self.icons.get(command).cloned().flatten(),
-                    _ => None,
+                    Action::Launch { command, .. } => self
+                        .icons
+                        .get(command)
+                        .cloned()
+                        .flatten()
+                        .map_or(RowIcon::None, RowIcon::Image),
+                    // 目录走 `Open`、文件走 `Reveal`（go 的 Opener::Default）
+                    Action::Open(path) | Action::Reveal(path) => {
+                        RowIcon::Glyph(glyphs::for_path(path))
+                    }
+                    Action::OpenInEditor { file, .. } => RowIcon::Glyph(glyphs::for_path(file)),
+                    // 网址：favicon 到位就用位图，否则（或 `web_icons = "globe"`）用地球
+                    Action::OpenUrl(url) => self.web_icon(url),
+                    _ => RowIcon::None,
                 },
                 selected: selected == Some(index),
                 color: style::badge_color(item.kind),
@@ -1460,13 +1544,32 @@ impl Panel {
     }
 }
 
+/// 行首类型列的图标来源。
+///
+/// 优先级：应用位图 > Nerd Font 字形 > 没有（画 chip）。
+/// 字形这一档让文件 / 文件夹 / 网页不用任何图片就能有图标 ——
+/// 字体自带 Nerd Font（见 [`glyphs`]）。
+#[derive(Clone)]
+enum RowIcon {
+    None,
+    /// 应用 exe 的位图（[`appicon`]）
+    Image(Arc<RenderImage>),
+    /// 文件 / 文件夹 / 网页的 Nerd Font 字形
+    Glyph(char),
+}
+
+impl RowIcon {
+    fn is_some(&self) -> bool {
+        !matches!(self, RowIcon::None)
+    }
+}
+
 struct RowSnapshot {
     index: usize,
     columns: Vec<String>,
     badge: &'static str,
-    /// 应用图标（`.lnk` / `.exe` 才有）。有值时**顶替** chip 占那一列，
-    /// 无值时（文件 / 网页 / 命令 / 历史）还是画类型胶囊。
-    icon: Option<Arc<RenderImage>>,
+    /// 类型列画什么。有值时**顶替** chip 占那一列；`None` 时回落到类型胶囊。
+    icon: RowIcon,
     color: Rgba,
     /// 是否是选中行（选中行不做 hover 高亮，否则会盖住 marker）
     selected: bool,
@@ -1656,15 +1759,24 @@ fn badge_cell(row: &RowSnapshot, p: Palette) -> AnyElement {
         .justify_center();
 
     match row.icon.clone() {
-        Some(icon) => slot
+        RowIcon::Image(icon) => slot
             .child(
                 img(icon)
                     .w(px(style::ICON_SIZE))
                     .h(px(style::ICON_SIZE)),
             )
             .into_any_element(),
+        // Nerd Font 字形：文件 / 文件夹 / 网页。字体本身带图标，不需要图片
+        RowIcon::Glyph(glyph) => slot
+            .child(
+                div()
+                    .text_size(px(style::GLYPH_SIZE))
+                    .text_color(row.color)
+                    .child(glyph.to_string()),
+            )
+            .into_any_element(),
         // chip：胶囊底；未选中灰底 + 类型色字，选中行反白成类型色底 + 深色字
-        None => slot
+        RowIcon::None => slot
             .rounded(px(style::BADGE_RADIUS))
             .bg(style::mix(p.panel, row.color, row.chip_progress))
             .text_size(px(style::BADGE_SIZE))

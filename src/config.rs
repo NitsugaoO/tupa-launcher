@@ -64,6 +64,13 @@ pub struct Gui {
     ///
     /// 关掉后窗口会被普通窗口压住 —— GlazeWM 里 `tupa-gui` 是 `ignore`，不会替你抬到前面。
     pub always_on_top: bool,
+
+    /// 网页行的图标：`favicon`（默认，抓站点自己的图标）或 `globe`（统一一个地球）。
+    ///
+    /// `favicon` 只对**可视行**的域名发请求，结果缓存在
+    /// `~/.config/tupa-launcher/icons/`（按域名存原始字节）；拉不到就回落成地球，
+    /// 不会反复重试。想要完全离线、不发任何网络请求就设 `globe`。
+    pub web_icons: String,
 }
 
 impl Default for Gui {
@@ -76,6 +83,7 @@ impl Default for Gui {
             acrylic: false,
             rounded: true,
             always_on_top: true,
+            web_icons: "favicon".to_string(),
         }
     }
 }

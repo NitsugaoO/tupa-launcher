@@ -50,6 +50,11 @@ acrylic = false
 rounded = true
 # 面板是否一直置顶（默认开；关掉会被普通窗口压住，GlazeWM 不管浮层）
 always_on_top = true
+# 网页行的图标：`favicon`（默认，抓站点自己的图标）或 `globe`（统一一个地球）。
+# favicon 只对**当时看得见的那几行**发请求（`/favicon.ico`，没有就翻首页的
+# `<link rel="icon">`），结果缓存在 `~/.config/tupa-launcher/icons/`；
+# 拉不到就回落成地球且下次不再重试。想要完全离线、不发任何网络请求就写 `globe`。
+web_icons = "favicon"
 
 [blog]
 # 博客仓库根目录（package.json 和 source/_posts 在这里）；留空 = ~/blog

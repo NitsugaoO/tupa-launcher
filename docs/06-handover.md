@@ -374,26 +374,27 @@ fork `vendor/gpui`，把 `directx_renderer.rs` 的 `DirectComposition` 换成 Wi
 **host backdrop 自带模糊，不需要 Win2D 的 `GaussianBlurEffect`**，整体约 150 行。
 注意：一个 HWND 只能有一个 DComp target，WinRT target 与 Win32 target 不能并存。
 
-### 应用图标（2026-11-18）
+### 图标：位图 / Nerd Font 字形 / chip（2026-11-18）
 
-`Kind::App` 行（以及任何 `Action::Launch` 的行）在类型列上画**应用图标**，
-有图标就**顶替 chip**，取不到才画回胶囊标签。实现在 `src/gui/appicon.rs`。
+类型列上的图标有**三个来源**，按优先级（`RowIcon` 枚举）：
+
+| 来源 | 用在 | 实现 |
+|---|---|---|
+| `RowIcon::Image` | 应用行（`Action::Launch`）、网页行（favicon） | `src/gui/appicon.rs` / `src/gui/favicon.rs` |
+| `RowIcon::Glyph` | 文件 / 目录 / 网页（无 favicon 时） | `src/gui/glyphs.rs`（Nerd Font 码点） |
+| `RowIcon::None` | `cfg` / `run` / 老 `hist` 条目（没有本地路径） | 回落成原来的类型 chip |
+
+#### 位图：应用（SHELL）
 
 - 取图：`IShellItemImageFactory::GetImage(96×96, SIIGBF_ICONONLY | SIIGBF_BIGGERSIZEOK)`。
   不用 `SHGetFileInfoW` 是因为它只有 32×32（本机 200% DPI 下 20 逻辑像素 = 40 物理，会糊）；
-  要 256 得走 `SHGetImageList(SHIL_JUMBO)` + `IImageList::GetIcon`，多一层 COM 类型，
-  而 `GetImage` 能**直接要指定尺寸**。96 已经够（2.4 倍余量），没必要拿 256。
+  要 256 得走 `SHGetImageList(SHIL_JUMBO)` + `IImageList::GetIcon`，多一层 COM 类型。
 - 格式：`GetDIBits` 指定 `biHeight = -h`（自顶向下）+ 32bpp → 出来就是
   **BGRA 非预乘**，正好是 GPUI `RenderImage` 要的格式（GPUI 内部把 RGBA 预乘
   换成 BGRA，见 `vendor/gpui/src/color.rs::swap_rgba_pa_to_bgra`）。
   别自己再 swap 一次，会变成红蓝互换。
 - **alpha 全 0 的兜底**：老式 16 色图标的 DIB 里 alpha 全是 0，不处理就是「整块透明」
   （看着像图标丢了）。检测到全 0 就直接置 255 当不透明。
-- 缓存：`Panel::icons: HashMap<String, Option<Arc<RenderImage>>>`，key 是配置里的
-  `command`，**失败也缓存**（`wt` / `ms-settings:` 这类每次刷新重试都是白花 COM 时间）。
-- 只给「可视区附近」的行提取（`Panel::prefetch_icons`）：首屏约 15 个，
-  滚动时新行下一帧补上。别在 `snapshot()` 里遍历全部条目 —— 74 个应用全走一遍
-  COM + GDI 会让首屏明显迟滞。
 - 图标源：`appicon::exe_for(command, title)`，三层兜底（命中就停）：
   1. `util::resolve_executable` 直接给 `.exe`
   2. 给的是 `.cmd` / `.bat` / **无扩展名 shim**（npm 装的 CLI 全是这种，VSCode 的
@@ -403,12 +404,48 @@ fork `vendor/gpui`，把 `directx_renderer.rs` 的 `DirectComposition` 换成 Wi
   3. 开始菜单索引（`%APPDATA%` + `%ProgramData%` 下的 `Start Menu\Programs` 递归扫 `.lnk`，
      key = 小写去扩展名，`OnceLock` 只建一次）→ 按**条目标题**、再按命令名命中 → 解到 exe
 
-  还是取不到的（`ms-settings:` 这类协议、PATH 里没有的 `obs64.exe`）回退到 chip。
-- 布局：卡片第一行是图标（顶替 chip），第二行图标下面挂一个 **mini chip**
+#### 位图：网页（favicon）
+
+`[gui] web_icons = "favicon"`（默认；设 `globe` 就完全不联网）时，`src/gui/favicon.rs`：
+
+- 取图顺序：`GET /favicon.ico` → 没有（404 / 不是图片）就抓首页 HTML，
+  从 `<link rel="...icon..." href>` 里找。**很多站点根本不做 `/favicon.ico`**：
+  实测 `pwn.college` 是 404，只靠第一步会一个图标都拿不到
+- HTTP 用 **WinHTTP**（`Win32_Networking_WinHttp`），不引新依赖；超时 2 秒、
+  只收 2xx、body 上限 1MB、带上常见浏览器 UA（空 UA 常被 403）
+- **一定在后台线程跑**（`prefetch_icons` 里 spawn，结果走 mpsc 回到轮询里 drain）：
+  WinHTTP 是阻塞的，放渲染线程上会把面板卡住
+- 缓存：`~/.config/tupa-launcher/icons/<站点>.bin`，存**原始字节**（ICO/PNG 让 `image`
+  自动识别），下次启动只解码；**失败写一个空文件**当「别重试」标记
+- 站点 key = `host[:port]`：**非默认端口要带上**，否则本机 `127.0.0.1:5173`（博客）
+  和 `:4000`（Hexo）会共用同一个图标
+- 解码：`image`（features `png` / `ico` / `jpeg`）→ RGBA → swap 成 BGRA（和 appicon 同一约定）
+
+#### 字形：文件 / 目录 / 网页（Nerd Font）
+
+`src/gui/glyphs.rs`。字体 `JetBrains Maple Mono`（18MB）自带完整 Nerd Font 图标集，
+所以文件类图标**不需要任何图片**，往 text 元素里塞一个 PUA 码点就行。
+
+- 码点抄 **eza**（`src/output/icons.rs`）的表：按**语言**给专属图标（Rust 齿轮、Python、
+  Go、JS/TS、C/C++…），比「所有代码一个 `</>`」辨识度高。yazi 的 `theme-dark.toml`
+  是同一套 PUA，但它主要按文件名配（`.gitignore` / `node_modules`），启动器用不上
+- **换字体要重量**：字体里没有的字形显示成豆腐块。验证方式：PowerShell + GDI+
+  把一批码点 `DrawString` 成 PNG 逐个看一眼（一遍 40 个，几十秒的事），
+  再加单测 `every_glyph_is_in_the_private_use_area` 兜住抄错的码点
+- 已知坑：老的 `F60F`（fa-markdown）在这个字体里是斜线方块，用 oct 的 `F48A` 代替
+
+#### 布局与缓存
+
+- 卡片第一行是图标（顶替 chip），第二行图标下面挂一个 **mini chip**
   （40×14、字号 9，**只在该行有图标时画**；没图标的行第一行已经是 chip，写两遍没意义）。
   第二行用和第一行**镜像**的 flex 结构（number / star / `BADGE_WIDTH` 列 + 同一个 gap），
   所以副标题起点自动和标题对齐（以前是硬编码 `card_indent()`）。
   单行密度模式（`Ctrl+Tab`）只有一行，**保留图标、不画 chip**。
+- 缓存：应用按配置里的 `command`、网页按站点 key，**失败也缓存**
+  （`wt` / `ms-settings:` / 拉不到的站点每次刷新重试都是白花 COM / 网络时间）。
+- 只给「可视区附近」的行提取（`Panel::prefetch_icons`）：首屏约 15 个，
+  滚动时新行下一帧补上。别在 `snapshot()` 里遍历全部条目 —— 74 个应用全走一遍
+  COM + GDI（或全去发 HTTP）会让首屏明显迟滞。
 
 ## 7. 调试入口
 
@@ -432,3 +469,7 @@ tupa-launcher.exe --daemon --debug        # 守护进程 + 日志
 - `favorites::toggle` 有两次小文件 IO（收藏不是高频操作）
 - 面板隐藏时每 200ms 轮询一次窗口可见性（改成就绪通知要碰窗口消息）
 - `Item.columns` 在每帧渲染时会分配 `String`（30fps 下可接受，真要优化就改成借用）
+- favicon 不认 **SVG**（`image` 解不了）也不看 `<meta property="og:image">`，
+  这两种站点会回落成地球；要支持得再加 XML / HTML 解析
+- 文件图标只看**扩展名**，不按文件名特化（eza / yazi 会给 `Makefile`、`.gitignore`、
+  `node_modules` 单独的图标）；启动器里出现的文件多是从历史来的具体文件，收益不大
