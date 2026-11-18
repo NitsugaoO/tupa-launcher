@@ -34,7 +34,8 @@ updated: 2026-11-18 · code: `8e15ed6`（亚克力 + 圆角 + 失焦光标 · �
 - **应用图标 + mini chip（2026-11-18 晚）**：卡片第一行图标顶替 chip，第二行图标下挂
   **mini chip**（34×14、字号 9，只在该行有图标时画，两行 `gap = 0` 贴着图标）；
   第二行用与第一行**镜像**的 flex 结构，副标题自动对齐（`card_indent()` 已删）。
-  字形图标内层固定 `ICON_SIZE` 宽 + `text_center`（advance 不一定是 16px，不定宽会偏右）。
+  字形图标用 `GLYPH_PAD_LEFT = 17` 定位（字形 advance 是 20 逻辑像素、ink 还偏左 2；
+  像素级标定：图标与 mini chip 的中心都是 139.5 物理像素）。
   单行密度模式只保留图标。
   应用图标三层兜底（`appicon::exe_for`）：直接 `.exe` → `.cmd` / 无扩展名 shim 向上一级
   找同名 `.exe`（VSCode `bin\code` → `Code.exe`，不做这步图标是「白纸 + 齿轮」）→

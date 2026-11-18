@@ -442,8 +442,11 @@ fork `vendor/gpui`，把 `directx_renderer.rs` 的 `DirectComposition` 换成 Wi
   第二行用和第一行**镜像**的 flex 结构（number / star / `BADGE_WIDTH` 列 + 同一个 gap），
   所以副标题起点自动和标题对齐（以前是硬编码 `card_indent()`）。
   单行密度模式（`Ctrl+Tab`）只有一行，**保留图标、不画 chip**。
-- 字形容器固定 `ICON_SIZE` 宽 + `text_center`：Nerd Font 字形的 advance 不一定是 16px，
-  不定宽时整块会被往右撑，看起来就是「图标比下面的 mini chip 偏右」。
+- 字形图标的水平定位靠 `GLYPH_PAD_LEFT`（`justify_start` + 左内边距）：这个字体的
+  图标字形 **advance 是 20 逻辑像素**（不是 `GLYPH_SIZE` 的 16），ink 还在 advance 里
+  偏左 2 → 标定值 17。两个**没用**的做法：文本元素 `.w(px(n))` 无效（宽度仍由内容撑）、
+  `ml(-n)` 被 flex 的 `justify_center` 抵消。标定方法：同一行量「图标 ink 的 x 中心」
+  和「mini chip 底色块的 x 中心」，相等即对齐（17 时都是 139.5 物理像素 @200% DPI）
 - **颜色分两个函数，别搞混**：
   - `chip_fg()`（`mix(row.color, p.background, chip_progress)`）—— chip / mini chip 的**文字**，
     未选中类型色、选中反白成背景色
