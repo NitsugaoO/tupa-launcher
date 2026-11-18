@@ -456,6 +456,26 @@ fork `vendor/gpui`，把 `directx_renderer.rs` 的 `DirectComposition` 换成 Wi
   - 两者的渐变进度都是同一个 `chip_progress`，所以换行时图标和 chip 一起变
   - 位图图标（应用 / favicon）是彩色的，不参与渐变
 - 缓存：应用按配置里的 `command`、网页按站点 key，**失败也缓存**
+- **哪种行画什么图标**（`Panel::glyph_for`，纯函数、有单测）：先看应用的位图 / favicon，
+  再看 `Kind` 里比 `Action` 更具体的两个 —— `Pi` 会话用**希腊字母 π**（普通字符，故意
+  不用 Nerd Font：它是终端 TUI，跟 `LaunchInTerminal` 的终端图标区分开）、老历史
+  （只有 `FillInput`、没有快照）用时钟；其余按 `Action` 分流：
+
+  | `Action` | 字形 |
+  |---|---|
+  | `Open` / `Reveal` | 按扩展名（`glyphs::for_path`） |
+  | `OpenInEditor` | `</>` |
+  | `LaunchInTerminal` / `RunCommand` | 终端 |
+  | `SetControl` | `Kind::Switch` → toggle，其它 → 齿轮 |
+  | `CleanSession` | `Restore` → 归档箱，其它 → 垃圾桶 |
+  | `BlogAdmin` / `BlogPreview` | 服务器 |
+  | `ServeStop` / `ServeStopAll` | 停止圈 |
+  | `CreateBlogPost` | 铅笔 |
+  | `FillInput` | `Kind::Help`（命令列表）→ 问号，其它 → 右箭头 |
+
+  没有图标的行（比如 `steam://` 这种没有本地 exe 的启动项）仍回落 mini chip。
+  别照 `Kind::badge()` 再复刻一份表：badge 是文字、图标是形状，口径不一样
+  （`Switch` / `Setting` 的 badge 不同，图标只差 toggle / 齿轮）。
   （`wt` / `ms-settings:` / 拉不到的站点每次刷新重试都是白花 COM / 网络时间）。
 - 只给「可视区附近」的行提取（`Panel::prefetch_icons`）：首屏约 15 个，
   滚动时新行下一帧补上。别在 `snapshot()` 里遍历全部条目 —— 74 个应用全走一遍

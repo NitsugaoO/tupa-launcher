@@ -1,6 +1,6 @@
 # tupa-launcher 状态
 
-updated: 2026-11-18 · code: `5d223e8`（亚克力 + 圆角 + 失焦光标 · 两行卡片 · 窗口高 0.68 + 提前两行滚动 · 应用图标 + mini chip + 文件/网页图标 + 历史死链回填）
+updated: 2026-11-18 · code: `a8dad5d`（亚克力 + 圆角 + 失焦光标 · 两行卡片 · 窗口高 0.68 + 提前两行滚动 · 应用图标 + mini chip + 文件/网页图标 + 全类型图标 + 历史死链回填）
 
 > 判断本文件是否过期：比较 `code` 与 `git log -1 --format=%h -- src Cargo.toml`。
 > 只改文档的提交不算过期。
@@ -13,6 +13,15 @@ updated: 2026-11-18 · code: `5d223e8`（亚克力 + 圆角 + 失焦光标 · �
 
 ## 阶段
 
+- **非文件类条目也有图标了（2026-11-18 晚）**：`:set` 开关是 toggle、动作项是齿轮、
+  `:run` / `:go:pi` 是终端、pi 会话是希腊字母 **π**、`:pi:clean` 是归档箱 / 垃圾桶、
+  `:blog` 是服务器 / 停止圈 / 铅笔、命令列表是问号、其余 `FillInput` 是右箭头。
+  决策逻辑在 `Panel::glyph_for`（纯函数，单测覆盖全分支），颜色仍走 `icon_fg`
+  （未选中灰、选中类型色）。没有图标的条目（如 `steam://` 启动项）照旧回落 mini chip。
+- **本机网页图标切回地球**：`config.toml` 加了 `[gui] web_icons = "globe"`（代码默认值
+  不变，仍是 favicon）。favicon 有磁盘缓存（`~/.config/tupa-launcher/icons/<站点>.bin`，
+  失败也写空文件、不重试），但**首次**遇到新站点仍会 spawn 线程走 WinHTTP（两次尝试
+  加一次首页 HTML），站点一多就有体感卡顿。想换回来改这一行即可。
 - **历史死链回填（2026-11-18）**：开屏 / `@hist` 里指向已删 `.lnk` 的应用条目（本机 OBS 的
   scoop 旧链、DeepSeek Harness 的旧链）现在是**展示前按标题回填当前 `[[apps]]`**
   （`Item::rebind_launch`，只动 `Launch`，且在去重之前调）—— 两条同名历史会被合并成一条，
