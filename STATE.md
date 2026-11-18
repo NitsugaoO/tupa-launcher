@@ -1,6 +1,6 @@
 # tupa-launcher 状态
 
-updated: 2026-11-18 · code: `c35de4f`（显示层两行卡片 · 输入框选区/剪贴板 · 滚动修复 · 模糊探针）
+updated: 2026-11-18 · code: `5b2538a`（显示层两行卡片 · 输入框选区/剪贴板 · 滚动修复 · 模糊探针）
 
 > 判断本文件是否过期：比较 `code` 与 `git log -1 --format=%h -- src Cargo.toml`。
 > 只改文档的提交不算过期。

@@ -263,46 +263,44 @@ cargo build --release --features gui     # 产出 tupa-gui.exe + tupa-launcher.e
    变成整窗黑玻璃；上游 0.3.8 也补了同一条 `if is_acrylic && color.3 == 0 { color.3 = 1 }`。
    所以我们不改 gpui 源码，调完覆盖它即可。
 
-#### 圆角与窗口形状（2026-11-18）
+#### 窗口形状：insets 与圆角（2026-11-18）
 
-亚克力是 **DWM 按整个窗口矩形**画的，而面板内容只在内部画 `.rounded(12)` ——
-窗口本身方角的话，四个角会漏出模糊。
+**① gpui 的 insets 已经在 vendor 里改成 0。**
 
-**正解：让 DWM 把窗口裁成圆角**（`src/gui/frame.rs`）：
+`vendor/gpui`（`[patch.crates-io]`，只带 src/resources/构建文件）只有一个改动：
 
 ```rust
-DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, &DWMWCP_ROUND, 4);
-SetWindowPos(hwnd, null, 0,0,0,0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER);
+// vendor/gpui/src/platform/windows/events.rs
+fn get_client_area_insets(..) -> RECT { RECT { left: 0, top: 0, right: 0, bottom: 0 } }
 ```
 
-亚克力会跟着圆角一起被裁，不需要任何 region。
+上游那圈 insets（`SM_CXSIZEFRAME + SM_CXPADDEDBORDER`，Win11 的 top 再加 `dpi/96`）
+是给 `WS_THICKFRAME` 留的系统边框：窗口矩形内、客户区外，DWM 会把它填成浅灰，
+开亚克力之后就是「面板外多一圈」。
 
-**试过但更差的两条路（别重走）**：
+**必须在源码里改**。运行时子类化 `WM_NCCALCSIZE` 返回 0 看起来等价，但
+`WindowBorderOffset` 是**窗口创建时**用 `GetWindowRect - GetClientRect` 算的，
+之后客户区变了它不更新 → GPUI 认为「窗口 = 客户区 + 一圈」，每轮 resize 再大一圈
+（实测 966 → 1551，两次实验完全一样）。
 
-1. **自己 `SetWindowRgn` + 保留 `WS_EX_NOREDIRECTIONBITMAP`**（gpui 的 DComp 默认样式）：
-   `SetWindowRgn` 返回成功、`GetWindowRgn` 也查得到 region，但 DWM **静默忽略**它，
-   四角照样是方角。
-2. **去掉 `WS_EX_NOREDIRECTIONBITMAP` 再 `SetWindowRgn`**：region 这次生效了，但
-   - region 外的区域被 DWM 填成浅灰/白色，视觉上就是「面板外多一圈」；
-   - gpui 的 insets 是**硬编码公式**（`events.rs::get_client_area_insets`：
-     `SM_CXSIZEFRAME + SM_CXPADDEDBORDER`，Win11 的 top 再加 `dpi/96`），
-     **与 `is_resizable` 无关**，所以客户区永远比窗口小一圈：
+**② 圆角和亚克力是死结，用 `[gui] rounded` 取舍。**
 
-     | | window | client | insets |
-     |---|---|---|---|
-     | tupa-gui | 966×74 | 952×66 | L6 T1 R8 B7 |
-     | ElyTerminal | 492×916 | 478×909 | L7 T0 R7 B7 |
+| 做法 | 结果 |
+|---|---|
+| `DWMWA_WINDOW_CORNER_PREFERENCE`（DWM 圆角） | 只裁**内容**，`SetWindowCompositionAttribute` 的亚克力仍按窗口矩形铺 → 圆角外剩一块方形亚克力 |
+| `SetWindowRgn` + 保留 `WS_EX_NOREDIRECTIONBITMAP` | DWM 静默忽略 region（`GetWindowRgn` 查得到，视觉无效） |
+| `SetWindowRgn` + 去掉那个 flag | region 生效了，但 GPUI 的无边框依赖它 —— **标题栏冒出来**，还要额外处理 redirection surface |
 
-   - 想用 `GetWindowRect` + `ClientToScreen` 把 region 对齐到客户区只会把右侧/底部的
-     边框裁掉，仍然去不掉那圈。
+所以：`rounded = true`（默认）得到圆角 + 圆角外的方形亚克力；`rounded = false`
+（本机设置）时窗口设 `DWMWCP_DONOTROUND`、根 div 圆角归零，两者边缘重合，接缝消失。
 
-**对照 ElyTerminal**（同样是 GPUI、同一个 ex-style、同样有亚克力）：它没有做任何
-窗口形状处理，insets 也是 L7 T0 R7 B7，圆角就是 DWM 默认行为 —— 这也印证了
-「不要自己动 region」。
+真想「圆角 + 真模糊」，只能改应用层：呼出前截一帧 + 模糊 + `paint_image`（静态帧），
+别再在 DWM 上找了 —— WinUI 应用能圆角 Acrylic 是因为它们用 WinRT compositor 自己的
+visual clip，不走 accent。
 
-**顺序坑**：`SWP_FRAMECHANGED` 会把 `SetWindowCompositionAttribute` 重置回 gpui 的
-`alpha = 0`（整窗黑玻璃）。所以亚克力的 `alpha = 1` 补丁必须在 `frame::apply`
-**之后**打。现在两者都在首帧 `Panel::render` 里，顺序是 frame → acrylic。
+**③ 顺序坑**：`SWP_FRAMECHANGED` 会把 `SetWindowCompositionAttribute` 重置回 gpui 的
+`alpha = 0`（整窗黑玻璃）。亚克力的 `alpha = 1` 补丁必须排在 `frame::apply` **之后**
+（现在都在首帧 `Panel::render` 里，顺序 frame → acrylic）。
 
 #### 之前为什么判成「做不到」（教训）
 

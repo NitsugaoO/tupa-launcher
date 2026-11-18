@@ -112,21 +112,22 @@ cargo clippy --release --features gui    # 零警告；必须带 feature，否�
      - 判据不要靠壁纸：用**棋盘格**铺底再截图（`copyfromscreen`，`PrintWindow` 抓不到
        DComp 合成结果）。探针在 `examples/acrylic_probe.rs`（`backdrop` / `host` /
        `sb2..sb4`），细节与结论见 `docs/06-handover.md` §6「窗口模糊」。
-     - **圆角交给 DWM，别自己裁 region**（2026-11-18，试过两条错路）：
-       亚克力按整个窗口矩形画，`SetWindowRgn` 看起来是解法，但
-       ① 保留 gpui 的 `WS_EX_NOREDIRECTIONBITMAP` 时 DWM 静默忽略 region
-       （`GetWindowRgn` 查得到、视觉零变化）；② 去掉那个 ex-style 后 region 生效，
-       可 region 外被 DWM 填成浅灰/白，加上 gpui 的 insets（`WM_NCCALCSIZE` 里硬编码
-       `SM_CXSIZEFRAME + SM_CXPADDEDBORDER`，**与 `is_resizable` 无关**）就是
-       「面板外多一圈」。正解是 `DWMWA_WINDOW_CORNER_PREFERENCE = DWMWCP_ROUND`
-       （`src/gui/frame.rs`），亚克力会跟着被裁 —— ElyTerminal 同样如此，
-       它的 insets 也是 L7 T0 R7 B7，没有额外处理。
-     - **`SWP_FRAMECHANGED` 会重置 composition attribute**：亚克力的 alpha = 1
-       补丁一定放在 `frame::apply` **之后**（现在都在首帧 `Panel::render` 里，
-       顺序是先 frame 后 acrylic），放前面就是整窗黑玻璃。
-     - 窗口外观相关的三个 DWM 属性（`NCRENDERING_POLICY` / `BORDER_COLOR` /
-       `VISIBLE_FRAME_BORDER_THICKNESS`）在这台机器上**返回成功但无效**，
-       圆角外那 1~2px 描边去不掉，别再花时间。
+     - **窗口形状：GPUI 的 insets 已经在 vendor 里改成 0**（2026-11-18）：
+       `vendor/gpui`（`[patch.crates-io]`）只改了一处 ——
+       `events.rs::get_client_area_insets` 返回 0，让客户区铺满整个窗口。
+       上游那圈 insets 是 `WS_THICKFRAME` 的系统边框，窗口矩形内、客户区外的部分会被
+       DWM 填成浅灰，开亚克力后就是「面板外多一圈」。**必须在源码里改**：运行时子类化
+       `WM_NCCALCSIZE` 会让 `WindowBorderOffset`（创建时用
+       `GetWindowRect - GetClientRect` 算的）与客户区不一致，窗口每轮 resize 都再大一圈
+       （实测 966 → 1551）。
+     - **圆角 vs 亚克力是死结，用 `[gui] rounded` 取舍**：`SetWindowCompositionAttribute`
+       的亚克力按**整个窗口矩形**铺，`DWMWA_WINDOW_CORNER_PREFERENCE` 只裁内容不裁它，
+       所以圆角外侧必然露出一块方形亚克力；`SetWindowRgn` 能裁但被
+       `WS_EX_NOREDIRECTIONBITMAP` 挡住（去掉它 GPUI 的标题栏会冒出来）。
+       `rounded = false` 时窗口也设 `DWMWCP_DONOTROUND`、根 div 圆角归零，两者边缘重合。
+       想真圆角 + 真模糊只能改应用层（呼出前截一帧 + 模糊 + `paint_image`），别再折腾 DWM。
+     - **`SWP_FRAMECHANGED` 会重置 composition attribute**：亚克力的 alpha = 1 补丁必须排在
+       `frame::apply` **之后**（都在首帧 `Panel::render` 里，顺序 frame → acrylic）。
      - 独立结论（仍然成立，别再试）：`CreateHostBackdropBrush` 在 Win32 上依赖
        `DWMWA_USE_HOSTBACKDROPBRUSH` 且自带模糊，可作为**后备方案**（要换 WinRT 合成树）；
        `CreateBackdropBrush` 只「透」不糊；`DWMWA_SYSTEMBACKDROP_TYPE` 在 DComp 窗口上
