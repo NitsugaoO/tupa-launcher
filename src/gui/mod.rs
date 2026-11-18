@@ -247,6 +247,8 @@ struct Panel {
     logged_rows: usize,
     /// 上一次写进调试日志的输入框内容
     logged_input: String,
+    /// 状态栏临时提示的文本 + 首次看到它的时间（超过 `STATUS_HOLD` 就清掉）
+    status_seen: Option<(String, std::time::Instant)>,
 }
 
 /// 面板的外观开关（`[gui]` 里那几项），打包传进来免得 `Panel::new` 参数爆炸。
@@ -282,7 +284,7 @@ impl Panel {
         // 开屏（收藏 + 最近命令）要一次查询，provider 在工作线程里跑
         app.refresh();
 
-        let palette = Palette::new(&app.theme);
+        let palette = Palette::new(&app.theme).with_opacity(opacity);
         let focus = cx.focus_handle();
         window.focus(&focus);
 
@@ -326,6 +328,25 @@ impl Panel {
                     }
 
                     panel.app.tick += 1;
+
+                    // 临时提示（「单行密度模式」「已复制」这类）只停 `STATUS_HOLD` 秒，
+                    // 之后自动回落成 provider 描述 —— 否则要等下一次输入才会变。
+                    if let Some((text, _)) = panel.app.status.as_ref() {
+                        let now = std::time::Instant::now();
+                        match &panel.status_seen {
+                            Some((seen, at)) if seen == text => {
+                                if now.duration_since(*at).as_secs_f32() >= style::STATUS_HOLD {
+                                    panel.app.status = None;
+                                    panel.status_seen = None;
+                                    cx.notify();
+                                }
+                            }
+                            // 新提示（或换了内容）：重新开始计时
+                            _ => panel.status_seen = Some((text.clone(), now)),
+                        }
+                    } else {
+                        panel.status_seen = None;
+                    }
 
                     let was_pending = panel.app.pending;
                     panel.app.drain_events();
@@ -410,6 +431,7 @@ impl Panel {
             was_compact: true,
             logged_rows: usize::MAX,
             logged_input: String::new(),
+            status_seen: None,
         }
     }
 
@@ -1397,7 +1419,7 @@ impl Panel {
                     // 左侧绿条用边框画：不占内容宽度，列表能整体左移
                     .border_l(px(style::ACCENT_BAR))
                     .border_color(p.accent)
-                    .bg(p.overlay),
+                    .bg(p.row_selected),
             );
         }
 
@@ -1679,7 +1701,7 @@ fn render_row(
     let card = if row.selected {
         card
     } else {
-        card.hover(|style| style.bg(p.panel))
+        card.hover(|style| style.bg(p.row_hover))
     };
 
     // 选中底色与左侧绿条由列表容器里的「选框」（marker）统一画；
@@ -2039,7 +2061,7 @@ fn render_card_row(
     let card = if row.selected {
         card
     } else {
-        card.hover(|style| style.bg(p.panel))
+        card.hover(|style| style.bg(p.row_hover))
     };
 
     div()

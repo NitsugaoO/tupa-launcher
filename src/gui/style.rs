@@ -114,6 +114,12 @@ pub const NOTE_SIZE: f32 = 11.0;
 /// 状态栏：高 24、字号 11
 pub const STATUS_HEIGHT: f32 = 24.0;
 pub const STATUS_SIZE: f32 = 11.0;
+
+/// 状态栏临时提示的停留时间（秒）。
+///
+/// 「单行密度模式」「已复制」这类一次性提示只停这么久，之后自动回落成 provider 描述 ——
+/// 不然它得等到下一次输入 / 换 provider 才会变（2026-11-18 用户反馈）。
+pub const STATUS_HOLD: f32 = 2.0;
 /// 选中行左侧的强调条宽度
 pub const ACCENT_BAR: f32 = 3.0;
 /// 列表区顶部留白（别让第一行贴着分隔线）
@@ -165,6 +171,10 @@ pub struct Palette {
     /// 比背景略亮一档：hover 底色、未选中 chip 的底色
     pub panel: Rgba,
     pub overlay: Rgba,
+    /// hover 行的底色（带 alpha，默认等于 `panel`）
+    pub row_hover: Rgba,
+    /// 选框的底色（带 alpha，默认等于 `overlay`）
+    pub row_selected: Rgba,
     pub border: Rgba,
     pub fg: Rgba,
     pub muted: Rgba,
@@ -179,10 +189,14 @@ pub struct Palette {
 impl Palette {
     pub fn new(theme: &Theme) -> Self {
         let background = rgba(theme.background, theme.background);
+        let panel = rgba(theme.panel, theme.background);
+        let overlay = rgba(theme.overlay, theme.background);
         Self {
             background,
-            panel: rgba(theme.panel, theme.background),
-            overlay: rgba(theme.overlay, theme.background),
+            panel,
+            overlay,
+            row_hover: panel,
+            row_selected: overlay,
             border: rgba(theme.border, theme.background),
             fg: rgba(theme.fg, theme.background),
             muted: rgba(theme.muted, theme.background),
@@ -193,6 +207,21 @@ impl Palette {
             warn: rgba(theme.warn, theme.background),
             bad: rgba(theme.bad, theme.background),
         }
+    }
+
+    /// 让 hover 底色 / 选框底色跟随面板不透明度。
+    ///
+    /// 面板本身是亚克力（`acrylic = true` + `opacity < 1`），根节点的背景 alpha
+    /// 就是 `opacity`。如果这两层底色写死成不透明色，它们会把底下的亚克力完全盖住 ——
+    /// 换成一层的半透明色，模糊的桌面就能从选框 / hover 里透出来。
+    ///
+    /// alpha 直接取 `opacity`：面板 60% 透，选框也 60% 透，两层叠起来的实际不透明度
+    /// 约 `1-(1-0.6)² ≈ 0.84`，文字仍然吃得住。
+    pub fn with_opacity(mut self, opacity: f32) -> Self {
+        let alpha = opacity.clamp(0.0, 1.0);
+        self.row_hover = with_alpha(self.panel, alpha);
+        self.row_selected = with_alpha(self.overlay, alpha);
+        self
     }
 }
 

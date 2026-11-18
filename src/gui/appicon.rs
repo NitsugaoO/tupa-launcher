@@ -79,15 +79,29 @@ pub fn load(path: &Path) -> Option<Arc<RenderImage>> {    ensure_com();
 /// “未知文件类型”图标，而那个 shim 上一级的 `Code.exe` 才是真 logo。
 pub fn exe_for(command: &str, title: &str) -> Option<PathBuf> {
     if let Some(path) = crate::util::resolve_executable(command) {
-        if is_exe(&path) {
-            return Some(path);
-        }
-        if let Some(exe) = sibling_exe(&path) {
-            return Some(exe);
+        // MSIX 应用（`wt.exe` 转发到 `...\WindowsApps\<包名>\wt.exe`）的目录受保护，
+        // `IShellItemImageFactory` 只能给出通用的「应用」图标（白纸 + 一块蓝），
+        // 所以跳过它，直接用开始菜单里的 `.lnk`（那里存的是真图标）。
+        if !is_msix(&path) {
+            if is_exe(&path) {
+                return Some(path);
+            }
+            if let Some(exe) = sibling_exe(&path) {
+                return Some(exe);
+            }
         }
     }
 
     start_menu_exe(title).or_else(|| start_menu_exe(command))
+}
+
+/// 是否在 MSIX 包目录里（`C:\Program Files\WindowsApps\<包名>\…`）。
+fn is_msix(path: &Path) -> bool {
+    path.components().any(|part| {
+        part.as_os_str()
+            .to_string_lossy()
+            .eq_ignore_ascii_case("WindowsApps")
+    })
 }
 
 fn is_exe(path: &Path) -> bool {
