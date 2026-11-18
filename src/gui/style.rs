@@ -72,8 +72,14 @@ pub const ROW_GAP: f32 = 3.0;
 pub const ROW_RADIUS: f32 = 7.0;
 pub const ROW_SIZE: f32 = 13.0;
 /// 应用图标边长（逻辑像素）。有图标时它**顶替** chip 占那一列（列宽仍是
-/// `BADGE_WIDTH`，所以 `card_indent()` 和列宽计算都不用动）。
+/// `BADGE_WIDTH`，所以列宽计算不用动）。
 pub const ICON_SIZE: f32 = 20.0;
+/// mini chip：卡片第二行、图标下面那个小的类型标签（`app` / `file`）。
+/// **只在该行有图标时画** —— 没图标的行第一行已经是 chip，没必要写两遍。
+pub const MINI_CHIP_WIDTH: f32 = 40.0;
+pub const MINI_CHIP_HEIGHT: f32 = 14.0;
+pub const MINI_CHIP_RADIUS: f32 = 7.0;
+pub const MINI_CHIP_SIZE: f32 = 9.0;
 /// 徽标 chip：宽 50、高 18、圆角 9（胶囊）、字号 10
 pub const BADGE_WIDTH: f32 = 50.0;
 pub const BADGE_HEIGHT: f32 = 18.0;

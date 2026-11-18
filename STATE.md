@@ -20,15 +20,13 @@ updated: 2026-11-18 · code: `ebab915`（亚克力 + 圆角 + 失焦光标 · �
   `@ev my-dot.`、`@go Downloads/blog/Themes` 三条相对路径），备份 `history.json.bak-20261118-141813`。
   审计脚本：`python` 逐条看 `Action` 能不能解析（路径存在 / `which` / 协议前缀）。
 
-- **应用图标（2026-11-18 晚）**：App 行（以及任何 `Action::Launch` 的行）在类型列画
-  **20×20 应用图标，顶替 chip**；取不到才画回胶囊。实现在 `src/gui/appicon.rs`：
-  `IShellItemImageFactory::GetImage(96×96)` → `GetDIBits`（`biHeight` 负 = 自顶向下、32bpp）
-  → BGRA → `gpui::RenderImage`。列宽仍是 `BADGE_WIDTH`，所以 `card_indent()` / `RowMetrics`
-  都不用动。缓存 key = 配置里的 `command`、**失败也缓存**、只给「可视区附近」的行提取
-  （`prefetch_icons`）。依赖新增 `image`（optional，仅 `gui`）+ windows `Win32_Graphics_Gdi`。
-  **覆盖率**：真 `.lnk` / 全路径 exe 全有图标；裸命令看 PATH（`code` 拿到 `code.cmd` 的脚本图标，
-  不在 PATH 的 `obs64.exe` 没图标 → 回落 chip）。要再高只能加「标题 → 开始菜单 `.lnk`」反查，
-  **未做**。
+- **应用图标 + mini chip（2026-11-18 晚）**：App 行（以及任何 `Action::Launch` 的行）在类型列画
+  **20×20 应用图标，顶替 chip**；卡片第二行图标下面再挂一个 **mini chip**（40×14、字号 9，
+  只在该行有图标时画），第二行用与第一行镜像的 flex 结构，副标题自动对齐（`card_indent()`
+  已删）。单行密度模式只有图标、不画 chip。图标源三层兜底（`appicon::exe_for`）：直接 `.exe`
+  → `.cmd` / 无扩展名 shim 向上一级找同名 `.exe`（VSCode `bin\code` → `Code.exe`，
+  不做这步图标是「白纸 + 齿轮」）→ 开始菜单 `.lnk` 索引（按标题 / 命令名，`OnceLock` 建一次）。
+  `web` / `cfg` / `run` / 老 `hist` 条目没有本地路径，仍用 chip。
 - **窗口高度与提前滚动（2026-11-18）**：`MAX_HEIGHT_RATIO` → **0.68**（本机 960 逻辑高，
   实测窗口 638px、**11 条卡片**），`SCROLL_MARGIN_ROWS` → **2**（选框距边缘还有 2 条就开滚，
   实测 24/30 时下方仍露 2 条）。**可视条数不写死**：`max_visible_rows()` 用 `max_height`
@@ -331,9 +329,6 @@ updated: 2026-11-18 · code: `ebab915`（亚克力 + 圆角 + 失焦光标 · �
 
 ## 未完成
 
-- **裸命令的图标覆盖率**：只有 `util::resolve_executable` 能解析到的才有图标（`code` 拿到的是
-  `code.cmd` 的脚本图标，不在 PATH 的 `obs64.exe` 直接没图标 → 回落 chip）。要接近 100%
-  得再加一层「标题/文件名 → 开始菜单 `.lnk`」反查，**未做**。
 - **窗口宽度记忆**：面板宽度固定按主屏 62%（高度随内容），拖边改过的宽度还没写回
   `gui.json`（`config.toml` 手写带注释，不能程序回写）。
 - **TUI 侧没跟进的新交互**：紧凑形态、双击执行、chip 配色只在 GUI 有；

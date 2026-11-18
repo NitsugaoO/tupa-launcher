@@ -394,10 +394,21 @@ fork `vendor/gpui`，把 `directx_renderer.rs` 的 `DirectComposition` 换成 Wi
 - 只给「可视区附近」的行提取（`Panel::prefetch_icons`）：首屏约 15 个，
   滚动时新行下一帧补上。别在 `snapshot()` 里遍历全部条目 —— 74 个应用全走一遍
   COM + GDI 会让首屏明显迟滞。
-- 图标源：`util::resolve_executable`（`.lnk` → 目标 exe，裸命令 → PATH）。
-  **裸命令的覆盖率有限**：`code` 解析到的是 `code.cmd`（显示 cmd 脚本图标），
-  `obs64.exe` 这种不在 PATH 的就是没有图标。要更高的覆盖率只能加一层
-  「标题 → 开始菜单 `.lnk`」反查，目前**没做**。
+- 图标源：`appicon::exe_for(command, title)`，三层兜底（命中就停）：
+  1. `util::resolve_executable` 直接给 `.exe`
+  2. 给的是 `.cmd` / `.bat` / **无扩展名 shim**（npm 装的 CLI 全是这种，VSCode 的
+     `bin\code` 也是）→ 同级 / 上一级目录找同名 `.exe`
+     （`…\Microsoft VS Code\bin\code` → `…\Microsoft VS Code\Code.exe`）。
+     **不做这一步的话 VSCode 的图标是「白纸 + 齿轮」** —— 那是 SHELL 给「未知文件类型」的图标
+  3. 开始菜单索引（`%APPDATA%` + `%ProgramData%` 下的 `Start Menu\Programs` 递归扫 `.lnk`，
+     key = 小写去扩展名，`OnceLock` 只建一次）→ 按**条目标题**、再按命令名命中 → 解到 exe
+
+  还是取不到的（`ms-settings:` 这类协议、PATH 里没有的 `obs64.exe`）回退到 chip。
+- 布局：卡片第一行是图标（顶替 chip），第二行图标下面挂一个 **mini chip**
+  （40×14、字号 9，**只在该行有图标时画**；没图标的行第一行已经是 chip，写两遍没意义）。
+  第二行用和第一行**镜像**的 flex 结构（number / star / `BADGE_WIDTH` 列 + 同一个 gap），
+  所以副标题起点自动和标题对齐（以前是硬编码 `card_indent()`）。
+  单行密度模式（`Ctrl+Tab`）只有一行，**保留图标、不画 chip**。
 
 ## 7. 调试入口
 

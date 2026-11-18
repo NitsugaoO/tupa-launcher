@@ -979,14 +979,14 @@ impl Panel {
         let first = (self.scroll_y / row_h).floor() as usize;
         let end = (first + self.max_visible_rows() + 2).min(self.app.items.len());
         for i in first.saturating_sub(2)..end {
-            let command = match &self.app.items[i].action {
-                Action::Launch { command, .. } => command.clone(),
+            let (command, title) = match &self.app.items[i].action {
+                Action::Launch { command, .. } => (command.clone(), self.app.items[i].title().to_string()),
                 _ => continue,
             };
             if self.icons.contains_key(&command) {
                 continue;
             }
-            let icon = appicon_for(&command);
+            let icon = appicon_for(&command, &title);
             self.icons.insert(command, icon);
         }
     }
@@ -1137,7 +1137,7 @@ impl Panel {
             note: note_width,
             state: state_width,
             secondary: if card_mode {
-                (total - card_indent() - style::ROW_PAD_X).max(80.0)
+                (total - fixed - style::ROW_PAD_X).max(80.0)
             } else {
                 0.0
             },
@@ -1641,8 +1641,7 @@ fn render_row(
 
 /// 类型列：有应用图标就画图标（顶替 chip），否则画胶囊标签。
 ///
-/// 两种都占 `BADGE_WIDTH` 宽，所以 `card_indent()`（卡片第二行缩进）和
-/// `RowMetrics` 里的列宽计算都不用跟着变。
+/// 两种都占 `BADGE_WIDTH` 宽，所以列宽计算不用跟着变。
 fn badge_cell(row: &RowSnapshot, p: Palette) -> AnyElement {
     let slot = div()
         .w(px(style::BADGE_WIDTH))
@@ -1675,25 +1674,33 @@ fn badge_cell(row: &RowSnapshot, p: Palette) -> AnyElement {
     }
 }
 
-/// `command`（`.lnk` / exe / 裸命令）→ 图标。
+/// mini chip：卡片第二行、图标下面那个小的类型标签。
 ///
-/// 统一走 `util::resolve_executable`：它先把 `.lnk` 解到目标 exe，裸命令再按 PATH 搜。
-/// 不直接用 SHELL 对 `.lnk` 取图，是因为那样拿到的是「快捷方式带小箭头」的样子，
-/// 不是应用本来的标志。
-fn appicon_for(command: &str) -> Option<Arc<RenderImage>> {
-    let exe = crate::util::resolve_executable(command).or_else(|| {
-        // 兑底：`command` 万一带着参数（`wt -d C:\...`），只拿首个 token 再试一次
-        command
-            .split_whitespace()
-            .next()
-            .filter(|first| *first != command)
-            .and_then(crate::util::resolve_executable)
-    })?;
-    exe.is_file().then(|| appicon::load(&exe)).flatten()
+/// 只在**有图标**的行画（[`render_card_row`] 里判断）：没图标的行第一行已经是 chip，
+/// 第二行再写一遍是同一个信息两次。
+fn mini_chip(row: &RowSnapshot, p: Palette) -> AnyElement {
+    div()
+        .w(px(style::MINI_CHIP_WIDTH))
+        .h(px(style::MINI_CHIP_HEIGHT))
+        .flex_shrink_0()
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded(px(style::MINI_CHIP_RADIUS))
+        .bg(style::mix(p.panel, row.color, row.chip_progress))
+        .text_size(px(style::MINI_CHIP_SIZE))
+        .text_color(style::mix(row.color, p.background, row.chip_progress))
+        .child(row.badge)
+        .into_any_element()
 }
 
-/// 卡片第二行的缩进（对齐到 chip 右侧）
-fn card_indent() -> f32 {    style::ACCENT_BAR + 8.0 * 2.0 + style::STAR_WIDTH + style::BADGE_WIDTH + 8.0
+/// `command`（`.lnk` / exe / 裸命令）→ 图标。
+///
+/// 找图标源这件事交给 [`appicon::exe_for`]：它有三层兜底（直接是 exe →
+/// `.cmd` / 无扩展名 shim 向上找同名 exe → 开始菜单索引按标题找 lnk）。
+fn appicon_for(command: &str, title: &str) -> Option<Arc<RenderImage>> {
+    let exe = appicon::exe_for(command, title)?;
+    exe.is_file().then(|| appicon::load(&exe)).flatten()
 }
 
 /// 两行卡片（默认形态）：第一行标题 + 右侧尾巴，第二行路径 / 分组（dim 小字）。
@@ -1770,19 +1777,53 @@ fn render_card_row(
                 ),
         );
 
-    // 第二行：路径 / 分组（超宽时跟标题一样左右滚动）
+    // 第二行：图标下面挂 mini chip（只在这一行**有图标**时画），再往右是路径 / 分组。
+    //
+    // 结构与第一行**镜像**（number / star / `BADGE_WIDTH` 列 + 同一个 gap），
+    // 所以副标题起点天然和标题左对齐，不用再硬编码一个缩进常量。
     let sub = div()
         .w_full()
-        .pl(px(card_indent()))
-        .overflow_hidden()
-        .whitespace_nowrap()
+        .flex()
+        .flex_row()
+        .items_center()
+        .gap(px(style::ROW_GAP_X))
+        .child(if row.number.is_some() {
+            div()
+                .w(px(style::NUMBER_WIDTH))
+                .flex_shrink_0()
+                .into_any_element()
+        } else {
+            div().into_any_element()
+        })
+        .child(div().w(px(style::STAR_WIDTH)).flex_shrink_0())
         .child(
             div()
-                .ml(px(-row.note_shift))
+                .w(px(style::BADGE_WIDTH))
+                .flex_shrink_0()
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(if row.icon.is_some() {
+                    mini_chip(row, p)
+                } else {
+                    // 没图标时这一列留空（第一行已经有 chip 了）
+                    div().into_any_element()
+                }),
+        )
+        .child(
+            div()
+                .w(px(metrics.secondary))
+                .flex_shrink_0()
+                .overflow_hidden()
                 .whitespace_nowrap()
-                .text_size(px(style::NOTE_SIZE))
-                .text_color(p.dim)
-                .child(row.secondary.clone()),
+                .child(
+                    div()
+                        .ml(px(-row.note_shift))
+                        .whitespace_nowrap()
+                        .text_size(px(style::NOTE_SIZE))
+                        .text_color(p.dim)
+                        .child(row.secondary.clone()),
+                ),
         );
 
     let card = div()

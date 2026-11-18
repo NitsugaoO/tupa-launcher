@@ -201,7 +201,10 @@ cargo clippy --release --features gui    # 零警告；必须带 feature，否�
      - 老式图标 alpha 全 0 必须当不透明处理（不然整块透明，像图标丢失）
      - 只给「可视区附近」的行提取（`Panel::prefetch_icons`），且**失败也缓存**；
        别在 `snapshot()` 里遍历全部条目，74 个应用全会让首屏迟滞
-     - 图标顶替 chip 但**列宽不变**（仍是 `BADGE_WIDTH`），所以 `card_indent()` / 列宽计算不用跟着改
+     - 图标顶替 chip 但**列宽不变**（仍是 `BADGE_WIDTH`）；卡片第二行的 mini chip 用与
+       第一行镜像的 flex 结构（number / star / `BADGE_WIDTH` + 同一个 gap），副标题因此自动对齐
+     - 图标源有三层兜底（`appicon::exe_for`）：直接 `.exe` → `.cmd` / **无扩展名 shim**
+       向上找同名 `.exe`（不做这步 VSCode 会是「白纸 + 齿轮」）→ 开始菜单 `.lnk` 索引
 - **托盘/热键在后台线程，别塞进 GPUI**：`Application::run` 占住主线程，所以 `src/tray.rs`
   自己开线程跑 message-only 窗口 + `Shell_NotifyIconW` + `RegisterHotKey`，面板显隐直接用
   `ShowWindow` 操作 HWND（`util::find_panel`），不碰 GPUI 状态。托盘菜单用

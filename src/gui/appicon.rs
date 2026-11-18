@@ -12,8 +12,9 @@
 //! 缓存不在这里做：调用方（`Panel::icons`）按配置里的 `command` 缓存，
 //! **失败也缓存**（裸命令 `wt` / `ms-settings:` 没有文件可提取，每次重试都是白花 COM 时间）。
 
-use std::path::Path;
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, OnceLock};
 
 use gpui::RenderImage;
 use image::{Frame, RgbaImage};
@@ -38,8 +39,7 @@ pub const ICON_PX: i32 = 96;
 /// 给一个**存在的文件**（`.exe` / `.lnk` / `.msc` …）取图标。
 ///
 /// 出错全部静默（返回 `None`）：调用方回退到类型 chip，不能因为一个图标让整行画不出来。
-pub fn load(path: &Path) -> Option<Arc<RenderImage>> {
-    ensure_com();
+pub fn load(path: &Path) -> Option<Arc<RenderImage>> {    ensure_com();
 
     // 安全：下面全是 Win32 调用，句柄在 `read_bgra` 前后各自检查、用完立刻释放。
     unsafe {
@@ -64,6 +64,124 @@ pub fn load(path: &Path) -> Option<Arc<RenderImage>> {
         let (width, height, bytes) = pixels?;
         let buffer = RgbaImage::from_raw(width, height, bytes)?;
         Some(Arc::new(RenderImage::new([Frame::new(buffer)])))
+    }
+}
+
+/// `command` → 真正带应用图标的 `.exe`。
+///
+/// 三层兑底（命中就停）：
+/// 1. `command` 直接解析成 `.exe`（`.lnk` 会先解到目标）
+/// 2. 解析到的是 `.cmd` / `.bat` / **没扩展名**的 shim（npm 装的 CLI 全是这种，
+///    VSCode 的 `bin\code` 也是）→ 同级和上一级目录里找同名 `.exe`
+/// 3. 按**条目标题**、再按命令名，去开始菜单索引里找 `.lnk` → 解析到 exe
+///
+/// 第 2 步就是「VSCode 图标变成白纸 + 齿轮」的修法：SHELL 对无扩展名脚本只给
+/// “未知文件类型”图标，而那个 shim 上一级的 `Code.exe` 才是真 logo。
+pub fn exe_for(command: &str, title: &str) -> Option<PathBuf> {
+    if let Some(path) = crate::util::resolve_executable(command) {
+        if is_exe(&path) {
+            return Some(path);
+        }
+        if let Some(exe) = sibling_exe(&path) {
+            return Some(exe);
+        }
+    }
+
+    start_menu_exe(title).or_else(|| start_menu_exe(command))
+}
+
+fn is_exe(path: &Path) -> bool {
+    path.extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("exe"))
+}
+
+/// 同一程序目录里按名字找 `.exe`（先看同级，再看上一级）。
+fn sibling_exe(path: &Path) -> Option<PathBuf> {
+    let stem = path.file_stem()?.to_string_lossy().into_owned();
+    let parent = path.parent()?;
+    let mut dirs = vec![parent];
+    if let Some(up) = parent.parent() {
+        dirs.push(up);
+    }
+    dirs.into_iter().find_map(|dir| find_named(dir, &stem, "exe"))
+}
+
+/// 目录里按 `名字.扩展名` 找。Windows 文件系统大小写不敏感，但 `read_dir`
+/// 返回的是磁盘上的真实大小写，所以比较前统一转小写。
+fn find_named(dir: &Path, stem: &str, ext: &str) -> Option<PathBuf> {
+    let want = format!("{}.{}", stem.to_lowercase(), ext.to_lowercase());
+    for entry in std::fs::read_dir(dir).ok()?.flatten() {
+        let path = entry.path();
+        let Some(name) = path
+            .file_name()
+            .map(|name| name.to_string_lossy().to_lowercase())
+        else {
+            continue;
+        };
+        if name == want {
+            return Some(path);
+        }
+    }
+    None
+}
+
+/// 开始菜单里按名字找 `.lnk`，解到目标 exe
+/// （`Visual Studio Code` → `…\Visual Studio Code.lnk` → `Code.exe`）。
+fn start_menu_exe(name: &str) -> Option<PathBuf> {
+    let key = name.trim().to_lowercase();
+    if key.is_empty() {
+        return None;
+    }
+    let lnk = start_menu_index().get(&key)?;
+    let target = crate::util::resolve_shortcut(lnk);
+    target.is_file().then_some(target)
+}
+
+/// `lnk 文件名（小写、去扩展名）` → 路径。整个进程只建一次。
+fn start_menu_index() -> &'static HashMap<String, PathBuf> {
+    static INDEX: OnceLock<HashMap<String, PathBuf>> = OnceLock::new();
+    INDEX.get_or_init(|| {
+        let mut map = HashMap::new();
+        for dir in start_menu_dirs() {
+            collect_shortcuts(&dir, &mut map, 0);
+        }
+        map
+    })
+}
+
+fn start_menu_dirs() -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+    if let Some(appdata) = std::env::var_os("APPDATA") {
+        dirs.push(PathBuf::from(appdata).join(r"Microsoft\Windows\Start Menu\Programs"));
+    }
+    if let Some(programdata) = std::env::var_os("ProgramData") {
+        dirs.push(PathBuf::from(programdata).join(r"Microsoft\Windows\Start Menu\Programs"));
+    }
+    dirs.retain(|dir| dir.is_dir());
+    dirs
+}
+
+fn collect_shortcuts(dir: &Path, map: &mut HashMap<String, PathBuf>, depth: usize) {
+    // 开始菜单一般两三层；限个深度，避免 junction / 符号链接绕成环
+    if depth > 5 {
+        return;
+    }
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_shortcuts(&path, map, depth + 1);
+        } else if path
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("lnk"))
+            && let Some(stem) = path
+                .file_stem()
+                .map(|stem| stem.to_string_lossy().to_lowercase())
+        {
+            map.entry(stem).or_insert(path);
+        }
     }
 }
 
