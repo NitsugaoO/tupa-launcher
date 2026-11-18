@@ -112,22 +112,22 @@ cargo clippy --release --features gui    # 零警告；必须带 feature，否�
      - 判据不要靠壁纸：用**棋盘格**铺底再截图（`copyfromscreen`，`PrintWindow` 抓不到
        DComp 合成结果）。探针在 `examples/acrylic_probe.rs`（`backdrop` / `host` /
        `sb2..sb4`），细节与结论见 `docs/06-handover.md` §6「窗口模糊」。
-     - **窗口形状：GPUI 的 insets 已经在 vendor 里改成 0**（2026-11-18）：
-       `vendor/gpui`（`[patch.crates-io]`）只改了一处 ——
-       `events.rs::get_client_area_insets` 返回 0，让客户区铺满整个窗口。
-       上游那圈 insets 是 `WS_THICKFRAME` 的系统边框，窗口矩形内、客户区外的部分会被
-       DWM 填成浅灰，开亚克力后就是「面板外多一圈」。**必须在源码里改**：运行时子类化
-       `WM_NCCALCSIZE` 会让 `WindowBorderOffset`（创建时用
-       `GetWindowRect - GetClientRect` 算的）与客户区不一致，窗口每轮 resize 都再大一圈
-       （实测 966 → 1551）。
-     - **圆角 vs 亚克力是死结，用 `[gui] rounded` 取舍**：`SetWindowCompositionAttribute`
-       的亚克力按**整个窗口矩形**铺，`DWMWA_WINDOW_CORNER_PREFERENCE` 只裁内容不裁它，
-       所以圆角外侧必然露出一块方形亚克力；`SetWindowRgn` 能裁但被
-       `WS_EX_NOREDIRECTIONBITMAP` 挡住（去掉它 GPUI 的标题栏会冒出来）。
-       `rounded = false` 时窗口也设 `DWMWCP_DONOTROUND`、根 div 圆角归零，两者边缘重合。
-       想真圆角 + 真模糊只能改应用层（呼出前截一帧 + 模糊 + `paint_image`），别再折腾 DWM。
-     - **`SWP_FRAMECHANGED` 会重置 composition attribute**：亚克力的 alpha = 1 补丁必须排在
-       `frame::apply` **之后**（都在首帧 `Panel::render` 里，顺序 frame → acrylic）。
+     - **窗口形状 / 圆角（2026-11-18 结案）**：`vendor/gpui` 把
+       `events.rs::get_client_area_insets` 改成 0（客户区铺满窗口，内容能盖到窗口边缘），
+       `[gui] rounded` 控制外框圆角（8px）。
+       **残留**：圆角外侧会剩一点点方形亚克力 —— 这是 DWM 的机制
+       （`SetWindowCompositionAttribute` 按整个窗口矩形铺，系统圆角只裁内容），
+       不是参数问题。要彻底干净只能走应用层（呼出前截一帧 + 模糊 + `paint_image`）。
+     - **排查这类问题先看有没有残留的 `DWMWCP_DONOTROUND`**：`src/gui/mod.rs` 原来在
+       `make_overlay_window` 里调 `tune_dwm()` 设了它，DWM 就彻底不管这个窗口的圆角，
+       而且之后所有 DWM 侧调整（corner preference / region / insets）都会被它盖掉 ——
+       这次绕了几小时就是被这一行藏住。已删。
+     - **别再试的**（全部实测无效或更差）：`SetWindowRgn`（带
+       `WS_EX_NOREDIRECTIONBITMAP` 时 DWM 静默忽略；去掉那个 flag 标题栏会冒出来）、
+       `DwmExtendFrameIntoClientArea(-1)`、`DWMWA_NCRENDERING_POLICY`、
+       `DWMWA_BORDER_COLOR = COLOR_NONE`、`DWMWA_VISIBLE_FRAME_BORDER_THICKNESS = 0`、
+       运行时子类化 `WM_NCCALCSIZE`（`WindowBorderOffset` 失配，窗口 resize 会越来越大，
+       966 → 1551）。
      - 独立结论（仍然成立，别再试）：`CreateHostBackdropBrush` 在 Win32 上依赖
        `DWMWA_USE_HOSTBACKDROPBRUSH` 且自带模糊，可作为**后备方案**（要换 WinRT 合成树）；
        `CreateBackdropBrush` 只「透」不糊；`DWMWA_SYSTEMBACKDROP_TYPE` 在 DComp 窗口上

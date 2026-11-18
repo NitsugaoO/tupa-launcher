@@ -1496,17 +1496,11 @@ fn get_client_area_insets(
     _is_maximized: bool,
     _windows_version: WindowsVersion,
 ) -> RECT {
-    // [tupa patch] 返回 0，让客户区铺满整个窗口。
+    // [tupa patch] 0：客户区铺满整个窗口，内容可以直接盖到窗口边缘。
     //
-    // 上游这里会给 `WS_THICKFRAME` 留一圈 insets
-    // （`SM_CXSIZEFRAME + SM_CXPADDEDBORDER`，Win11 的 top 再加 `dpi/96`），
-    // 用来放系统画的边框/阴影。tupa 的面板是**固定尺寸、无边框、不最大化**的浮层，
-    // 不需要那圈：它是窗口矩形内、客户区外的空白，DWM 会填成浅灰，
-    // 开了亚克力之后看起来就是「圆角外多一圈灰边」。
-    //
-    // 注意必须在这里改而不是运行时子类化 `WM_NCCALCSIZE`：`WindowBorderOffset`
-    // 是在窗口创建时用 `GetWindowRect - GetClientRect` 算出来的，运行期改客户区会让
-    // 两边不一致 —— 窗口每轮 resize 都会再大一圈（实测 966 → 1551）。
+    // 早先也试过 0，那时结论是「DWM 不裁圆角了」，但那是因为 `src/gui/mod.rs` 里
+    // 还有个 `tune_dwm` 显式设了 `DWMWCP_DONOTROUND`（后来删掉了）。
+    // 现在交给 DWM 默认圆角，内容自己画同样半径的圆角就能贴合。
     RECT {
         left: 0,
         top: 0,

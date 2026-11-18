@@ -263,44 +263,46 @@ cargo build --release --features gui     # 产出 tupa-gui.exe + tupa-launcher.e
    变成整窗黑玻璃；上游 0.3.8 也补了同一条 `if is_acrylic && color.3 == 0 { color.3 = 1 }`。
    所以我们不改 gpui 源码，调完覆盖它即可。
 
-#### 窗口形状：insets 与圆角（2026-11-18）
+#### 圆角与窗口形状（2026-11-18 结案）
 
-**① gpui 的 insets 已经在 vendor 里改成 0。**
+**最终状态**：圆角由内容自己画（8px，`style::WINDOW_RADIUS`），窗口尺寸 = 内容尺寸
+（`vendor/gpui` 把 `get_client_area_insets` 改成 0）。
 
-`vendor/gpui`（`[patch.crates-io]`，只带 src/resources/构建文件）只有一个改动：
+**残留问题（已知，接受）**：圆角外侧剩一点点**方形亚克力**。原因不是参数没调对：
 
-```rust
-// vendor/gpui/src/platform/windows/events.rs
-fn get_client_area_insets(..) -> RECT { RECT { left: 0, top: 0, right: 0, bottom: 0 } }
-```
+> `SetWindowCompositionAttribute`（亚克力）是 DWM 按**整个窗口矩形**铺的，
+> 而 Win11 的系统圆角只裁**内容**。两者是两套机制，没有 API 让 accent 跟着圆角走。
 
-上游那圈 insets（`SM_CXSIZEFRAME + SM_CXPADDEDBORDER`，Win11 的 top 再加 `dpi/96`）
-是给 `WS_THICKFRAME` 留的系统边框：窗口矩形内、客户区外，DWM 会把它填成浅灰，
-开亚克力之后就是「面板外多一圈」。
+WinUI 应用能做到圆角 Acrylic，是因为它们用 WinRT compositor 自己的 visual clip，
+不走 accent。想在 tupa 上彻底干净，只能改成应用层模糊：面板呼出前截一帧 →
+高斯模糊 → `window.paint_image()` 当底图（代价是静态帧，背后放视频会看出冻结）。
 
-**必须在源码里改**。运行时子类化 `WM_NCCALCSIZE` 返回 0 看起来等价，但
-`WindowBorderOffset` 是**窗口创建时**用 `GetWindowRect - GetClientRect` 算的，
-之后客户区变了它不更新 → GPUI 认为「窗口 = 客户区 + 一圈」，每轮 resize 再大一圈
-（实测 966 → 1551，两次实验完全一样）。
-
-**② 圆角和亚克力是死结，用 `[gui] rounded` 取舍。**
+**已经试完、别再试的（2026-11-18 全部实测）**：
 
 | 做法 | 结果 |
 |---|---|
-| `DWMWA_WINDOW_CORNER_PREFERENCE`（DWM 圆角） | 只裁**内容**，`SetWindowCompositionAttribute` 的亚克力仍按窗口矩形铺 → 圆角外剩一块方形亚克力 |
 | `SetWindowRgn` + 保留 `WS_EX_NOREDIRECTIONBITMAP` | DWM 静默忽略 region（`GetWindowRgn` 查得到，视觉无效） |
-| `SetWindowRgn` + 去掉那个 flag | region 生效了，但 GPUI 的无边框依赖它 —— **标题栏冒出来**，还要额外处理 redirection surface |
+| `SetWindowRgn` + 去掉那个 flag | region 生效，但 GPUI 的无边框依赖它（标题栏冒出来）+ insets 区域变灰 |
+| `DwmExtendFrameIntoClientArea(-1)` | 无变化 |
+| `DWMWA_NCRENDERING_POLICY = DWMNCRP_DISABLED` | 返回成功，无变化 |
+| `DWMWA_BORDER_COLOR = DWMWA_COLOR_NONE` | 返回成功，无变化 |
+| `DWMWA_VISIBLE_FRAME_BORDER_THICKNESS = 0` | 返回成功，无变化 |
+| 运行时子类化 `WM_NCCALCSIZE` 返回 0 | `WindowBorderOffset` 与客户区失配 → 窗口每轮 resize 再大一圈（966 → 1551） |
+| `insets = 7`（上游默认） | 客户区比窗口小一圈，那圈只有亚克力没有面板底色 → 「面板外多一圈」 |
+| `insets = 2` + 内容圆角 6px | 贴合了，但窗口 frame 那 2px 仍露一条浅色带 |
+| `insets = 0` + 内容圆角 8px（**现在**） | 溢出只剩圆角外那一点点，是目前最小的 |
 
-所以：`rounded = true`（默认）得到圆角 + 圆角外的方形亚克力；`rounded = false`
-（本机设置）时窗口设 `DWMWCP_DONOTROUND`、根 div 圆角归零，两者边缘重合，接缝消失。
+**最重要的一个坑**：`src/gui/mod.rs` 的 `make_overlay_window()` 里原来调了 `tune_dwm()`，
+它显式设了 `DWMWA_WINDOW_CORNER_PREFERENCE = DWMWCP_DONOTROUND`。这一行会让 DWM
+**彻底不管这个窗口的圆角**，于是圆角只裁内容、亚克力按矩形溢出 —— 而且它盖掉了之后
+所有 DWM 侧的调整（corner preference / region / insets 全都白试）。已删除。
+排查这类问题，**第一步先查窗口上有没有残留的 `DONOTROUND`**。
 
-真想「圆角 + 真模糊」，只能改应用层：呼出前截一帧 + 模糊 + `paint_image`（静态帧），
-别再在 DWM 上找了 —— WinUI 应用能圆角 Acrylic 是因为它们用 WinRT compositor 自己的
-visual clip，不走 accent。
+**insets 与圆角半径是绑定的**（以后要动就一起动）：
 
-**③ 顺序坑**：`SWP_FRAMECHANGED` 会把 `SetWindowCompositionAttribute` 重置回 gpui 的
-`alpha = 0`（整窗黑玻璃）。亚克力的 `alpha = 1` 补丁必须排在 `frame::apply` **之后**
-（现在都在首帧 `Panel::render` 里，顺序 frame → acrylic）。
+- `insets = 0`：内容铺满窗口，圆角完全由内容画（现在这个）；
+- `insets > 0`：DWM 会认这个窗口有边框，但客户区外那圈只有亚克力没有面板底色，
+  会露出浅色带 —— insets 越小越不明显。
 
 #### 之前为什么判成「做不到」（教训）
 

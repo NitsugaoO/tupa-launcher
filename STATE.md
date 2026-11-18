@@ -24,6 +24,17 @@ updated: 2026-11-18 · code: `5b2538a`（显示层两行卡片 · 输入框选�
   所有材质 API 都「调用成功但没效果」。排查顺序、探针对照表、Zed / ELYTerminal 的做法
   见 `docs/06-handover.md` §6「窗口模糊」。`examples/acrylic_probe.rs` 留着做回归
   （`host` 模式就是后备方案 —— WinRT host backdrop brush —— 的真模糊验证）。
+- **窗口形状 / 圆角（2026-11-18）**：`vendor/gpui` + `[patch.crates-io]`，只改
+  `events.rs::get_client_area_insets` 返回 0（客户区铺满窗口，内容能盖到边缘）；
+  `[gui] rounded`（默认 true，外框 8px）控制圆角。
+  **残留**：圆角外侧剩一点点方形亚克力 —— DWM 的 `SetWindowCompositionAttribute`
+  按整个窗口矩形铺、系统圆角只裁内容，这是机制不是参数；要彻底干净只能上应用层模糊
+  （呼出前截一帧 + `paint_image`，静态帧）。
+  排查时**先确认窗口上没有残留的 `DWMWCP_DONOTROUND`**：`make_overlay_window` 里原来的
+  `tune_dwm()` 设过它，会把之后所有 DWM 侧调整都盖掉（这次绕了几小时就是被它藏住）。
+  `[gui] always_on_top`（默认 true）走 TOPMOST；
+  **顺序**：`SWP_FRAMECHANGED` 会把 composition attribute 重置成 alpha = 0（黑玻璃），
+  亚克力的 alpha = 1 补丁必须在 `frame::apply` 之后打（首帧里）。
 - **显示层：两行卡片（2026-11-18）**：普通模式从「标题 + 一条 ` · ` 拼起来的附注」
   改成**两行卡片**（第一行 标题 + 右侧状态/次数/时间，第二行 路径/分组 dim 小字），
   `Ctrl+Tab` 切**单行密度表**（一屏 12 条）。要点：

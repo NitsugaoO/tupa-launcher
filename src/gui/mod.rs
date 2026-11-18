@@ -1838,7 +1838,10 @@ impl Render for Panel {
             .flex()
             .flex_col()
             .bg(style::with_alpha(p.background, self.opacity))
-            .rounded(px(if self.rounded { style::RADIUS } else { 0.0 }))
+            // `rounded` 时圆角交给 DWM（窗口级），内容自己不再画一圈：
+            // 内容在客户区里（比窗口小一圈 insets），再画 12px 圆角会在
+            // DWM 圆角与内容圆角之间露出一条弧形亚克力缝。
+            .rounded(px(if self.rounded { style::WINDOW_RADIUS } else { 0.0 }))
             .border(px(style::BORDER))
             .border_color(p.accent)
             .p(px(style::PADDING))
@@ -2057,41 +2060,6 @@ fn make_overlay_window() {
             SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
         );
 
-        tune_dwm(hwnd);
-    }
-}
-
-/// 关掉系统圆角与 1px 窗口边框。
-///
-/// 内容自己画的是 12px 圆角，Win11 的 DWM 圆角半径比它小，两者叠在一起
-/// 就会看到「边框没跟着圆角」的一圈弧线。索性让 DWM 不画，圆角交给内容。
-#[cfg(windows)]
-fn tune_dwm(hwnd: windows_sys::Win32::Foundation::HWND) {
-    use windows_sys::Win32::Graphics::Dwm::{
-        DWMWA_BORDER_COLOR, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_DONOTROUND,
-        DwmSetWindowAttribute,
-    };
-
-    // DWMWCP_DONOTROUND = 1
-    let corner: i32 = DWMWCP_DONOTROUND;
-    unsafe {
-        DwmSetWindowAttribute(
-            hwnd,
-            DWMWA_WINDOW_CORNER_PREFERENCE as u32,
-            (&corner as *const i32).cast(),
-            std::mem::size_of::<i32>() as u32,
-        );
-    }
-
-    // DWMWA_COLOR_NONE：不画窗口边框
-    let no_border: u32 = 0xFFFF_FFFE;
-    unsafe {
-        DwmSetWindowAttribute(
-            hwnd,
-            DWMWA_BORDER_COLOR as u32,
-            (&no_border as *const u32).cast(),
-            std::mem::size_of::<u32>() as u32,
-        );
     }
 }
 

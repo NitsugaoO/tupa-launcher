@@ -19,7 +19,9 @@ pub const TOP_RATIO: f32 = 0.12;
 /// 窗口最多长到屏幕的多少（展开后的硬上限，别顶到任务栏）
 pub const MAX_HEIGHT_RATIO: f32 = 0.62;
 
-pub const RADIUS: f32 = 12.0;
+/// 面板外框的圆角：`[gui] rounded` 开着时**由 DWM 画窗口圆角**，内容这边只留
+/// 一点点（0 会让草绿边框在四角是尖的）。调大了会在 DWM 圆角内侧露出一条弧形缝。
+pub const WINDOW_RADIUS: f32 = 8.0;
 pub const PADDING: f32 = 12.0;
 /// 超宽行的左右滚动：像素速度、两端停顿、单程的最短时长
 pub const SCROLL_SPEED: f32 = 240.0; // px/s
