@@ -476,6 +476,17 @@ fork `vendor/gpui`，把 `directx_renderer.rs` 的 `DirectComposition` 换成 Wi
   没有图标的行（比如 `steam://` 这种没有本地 exe 的启动项）仍回落 mini chip。
   别照 `Kind::badge()` 再复刻一份表：badge 是文字、图标是形状，口径不一样
   （`Switch` / `Setting` 的 badge 不同，图标只差 toggle / 齿轮）。
+- **MSIX 应用的图标别走 SHELL**：`wt.exe` 这种会转发到
+  `C:\Program Files\WindowsApps\<包名>\wt.exe`，那个目录受保护，
+  `IShellItemImageFactory` 只给通用「应用」图标（白纸 + 蓝块）。`appicon::exe_for`
+  看到路径里有 `WindowsApps` 就跳过，改走开始菜单 `.lnk`（存的是真图标）。
+- **hover / 选框的底色要跟着 `opacity` 走**：`Palette::{row_hover,row_selected}`
+  由 `with_opacity(opacity)` 算出来。窗口是亚克力，根节点背景 alpha = `opacity`；
+  这两层要是写死实色就把亚克力盖住了。alpha 直接取 `opacity`，两层叠起来
+  实际不透明度 ≈ `1-(1-o)²`（o=0.6 时约 0.84），字还吃得住。
+- **状态栏的临时提示**（「单行密度模式」「已复制」……）只停 `STATUS_HOLD = 2` 秒，
+  由 GUI 那个 120ms 轮询循环比对文本 + 起始时间后清掉，回落到 provider 描述。
+  清的是 `App::status`，TUI 不受影响。
   （`wt` / `ms-settings:` / 拉不到的站点每次刷新重试都是白花 COM / 网络时间）。
 - 只给「可视区附近」的行提取（`Panel::prefetch_icons`）：首屏约 15 个，
   滚动时新行下一帧补上。别在 `snapshot()` 里遍历全部条目 —— 74 个应用全走一遍

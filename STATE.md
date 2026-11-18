@@ -1,6 +1,6 @@
 # tupa-launcher 状态
 
-updated: 2026-11-18 · code: `a8dad5d`（亚克力 + 圆角 + 失焦光标 · 两行卡片 · 窗口高 0.68 + 提前两行滚动 · 应用图标 + mini chip + 文件/网页图标 + 全类型图标 + 历史死链回填）
+updated: 2026-11-18 · code: `438a31e`（亚克力 + 圆角 + 失焦光标 · 两行卡片 · 窗口高 0.68 + 提前两行滚动 · 应用图标 + mini chip + 文件/网页/Steam 图标 + 全类型图标 + 历史死链回填）
 
 > 判断本文件是否过期：比较 `code` 与 `git log -1 --format=%h -- src Cargo.toml`。
 > 只改文档的提交不算过期。
@@ -13,6 +13,18 @@ updated: 2026-11-18 · code: `a8dad5d`（亚克力 + 圆角 + 失焦光标 · �
 
 ## 阶段
 
+- **Steam 游戏图标（2026-11-18 晚）**：`steam://rungameid/<appid>` → 读注册表
+  `HKCU\Software\Valve\Steam\SteamPath` → `userdata/<id>/config/grid/<appid>p.png`
+  （用户自定义）优先，其次 `appcache/librarycache/<appid>/` 的
+  `library_600x900.jpg` / `library_header.jpg` / `header.jpg`；居中裁方形缩到 96px。
+  **不联网**，未安装的游戏回落 mini chip。`logo.png` 不用（横向文字 logo 缩到 20px 认不出）。
+  相关：`windows` crate 的 features 加了 `Win32_System_Registry`。
+- **hover / 选框透出亚克力 + MSIX 图标 + 提示自动回落（2026-11-18 晚）**：
+  `Palette::with_opacity(opacity)` 让 `row_hover` / `row_selected` 带 alpha（否则实色
+  盖住亚克力）；`appicon::exe_for` 跳过 `\WindowsApps\` 改走开始菜单（修 `wt.exe`
+  的「白纸 + 蓝块」）；状态栏临时提示 `STATUS_HOLD = 2s` 后回落到 provider 描述。
+- **`@exp` 已删除（2026-11-18 晚）**：`explorer_watch.rs` 保留，但不再作为 provider
+  出现在命令列表（用户觉得不好用）。
 - **非文件类条目也有图标了（2026-11-18 晚）**：`:set` 开关是 toggle、动作项是齿轮、
   `:run` / `:go:pi` 是终端、pi 会话是希腊字母 **π**、`:pi:clean` 是归档箱 / 垃圾桶、
   `:blog` 是服务器 / 停止圈 / 铅笔、命令列表是问号、其余 `FillInput` 是右箭头。
