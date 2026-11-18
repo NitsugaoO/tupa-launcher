@@ -288,8 +288,9 @@ impl Panel {
                     // 光标闪烁：到点就翻一次（移动光标后 `blink_at` 会被推后）
                     let now = std::time::Instant::now();
                     if !active {
-                        if !panel.cursor_on {
-                            panel.cursor_on = true;
+                        // 失焦直接藏光标（编辑器惯例），也不推帧
+                        if panel.cursor_on {
+                            panel.cursor_on = false;
                             cx.notify();
                         }
                         panel.blink_at = now + Duration::from_millis(500);
