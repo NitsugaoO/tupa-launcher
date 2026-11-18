@@ -1,6 +1,6 @@
 # tupa-launcher 状态
 
-updated: 2026-11-18 · code: `374a13c`（显示层两行卡片 · 输入框选区/剪贴板 · 滚动修复 · 模糊探针）
+updated: 2026-11-18 · code: `193e225`（显示层两行卡片 · 输入框选区/剪贴板 · 滚动修复 · 模糊探针）
 
 > 判断本文件是否过期：比较 `code` 与 `git log -1 --format=%h -- src Cargo.toml`。
 > 只改文档的提交不算过期。
@@ -17,8 +17,13 @@ updated: 2026-11-18 · code: `374a13c`（显示层两行卡片 · 输入框选�
   `docs/06-handover.md` §6「窗口模糊」。实测：WinRT `CreateBackdropBrush` 在
   `WS_EX_NOREDIRECTIONBITMAP` 窗口上**能采到真实的背后桌面**（其它窗口的内容也采得到），
   但**完全不模糊**；`CreateHostBackdropBrush` + `DWMWA_USE_HOSTBACKDROPBRUSH` 在 Win32 上
-  **全黑**。真模糊只剩 fork GPUI（换 WinRT 合成树 + 自实现 Win2D 兼容
-  `GaussianBlurEffect`），或应用层截一帧再模糊。
+  **全黑**；Win11 系统材质 `DWMWA_SYSTEMBACKDROP_TYPE`（Mica/Acrylic/MicaAlt 三个值）
+  配合 `DwmExtendFrameIntoClientArea` 退化成**纯灰块**，也不采样背后。
+  2026-11-18 调研过别家（详见 docs/06）：**Zed 上游、ELYTerminal 在 Windows 上也都没做出模糊**
+  （都是 GPUI 的 acrylic / systembackdrop，实测 ELY 只有半透明；`dux-web/gpui` 的
+  `BackdropBlur` 只有 Metal/wgpu，DirectX 没实现）→ Windows 上没有现成轮子可抄。
+  真模糊只剩 fork GPUI（换 WinRT 合成树 + 自实现 Win2D 兼容 `GaussianBlurEffect`），
+  或应用层截一帧再模糊。
   本次**只动了 `Cargo.toml`（windows 的 WinRT features + `windows-numerics`）与 `examples/`**，
   `src/` 一行未改 —— 面板行为完全不变。
 

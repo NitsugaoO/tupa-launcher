@@ -259,6 +259,7 @@ cargo build --release --features gui     # 产出 tupa-gui.exe + tupa-launcher.e
 cargo run --release --example acrylic_probe              # CreateBackdropBrush
 cargo run --release --example acrylic_probe -- host      # CreateHostBackdropBrush + DWMWA_USE_HOSTBACKDROPBRUSH
 cargo run --release --example acrylic_probe -- host 30   # 第二个参数 = tint 不透明度百分比（默认 60）
+cargo run --release --example acrylic_probe -- sb2       # Win11 系统材质：2=Mica 3=Acrylic 4=MicaAlt
 ```
 
 窗口是 `WS_EX_NOREDIRECTIONBITMAP` 的 `WS_POPUP`、**没有 swapchain**，画面全由 WinRT
@@ -268,11 +269,41 @@ cargo run --release --example acrylic_probe -- host 30   # 第二个参数 = tin
 |---|---|
 | `Compositor::CreateBackdropBrush` + `SpriteVisual` | **有效**：真实显示窗口后面的桌面/别的窗口（Explorer、PDF 正文都看得见），但**完全不模糊** |
 | `Compositor::CreateHostBackdropBrush` + `DWMWA_USE_HOSTBACKDROPBRUSH` | **全黑**（`DwmSetWindowAttribute` 返回 `Ok`，但没有内容）。Win32 上不可用，别再试 |
+| `DWMWA_SYSTEMBACKDROP_TYPE`（`sb2`/`sb3`/`sb4`，配合 `DwmExtendFrameIntoClientArea`） | **纯灰块**：Mica / Acrylic / MicaAlt 三个值都退化成一块不透明灰，不采样背后、不模糊 |
+| `SetWindowCompositionAttribute(4)`（= GPUI 的 `Blurred`） | 黑玻璃 / 无效果（DComp 窗口没有 redirection bitmap 可混） |
 | `CreateDesktopWindowTarget(hwnd, true)` + 多层合成 + `CreateColorBrushWithColor` | 正常，叠层顺序也对 |
 
 **结论**：底座（WinRT 合成层 + backdrop 采样）在这台机器上是通的，堵点只有「模糊」——
 `CreateBackdropBrush` 只透不糊，要亚克力必须给 effect 图一个 Win2D 兼容的
 `GaussianBlurEffect`（`Compositor::CreateEffectFactory` 只认 Win2D 那套 effect 类）。
+**所有系统级旁路已经试完**（accent / systembackdrop / host backdrop），都不采样窗口后方。
+
+**别家怎么做的（2026-11-18 调研，别再重查）：**
+
+- **Zed / 上游 GPUI**（`crates/gpui_windows/src/window.rs`，HEAD `9636213`）：
+  `Blurred` → `SetWindowCompositionAttribute(4)`；`MicaBackdrop` / `MicaAltBackdrop` →
+  `DWMWA_SYSTEMBACKDROP_TYPE` 2 / 4（build ≥ 22621）。**两条路都只对自身窗口生效，
+  在 `WS_EX_NOREDIRECTIONBITMAP` + DComp 窗口上不出模糊**（上表已验证）。
+  真实现只在 macOS（`NSVisualEffectView`）。上游也明确没做 backdrop 采样
+  （`longbridge/gpui-kit` issue #3598：「DirectX: outside-only drop shadows, no backdrop sampling yet」）。
+  唯一值得抄的一行：上游 acrylic 会把 gradient alpha 从 0 补成 **1**
+  （`if is_acrylic && color.3 == 0 { color.3 = 1 }`），0.2.2 里没有这句。
+  它只影响「黑玻璃 vs 半透明」，**依旧不是模糊**，所以不值得为此升级。
+- **ELYTerminal**（`ELY-Open-Source/ELYTerminal`，本机装了、有源码）：**没有 fork renderer**，
+  用的是 crates.io 上的 `gpui-pre 0.3.8` + 自写 `src/blur/`。Windows 侧只有：
+  GPUI 的 `Blurred`（acrylic）或 Mica/MicaAlt，外加 Win10 的「移动/缩放时 acrylic 变清晰、
+  窗口跟不上鼠标」的 wndproc 补丁（build ≥ 22000 直接跳过）。Linux 侧是给合成器发 blur 请求
+  （KWin 等画），macOS 是 `NSVisualEffectView`。**实测（本机、它的日志
+  `blur: Blurred on windows`，settings `background_opacity 0.88 + background_blur true`）：
+  背后内容清晰可读，没有模糊** —— 它 README 说的 Windows blur 实际只有半透明。
+- **`dux-web/gpui`（发布名 `bezel-gpui`，Apache-2.0）**：目前唯一做了 `BackdropBlur` 场景原语的
+  fork（`Window::paint_backdrop_blur`，带 blur 半径 / 圆角 / tint / 饱和度 / 玻璃边缘），
+  但只有 **Metal 和 wgpu** 后端有实现，**DirectX 只做了 outside-only drop shadow**。
+  Windows 上拿不到，且它跟的是 `gpui-pre 0.3.4`，移植过来代价不比我们自己写小。
+
+所以：**Windows 上真 backdrop 模糊没有现成轮子可抄**，可复用的只有
+「WinRT 合成层 + `CreateBackdropBrush`」这套底座（我们的探针已经证明了它能用）。
+
 
 **为什么 GPUI 现在出不来**（两个独立原因，别再猜）：
 

@@ -109,7 +109,11 @@ cargo clippy --release --features gui    # 零警告；必须带 feature，否�
        WinRT `Compositor` + `CreateDesktopWindowTarget` + `CreateBackdropBrush` 在
        `WS_EX_NOREDIRECTIONBITMAP` 窗口上**能拿到真实的背后桌面内容**（其它窗口也采得到），
        但**不带任何模糊**；`CreateHostBackdropBrush`（+ `DWMWA_USE_HOSTBACKDROPBRUSH`）
-       在 Win32 窗口上**全黑**，别再试。
+       在 Win32 窗口上**全黑**，别再试；Win11 的 `DWMWA_SYSTEMBACKDROP_TYPE`
+       （Mica / Acrylic / MicaAlt）配合 `DwmExtendFrameIntoClientArea` 也只有**纯灰块**。
+       **Zed 上游和 ELYTerminal 在 Windows 上同样没做出模糊**（都是 GPUI 的 acrylic /
+       systembackdrop，实测 ELY 只有半透明；`dux-web/gpui` 的 `BackdropBlur` 只有
+       Metal/wgpu，DirectX 没实现）—— Windows 上没有现成轮子可抄，别再花时间找。
      真模糊只剩两条：fork GPUI、把 DComp 树换成 WinRT 那套并自己实现 Win2D 兼容的
      `GaussianBlurEffect`（步骤在 `docs/06-handover.md` §6），或者应用层「截一帧 + 模糊」
      （背后有视频就露馅）。**一个 HWND 只能有一个 DComp target**，fork 只能整体替换，
