@@ -154,7 +154,7 @@ updated: 2026-11-18 · code: `a8dad5d`（亚克力 + 圆角 + 失焦光标 · �
   所以既没有选框动画、也没有 chip 渐变。
 
 - 版本 `Cargo.toml` **0.10.0**（GUI 拆成独立 exe `tupa-gui.exe`；之前 0.9.0 是 `:blog` 取代 `:new`）
-- **TUI 面板稳定**：`app` `ev` `run` `pi` `go` `web` `blog` `fav` `cfg` `set` `exp` + 开屏 `home`（收藏 + 最近命令）
+- **TUI 面板稳定**：`app` `ev` `run` `pi` `go` `web` `blog` `fav` `cfg` `set` + 开屏 `home`（收藏 + 最近命令）
 - **`:blog` 取代了旧的 `:new`（2026-10-25）**：`src/providers/blog.rs`。不带参数列三个入口
   （本地 `localhost:4000` / GitHub Pages / Cloudflare），`:blog:new <标题>` 在
   `<blog>/source/_posts` 写 front matter 并用 VSCode 打开（同名不覆盖、空参数列最近文章），
