@@ -99,10 +99,23 @@ fn cache_cover(appid: u32) -> Option<PathBuf> {
         .join("appcache")
         .join("librarycache")
         .join(appid.to_string());
-    ["library_600x900.jpg", "library_header.jpg", "header.jpg"]
+    // 按前缀匹配：Steam 会按语言存成 `library_600x900_schinese.jpg` 这种
+    ["library_600x900", "library_header", "header", "library_hero"]
         .into_iter()
-        .map(|name| dir.join(name))
-        .find(|path| path.is_file())
+        .find_map(|prefix| find_prefix(&dir, prefix))
+}
+
+/// 目录里第一个文件名以 `prefix` 开头（忽略大小写）的条目。
+fn find_prefix(dir: &Path, prefix: &str) -> Option<PathBuf> {
+    std::fs::read_dir(dir)
+        .ok()?
+        .flatten()
+        .map(|entry| entry.path())
+        .find(|path| {
+            path.file_name()
+                .map(|name| name.to_string_lossy().to_lowercase().starts_with(prefix))
+                .unwrap_or(false)
+        })
 }
 
 /// 给一条 `steam://rungameid/...` 命令取封面。

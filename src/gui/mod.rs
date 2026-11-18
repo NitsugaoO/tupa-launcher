@@ -1908,8 +1908,61 @@ fn mini_chip(row: &RowSnapshot, p: Palette) -> AnyElement {
 /// 找图标源这件事交给 [`appicon::exe_for`]：它有三层兜底（直接是 exe →
 /// `.cmd` / 无扩展名 shim 向上找同名 exe → 开始菜单索引按标题找 lnk）。
 fn appicon_for(command: &str, title: &str) -> Option<Arc<RenderImage>> {
+    // UWP（`ms-windows-store:` / `ms-settings:`）没有 exe，图标要从 shell 命名空间取
+    if let Some(item) = appicon::shell_item_for(command)
+        && let Some(icon) = appicon::load(std::path::Path::new(&item))
+    {
+        return Some(icon);
+    }
     let exe = appicon::exe_for(command, title)?;
-    exe.is_file().then(|| appicon::load(&exe)).flatten()
+    // MSIX 返回的可能是 shell:AppsFolder 路径（不是真实文件），SHELL 仍能解析
+    if exe.is_file() || exe.to_string_lossy().starts_with("shell:") {
+        return appicon::load(&exe);
+    }
+    None
+}
+
+/// 体检（`--icons`）：配置里每个应用最终能不能拿到图标、来源是哪一步。
+///
+/// 排查「某一行没有图标」时用它：能区分是**解析不到 exe**（第一列都是 ✗）、
+/// **exe 在但 SHELL 提取失败**、还是 **Steam 本地没缓存封面**。
+pub fn icon_report(apps: &[crate::config::AppEntry]) -> Vec<(String, String)> {
+    apps.iter()
+        .map(|app| {
+            let command = app.command.as_str();
+            let detail = if let Some(item) = appicon::shell_item_for(command) {
+                match appicon::load(std::path::Path::new(&item)) {
+                    Some(_) => format!("✓ UWP {item}"),
+                    None => format!("✗ UWP 取图失败 {item}"),
+                }
+            } else if let Some(exe) = appicon::exe_for(command, &app.name) {
+                let text = exe.to_string_lossy();
+                if text.starts_with("shell:") {
+                    match appicon::load(&exe) {
+                        Some(_) => format!("✓ {text}"),
+                        None => format!("✗ shell 命名空间取图失败 {text}"),
+                    }
+                } else if !exe.is_file() {
+                    format!("✗ 路径不存在 {text}")
+                } else if appicon::load(&exe).is_some() {
+                    format!("✓ {text}")
+                } else {
+                    format!("✗ SHELL 提取失败 {text}")
+                }
+            } else if steamicon::appid(command).is_some() {
+                match steamicon::load(command) {
+                    Some(_) => "✓ Steam 封面".to_string(),
+                    None => format!(
+                        "✗ Steam 无本地封面（appid {}）",
+                        steamicon::appid(command).unwrap_or(0)
+                    ),
+                }
+            } else {
+                "✗ 解析不到 exe，也没有 Steam / UWP 来源".to_string()
+            };
+            (app.name.clone(), detail)
+        })
+        .collect()
 }
 
 /// 一条 `Launch` 的图标：先按 `.exe` / `.lnk` 提取，再试 Steam 的本地封面。

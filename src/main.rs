@@ -59,6 +59,30 @@ fn main() -> Result<()> {
         return check_config(&cfg);
     }
 
+    // 体检：配置里每个 app 的图标能不能拿到（需要 --features gui）
+    if args.iter().any(|a| a == "--icons") {
+        #[cfg(feature = "gui")]
+        {
+            if let Some(path) = config::config_path() {
+                println!("{}", path.display());
+            }
+            println!();
+            let report = tupa_launcher::gui::icon_report(&cfg.apps);
+            let mut missing = 0;
+            for (name, detail) in &report {
+                if !detail.starts_with('✓') {
+                    missing += 1;
+                }
+                println!("  {name:<28} {detail}");
+            }
+            println!();
+            println!("{} / {} 有图标", report.len() - missing, report.len());
+            return Ok(());
+        }
+        #[cfg(not(feature = "gui"))]
+        anyhow::bail!("--icons 需要 `--features gui` 构建");
+    }
+
     // 调试：看 .lnk / 命令会解析成什么（排查快捷键或路径问题）
     if let Some(pos) = args.iter().position(|a| a == "--resolve") {
         let target = args.get(pos + 1).cloned().unwrap_or_default();

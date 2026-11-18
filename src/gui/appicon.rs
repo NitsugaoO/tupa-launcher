@@ -78,10 +78,18 @@ pub fn load(path: &Path) -> Option<Arc<RenderImage>> {    ensure_com();
 /// 第 2 步就是「VSCode 图标变成白纸 + 齿轮」的修法：SHELL 对无扩展名脚本只给
 /// “未知文件类型”图标，而那个 shim 上一级的 `Code.exe` 才是真 logo。
 pub fn exe_for(command: &str, title: &str) -> Option<PathBuf> {
-    if let Some(path) = crate::util::resolve_executable(command) {
+    if let Some(resolved) = crate::util::resolve_executable(command) {
+        // `AppData\Local\Microsoft\WindowsApps\wt.exe` 这类别名是个 symlink，
+        // 跟到包里真正的 exe 才能推出 AUMID（直接拿别名文件名只会得到 `wt.exe!App`）
+        let path = resolve_alias(&resolved).unwrap_or(resolved);
+        // Scoop 的 shim（`<scoop>\shims\windhawk.exe`）是个通用代理程序，
+        // SHELL 只能给出 shim 自己的图标，得找到 apps 目录里的真程序
+        if let Some(real) = scoop_target(&path) {
+            return Some(real);
+        }
         // MSIX 应用（`wt.exe` 转发到 `...\WindowsApps\<包名>\wt.exe`）的目录受保护，
         // `IShellItemImageFactory` 只能给出通用的「应用」图标（白纸 + 一块蓝），
-        // 所以跳过它，直接用开始菜单里的 `.lnk`（那里存的是真图标）。
+        // 所以跳过它，直接用 `shell:AppsFolder` 让 shell 去包资源里取。
         if !is_msix(&path) {
             if is_exe(&path) {
                 return Some(path);
@@ -89,10 +97,75 @@ pub fn exe_for(command: &str, title: &str) -> Option<PathBuf> {
             if let Some(exe) = sibling_exe(&path) {
                 return Some(exe);
             }
+        } else if let Some(item) = msix_shell_item(&path) {
+            return Some(PathBuf::from(item));
         }
     }
 
     start_menu_exe(title).or_else(|| start_menu_exe(command))
+}
+
+/// symlink 解析（`WindowsApps\wt.exe` → 包里的真 exe）。失败就当作普通文件。
+fn resolve_alias(path: &Path) -> Option<PathBuf> {
+    let link = std::fs::read_link(path).ok()?;
+    let target = if link.is_absolute() {
+        link
+    } else {
+        path.parent()?.join(link)
+    };
+    target.is_file().then_some(target)
+}
+
+/// MSIX 包目录 → `shell:AppsFolder\<PackageFamilyName>!App`。
+///
+/// 包目录名形如 `Microsoft.WindowsTerminal_1.24.12741.0_x64__8wekyb3d8bbwe`：
+/// PackageFamilyName = `<Name>_<PublisherId>`（去掉版本和架构）。
+/// 多数 UWP 的入口 AppId 就是 `App`（Terminal / PowerShell 都是）；猜错了取图会失败，
+/// 自然回落到 chip，不会把行画坏。
+fn msix_shell_item(path: &Path) -> Option<String> {
+    let mut after = false;
+    let mut package = None;
+    for part in path.components() {
+        let text = part.as_os_str().to_string_lossy();
+        if after {
+            package = Some(text.into_owned());
+            break;
+        }
+        if text.eq_ignore_ascii_case("WindowsApps") {
+            after = true;
+        }
+    }
+    let package = package?;
+    // 包目录名必须含 `_`（包全名或 PackageFamilyName）；
+    // `WindowsApps\wt.exe` 这种别名文件不是包目录
+    if !package.contains('_') {
+        return None;
+    }
+    // 两种目录形态：
+    // - `Microsoft.WindowsTerminal_1.24…_x64__8wekyb3d8bbwe`（Program Files\WindowsApps 下的包全名）
+    // - `Microsoft.PowerShell_8wekyb3d8bbwe`（AppData\Local\Microsoft\WindowsApps 下的别名目录，
+    //   已经是 PackageFamilyName）
+    let family = match package.rsplit_once("__") {
+        Some((head, publisher)) => format!("{}_{publisher}", head.split('_').next()?),
+        None => package,
+    };
+    Some(format!(r"shell:AppsFolder\{family}!App"))
+}
+
+/// 已知的协议 / shell 命令 → `shell:AppsFolder` 里的项。
+///
+/// UWP（Microsoft Store、设置面板）没有可执行的 exe，图标只能通过
+/// `shell:AppsFolder\<AUMID>` 让 shell 到包资源里取。
+pub fn shell_item_for(command: &str) -> Option<String> {
+    let command = command.trim().to_ascii_lowercase();
+    let aumid = if command.starts_with("ms-windows-store:") {
+        "Microsoft.WindowsStore_8wekyb3d8bbwe!App"
+    } else if command.starts_with("ms-settings:") {
+        "windows.immersivecontrolpanel_cw5n1h2txyewy!microsoft.windows.immersivecontrolpanel"
+    } else {
+        return None;
+    };
+    Some(format!(r"shell:AppsFolder\{aumid}"))
 }
 
 /// 是否在 MSIX 包目录里（`C:\Program Files\WindowsApps\<包名>\…`）。
@@ -102,6 +175,34 @@ fn is_msix(path: &Path) -> bool {
             .to_string_lossy()
             .eq_ignore_ascii_case("WindowsApps")
     })
+}
+
+/// Scoop shim → `apps\<名字>\current\<名字>.exe`（没有 current 就取版本目录里最新的）。
+fn scoop_target(path: &Path) -> Option<PathBuf> {
+    let shims = path.parent()?;
+    if !shims
+        .file_name()?
+        .to_string_lossy()
+        .eq_ignore_ascii_case("shims")
+    {
+        return None;
+    }
+    let stem = path.file_stem()?.to_string_lossy().into_owned();
+    let apps = shims.parent()?.join("apps").join(&stem);
+
+    if let Some(exe) = find_named(&apps.join("current"), &stem, "exe") {
+        return Some(exe);
+    }
+    let mut versions: Vec<PathBuf> = std::fs::read_dir(&apps)
+        .ok()?
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| path.is_dir())
+        .collect();
+    versions.sort_by(|a, b| b.file_name().cmp(&a.file_name()));
+    versions
+        .into_iter()
+        .find_map(|dir| find_named(&dir, &stem, "exe"))
 }
 
 fn is_exe(path: &Path) -> bool {
@@ -142,13 +243,71 @@ fn find_named(dir: &Path, stem: &str, ext: &str) -> Option<PathBuf> {
 /// 开始菜单里按名字找 `.lnk`，解到目标 exe
 /// （`Visual Studio Code` → `…\Visual Studio Code.lnk` → `Code.exe`）。
 fn start_menu_exe(name: &str) -> Option<PathBuf> {
-    let key = name.trim().to_lowercase();
-    if key.is_empty() {
+    let exact = name.trim().to_lowercase();
+    if exact.is_empty() {
         return None;
     }
-    let lnk = start_menu_index().get(&key)?;
+    let index = start_menu_index();
+    let mut candidates = vec![exact];
+    candidates.extend(normalize_menu_keys(name));
+
+    let lnk = candidates
+        .iter()
+        .find_map(|key| index.get(key))
+        .or_else(|| {
+            // 标题往往比快捷方式名长（「Ubuntu 24.04 (WSL)」vs 「Ubuntu-24.04.lnk」），
+            // 再按「去括号 / 取括号内 + 分隔符归一」两种写法各试一次
+            index
+                .iter()
+                .find(|(key, _)| {
+                    let normalized = normalize_menu_keys(key);
+                    candidates.iter().any(|want| normalized.contains(want))
+                })
+                .map(|(_, path)| path)
+        })?;
     let target = crate::util::resolve_shortcut(lnk);
     target.is_file().then_some(target)
+}
+
+/// 开始菜单名字归一，返回多个候选：
+///
+/// - 去掉括号（含中文括号）里的内容：「Ubuntu 24.04 (WSL)」→ `ubuntu 24 04`
+/// - 只取括号里的：「终端 (Windows Terminal)」→ `windows terminal`
+///
+/// `-` `.` `_` 一律当空格（快捷方式名「Ubuntu-24.04」与标题「Ubuntu 24.04」对齐）。
+fn normalize_menu_keys(text: &str) -> Vec<String> {
+    let mut outside = String::with_capacity(text.len());
+    let mut inside = String::with_capacity(text.len());
+    let mut depth = 0usize;
+    for ch in text.chars() {
+        match ch {
+            '(' | '（' => depth += 1,
+            ')' | '）' => depth = depth.saturating_sub(1),
+            _ if depth > 0 => inside.push(ch),
+            _ => outside.push(ch),
+        }
+    }
+
+    let tidy = |raw: &str| -> String {
+        raw.chars()
+            .map(|ch| match ch {
+                '-' | '_' | '.' | '·' => ' ',
+                other => other,
+            })
+            .collect::<String>()
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+            .to_lowercase()
+    };
+
+    let mut keys = vec![tidy(&outside)];
+    let inner = tidy(&inside);
+    if !inner.is_empty() {
+        keys.push(inner);
+    }
+    keys.retain(|key| !key.is_empty());
+    keys
 }
 
 /// `lnk 文件名（小写、去扩展名）` → 路径。整个进程只建一次。
@@ -164,12 +323,13 @@ fn start_menu_index() -> &'static HashMap<String, PathBuf> {
 }
 
 fn start_menu_dirs() -> Vec<PathBuf> {
+    // 取 `Start Menu` 根目录（递归会覆盖 `Programs`），因为用户把快捷方式拖到
+    // 开始菜单顶层的情况不少（本机 `Ubuntu-24.04.lnk` 就在那一层）
     let mut dirs = Vec::new();
-    if let Some(appdata) = std::env::var_os("APPDATA") {
-        dirs.push(PathBuf::from(appdata).join(r"Microsoft\Windows\Start Menu\Programs"));
-    }
-    if let Some(programdata) = std::env::var_os("ProgramData") {
-        dirs.push(PathBuf::from(programdata).join(r"Microsoft\Windows\Start Menu\Programs"));
+    for base in ["APPDATA", "ProgramData"] {
+        if let Some(root) = std::env::var_os(base) {
+            dirs.push(PathBuf::from(root).join(r"Microsoft\Windows\Start Menu"));
+        }
     }
     dirs.retain(|dir| dir.is_dir());
     dirs
@@ -275,3 +435,4 @@ unsafe fn read_bgra(bitmap: HBITMAP) -> Option<(u32, u32, Vec<u8>)> {
     }
     Some((width, height, pixels))
 }
+
