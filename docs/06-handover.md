@@ -266,30 +266,43 @@ cargo build --release --features gui     # 产出 tupa-gui.exe + tupa-launcher.e
 #### 圆角与窗口形状（2026-11-18）
 
 亚克力是 **DWM 按整个窗口矩形**画的，而面板内容只在内部画 `.rounded(12)` ——
-所以窗口本身是方的，四个角会漏出模糊（看起来像「阴影/亚克力溢出圆角」）。做法：
+窗口本身方角的话，四个角会漏出模糊。
 
-1. **去掉 `WS_EX_NOREDIRECTIONBITMAP`**。实测带着它时 `SetWindowRgn` 和
-   `DWMWA_WINDOW_CORNER_PREFERENCE` 都返回成功却毫无效果，DWM 忽略窗口形状；
-   去掉后 GPUI 的 D3D11 + DComp 渲染照常（`CreateTargetForHwnd` 不依赖那个 ex-style）。
-2. `SetWindowRgn(CreateRoundRectRgn(...))` 按 `style::RADIUS` 裁圆角；
-   **`SetWindowRgn` 不跟随窗口缩放**，所以 `Panel::render` 里比较上一次的物理尺寸，
-   变了就重裁。
-3. region 用 `GetWindowRect` + `GetClientRect` + `ClientToScreen` 算出**客户区**：
-   gpui 在 `WM_NCCALCSIZE` 里给 `WS_THICKFRAME` 留了 resize 热区（实测左右各 7px、
-   上下各 4px），
-   - 按「窗口矩形」裁 → 亚克力比内容大一圈；
-   - 按 `window.viewport_size()` 裁 → 少算偏移，右侧和底部的边框被裁掉一半。
-4. 应用时机放在**首帧渲染**（`Panel::render` 第一次，`frame::apply`），不要放
-   `open_window` 的闭包 —— 后者太早，gpui 之后还会 show/resize，把 DWM 的 frame
-   状态（边框、阴影）重置回去。
+**正解：让 DWM 把窗口裁成圆角**（`src/gui/frame.rs`）：
 
-**去不掉的残留**：圆角外侧还有 1~2px 浅色描边，是 DWM 在**窗口矩形外**画的装饰
-（`PrintWindow` 抓窗口自身时看不到它，说明不在客户区里）。三个相关属性
-`DWMWA_NCRENDERING_POLICY` / `DWMWA_BORDER_COLOR` / `DWMWA_VISIBLE_FRAME_BORDER_THICKNESS`
-都试过，返回值都是成功，视觉毫无变化。深色壁纸下基本看不见，别再花时间。
+```rust
+DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, &DWMWCP_ROUND, 4);
+SetWindowPos(hwnd, null, 0,0,0,0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER);
+```
 
-另外 `[gui] always_on_top`（默认 true）用 `SetWindowPos(HWND_TOPMOST)` 实现 ——
-GlazeWM 里 `tupa-gui` 是 `ignore`，不置顶就会被普通窗口压住。
+亚克力会跟着圆角一起被裁，不需要任何 region。
+
+**试过但更差的两条路（别重走）**：
+
+1. **自己 `SetWindowRgn` + 保留 `WS_EX_NOREDIRECTIONBITMAP`**（gpui 的 DComp 默认样式）：
+   `SetWindowRgn` 返回成功、`GetWindowRgn` 也查得到 region，但 DWM **静默忽略**它，
+   四角照样是方角。
+2. **去掉 `WS_EX_NOREDIRECTIONBITMAP` 再 `SetWindowRgn`**：region 这次生效了，但
+   - region 外的区域被 DWM 填成浅灰/白色，视觉上就是「面板外多一圈」；
+   - gpui 的 insets 是**硬编码公式**（`events.rs::get_client_area_insets`：
+     `SM_CXSIZEFRAME + SM_CXPADDEDBORDER`，Win11 的 top 再加 `dpi/96`），
+     **与 `is_resizable` 无关**，所以客户区永远比窗口小一圈：
+
+     | | window | client | insets |
+     |---|---|---|---|
+     | tupa-gui | 966×74 | 952×66 | L6 T1 R8 B7 |
+     | ElyTerminal | 492×916 | 478×909 | L7 T0 R7 B7 |
+
+   - 想用 `GetWindowRect` + `ClientToScreen` 把 region 对齐到客户区只会把右侧/底部的
+     边框裁掉，仍然去不掉那圈。
+
+**对照 ElyTerminal**（同样是 GPUI、同一个 ex-style、同样有亚克力）：它没有做任何
+窗口形状处理，insets 也是 L7 T0 R7 B7，圆角就是 DWM 默认行为 —— 这也印证了
+「不要自己动 region」。
+
+**顺序坑**：`SWP_FRAMECHANGED` 会把 `SetWindowCompositionAttribute` 重置回 gpui 的
+`alpha = 0`（整窗黑玻璃）。所以亚克力的 `alpha = 1` 补丁必须在 `frame::apply`
+**之后**打。现在两者都在首帧 `Panel::render` 里，顺序是 frame → acrylic。
 
 #### 之前为什么判成「做不到」（教训）
 

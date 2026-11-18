@@ -112,14 +112,18 @@ cargo clippy --release --features gui    # 零警告；必须带 feature，否�
      - 判据不要靠壁纸：用**棋盘格**铺底再截图（`copyfromscreen`，`PrintWindow` 抓不到
        DComp 合成结果）。探针在 `examples/acrylic_probe.rs`（`backdrop` / `host` /
        `sb2..sb4`），细节与结论见 `docs/06-handover.md` §6「窗口模糊」。
-     - **圆角要裁窗口，不是裁内容**（2026-11-18）：亚克力是 DWM 按整个窗口矩形画的，
-       GPUI 的 `.rounded()` 只裁内容 → 四角会漏模糊。做法在 `src/gui/frame.rs`：
-       去掉 `WS_EX_NOREDIRECTIONBITMAP`（否则 `SetWindowRgn` 被静默忽略）+
-       `SetWindowRgn` 圆角 + 尺寸变化时重裁。region 必须用
-       `GetWindowRect` + `GetClientRect` + `ClientToScreen` 算**客户区**
-       （gpui 给 `WS_THICKFRAME` 留了左右 7px / 上下 4px 热区，按窗口算就会「大一圈」，
-       按 `viewport_size()` 算会裁掉右侧和底部的边框）。应用时机要放在**首帧渲染**，
-       `open_window` 的闭包里调太早（gpui 之后还会 show/resize，把 frame 状态重置）。
+     - **圆角交给 DWM，别自己裁 region**（2026-11-18，试过两条错路）：
+       亚克力按整个窗口矩形画，`SetWindowRgn` 看起来是解法，但
+       ① 保留 gpui 的 `WS_EX_NOREDIRECTIONBITMAP` 时 DWM 静默忽略 region
+       （`GetWindowRgn` 查得到、视觉零变化）；② 去掉那个 ex-style 后 region 生效，
+       可 region 外被 DWM 填成浅灰/白，加上 gpui 的 insets（`WM_NCCALCSIZE` 里硬编码
+       `SM_CXSIZEFRAME + SM_CXPADDEDBORDER`，**与 `is_resizable` 无关**）就是
+       「面板外多一圈」。正解是 `DWMWA_WINDOW_CORNER_PREFERENCE = DWMWCP_ROUND`
+       （`src/gui/frame.rs`），亚克力会跟着被裁 —— ElyTerminal 同样如此，
+       它的 insets 也是 L7 T0 R7 B7，没有额外处理。
+     - **`SWP_FRAMECHANGED` 会重置 composition attribute**：亚克力的 alpha = 1
+       补丁一定放在 `frame::apply` **之后**（现在都在首帧 `Panel::render` 里，
+       顺序是先 frame 后 acrylic），放前面就是整窗黑玻璃。
      - 窗口外观相关的三个 DWM 属性（`NCRENDERING_POLICY` / `BORDER_COLOR` /
        `VISIBLE_FRAME_BORDER_THICKNESS`）在这台机器上**返回成功但无效**，
        圆角外那 1~2px 描边去不掉，别再花时间。
