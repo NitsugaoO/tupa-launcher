@@ -24,11 +24,6 @@ pub const PADDING: f32 = 12.0;
 /// 超宽行的左右滚动：像素速度、两端停顿、单程的最短时长
 pub const SCROLL_SPEED: f32 = 240.0; // px/s
 pub const SCROLL_PAUSE: f32 = 0.6; // 两端各停多久（秒）
-/// 列表上下滚动：每帧向目标偏移逼近的比例（0..1，越大越快）。
-///
-/// **必须和 `MOVE_EASE` 一致**：滚动和选框是两个独立的插值，系数不同时选框会先
-/// 冲到目标、列表慢半拍追上来，看到的就是「选框已经露出可视区了」。
-pub const SCROLL_EASE: f32 = 0.55;
 /// 选框 / 光标滑动的缓动系数（指数逼近，光标用）
 pub const MOVE_EASE: f32 = 0.55;
 /// 选框 / 列表滚动的**固定动画时长**（秒）。
@@ -99,8 +94,6 @@ pub const SCROLLBAR_ALPHA: f32 = 0.25;
 pub const CARD_HEIGHT: f32 = 46.0;
 /// 卡片模式下最多显示多少条（一条两行，再高就装不下了）
 pub const CARD_VISIBLE_ROWS: usize = 7;
-
-/// 别调小：`panel` 和 `background` 只差一档，0.45 实测看不出卡片。
 
 /// 两色插值：`t` = 0 取 `a`，1 取 `b`（chip 灰 ↔ 彩的渐变就用它）
 pub fn mix(a: Rgba, b: Rgba, t: f32) -> Rgba {
