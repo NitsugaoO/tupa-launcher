@@ -205,6 +205,16 @@ cargo clippy --release --features gui    # 零警告；必须带 feature，否�
        第一行镜像的 flex 结构（number / star / `BADGE_WIDTH` + 同一个 gap），副标题因此自动对齐
      - 图标源有三层兜底（`appicon::exe_for`）：直接 `.exe` → `.cmd` / **无扩展名 shim**
        向上找同名 `.exe`（不做这步 VSCode 会是「白纸 + 齿轮」）→ 开始菜单 `.lnk` 索引
+     - **`\WindowsApps\` 下的 exe 别直接取图**（2026-11-18）：MSIX 包目录受保护，
+       SHELL 只给通用「应用」图标（白纸 + 蓝块，`wt.exe` / `pwsh.exe` 都中招）。
+       先跟随 symlink 到包内真 exe，再拼 `shell:AppsFolder\<PackageFamilyName>!App`；
+       `AppData\Local\Microsoft\WindowsApps\pwsh.exe` 那种别名目录已是 FamilyName，
+       直接拼 `!App`。UWP 的 `ms-settings:` / `ms-windows-store:` → AUMID 同理
+     - **Scoop shim 的图标是假的**：`<scoop>\shims\x.exe` 是通用代理程序，要回
+       `<scoop>\apps\x\current\`（或版本目录）找真 exe，否则 `windhawk` 这类没图标
+     - **Steam 游戏只有 `.url` 没有 `.lnk`**：开始菜单索引要收 `.url`
+       （Internet Shortcut，`IconFile=` 指向 Steam 缓存的游戏 ico），且对 `.url`
+       不做 `resolve_shortcut`，直接拿它自己取图（`Big Walk` 靠这条才有图）
    19. **文件图标不用图片，用 Nerd Font 字形**（2026-11-18）：字体 `JetBrains Maple Mono`
      自带完整 Nerd Font 图标集（18MB 的原因），`src/gui/glyphs.rs` 里直接给 PUA 码点。
      **码点抄 eza**（`src/output/icons.rs`，按语言给专属图标），别自己拍脑袋；
@@ -218,6 +228,19 @@ cargo clippy --release --features gui    # 零警告；必须带 feature，否�
      少了第二步一个图标都拿不到）。缓存存原始字节、**失败写空文件**否则每次呼出都重试；
      站点 key 要带**非默认端口**（`127.0.0.1:5173` 与 `:4000` 是两个服务）。
      开关是 `[gui] web_icons = "favicon" | "globe"`（`globe` 完全无网络请求）。
+- **`[[apps]] icon = "..."` 给的图要用 `image` 解，别过 SHELL**（2026-11-18）：
+  `SIIGBF_ICONONLY` 对 png / jpg 返回的是「图片文件」通用图标（白纸），不是图本身。
+  用 `appicon::load_image`（`image::open` + RGBA→BGRA），给自动解析推不出图的条目用
+  （本机 pi 跑在 `wt.exe` 里，图标是从用户给的 SVG 画出来的三色方块）。
+  排查用 `tupa-launcher.exe --icons`，它会列出每条实际走的哪条路。
+- **亚克力可用的判据别用电源计划**（2026-11-18 实测）：本机 `ActivePowerScheme`
+  恒为节能计划 `a1841308-3541-4fab-bc81-f71556f20b4a`，跟 `:set` 里那个「节能模式」
+  开关**不是一回事** —— 拿它判断会永远判成不可用，关节能后亚克力也回不来。
+  正确判据三条：`EnableTransparency != 0`、`SYSTEM_POWER_STATUS::SystemStatusFlag != 1`
+  （节电）、`HKLM\SYSTEM\CurrentControlSet\Control\Power\EnergySaverState != 1`
+  （和 `energy_saver_get_combined.ps1` 同源；实测关着时是 `2`）。
+  不可用时画不透明主题色（`#272e33`），并且**要重新下发 accent policy**
+  （`acrylic::disable` / `enable`），只改底色 DWM 那边还挂着旧的、切回来仍是黑底。
 - **托盘/热键在后台线程，别塞进 GPUI**：`Application::run` 占住主线程，所以 `src/tray.rs`
   自己开线程跑 message-only 窗口 + `Shell_NotifyIconW` + `RegisterHotKey`，面板显隐直接用
   `ShowWindow` 操作 HWND（`util::find_panel`），不碰 GPUI 状态。托盘菜单用
