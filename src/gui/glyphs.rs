@@ -77,6 +77,33 @@ pub const CODE: char = '\u{F121}';
 /// 网页：`[gui] web_icons = "globe"` 时用它；favicon 没拉下来 / 拉失败也回落到它
 pub const GLOBE: char = '\u{F0AC}';
 
+// ---- 非文件类的条目（按 Kind / Action 分流）----
+/// 终端 —— `:run` / `:go:yazi` / `:go:pi`
+pub const TERMINAL: char = '\u{F120}';
+/// 齿轮 —— `:cfg` / `:set` 的动作项
+pub const COG: char = '\u{F013}';
+/// 开关 —— `:set` 里的开关 / 选项（和齿轮区分开）
+pub const TOGGLE: char = '\u{F205}';
+/// 垃圾桶 —— `:pi:clean` 的归档 / 删除
+pub const TRASH: char = '\u{F1F8}';
+/// 归档箱 —— `:pi:clean:restore` 恢复
+pub const BOX_ARCHIVE: char = '\u{F187}';
+/// 服务器 —— `:blog` 的本地预览 / 管理页
+pub const SERVER: char = '\u{F233}';
+/// 停止 —— `:blog:stop` / 停本地服务
+pub const STOP: char = '\u{F28D}';
+/// 铅笔 —— `:blog:new`
+pub const PENCIL: char = '\u{F044}';
+/// 时钟 —— 老历史条目（没有快照、只能回填输入行的那些）
+pub const CLOCK: char = '\u{F43A}';
+/// 问号 —— 命令列表（`:` 打出来的那些）
+pub const QUESTION: char = '\u{F059}';
+/// 右箭头 —— 其余 `FillInput` 条目
+pub const ARROW: char = '\u{F054}';
+/// pi 会话。**故意用普通希腊字母**（不是 Nerd Font 码点）：π 一眼就是 pi，
+/// 而且和「终端」区分开 —— `:pi` 那些行除了标题，本来就靠这个形状认。
+pub const PI: char = '\u{03C0}';
+
 /// 路径 → 字形（目录给文件夹，其余按扩展名）
 pub fn for_path(path: &Path) -> char {
     if path.is_dir() {
@@ -207,7 +234,8 @@ mod tests {
             AUDIO, VIDEO, LOG, NOTEBOOK, DISK_IMAGE, CONFIG, ENV, LOCK, KEY, LICENSE, GIT, EXEC,
             LIBRARY, BINARY, RUST, PYTHON, GO, JAVASCRIPT, TYPESCRIPT, REACT, C, CPP, CSHARP,
             JAVA, KOTLIN, LUA, PHP, RUBY, HASKELL, ASSEMBLY, SHELL, SHELL_CMD, POWERSHELL, HTML,
-            CSS, SASS, JSON, YAML, TOML, XML, CODE, GLOBE,
+            CSS, SASS, JSON, YAML, TOML, XML, CODE, GLOBE, TERMINAL, COG, TOGGLE, TRASH,
+            BOX_ARCHIVE, SERVER, STOP, PENCIL, CLOCK, QUESTION, ARROW,
         ] {
             let code = glyph as u32;
             assert!(

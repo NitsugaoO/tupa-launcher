@@ -39,7 +39,7 @@ use gpui::{
 use crate::app::App;
 use crate::config::Config;
 use crate::i18n;
-use crate::providers::Action;
+use crate::providers::{Action, Item, Kind};
 use crate::theme::Theme;
 use crate::util::PanelKind;
 
@@ -1018,6 +1018,65 @@ impl Panel {
         RowIcon::Glyph(glyphs::GLOBE)
     }
 
+    /// 这一行的类型列画什么。
+    ///
+    /// 优先级：应用的位图 / 网页的 favicon > [`Self::glyph_for`] 算出的字形 > 没有（回落 chip）。
+    fn row_icon(&self, item: &Item) -> RowIcon {
+        // 1) 应用位图：`.lnk` / `.exe` 解析到的图标
+        if let Action::Launch { command, .. } = &item.action
+            && let Some(icon) = self.icons.get(command).cloned().flatten()
+        {
+            return RowIcon::Image(icon);
+        }
+        // 2) 网址：favicon 到位就用位图，否则（或 `web_icons = "globe"`）用地球
+        if let Action::OpenUrl(url) = &item.action {
+            return self.web_icon(url);
+        }
+        // 3) 其余靠字形
+        Self::glyph_for(item).map_or(RowIcon::None, RowIcon::Glyph)
+    }
+
+    /// 除位图以外，这一行该用哪个字形（`None` = 没有，界面回落 chip）。
+    ///
+    /// 顺序：`Kind` 里比 `Action` 更具体的（pi 会话 / 老历史）> `Action` 分流。
+    /// **不要按 `Kind::badge()` 再写一份平行表** —— badge 是文字、这里要形状，
+    /// 两者口径不一样（`Switch` / `Setting` 的 badge 不同，图标只差 toggle / 齿轮）。
+    fn glyph_for(item: &Item) -> Option<char> {
+        match item.kind {
+            Kind::Pi => return Some(glyphs::PI),
+            // 老历史只有 `FillInput`，按 Action 会误判成命令列表的箭头
+            Kind::History => return Some(glyphs::CLOCK),
+            _ => {}
+        }
+        match &item.action {
+            // 目录走 `Open`、文件走 `Reveal`（go 的 Opener::Default）；按扩展名细分
+            Action::Open(path) | Action::Reveal(path) => Some(glyphs::for_path(path)),
+            Action::OpenInEditor { .. } => Some(glyphs::CODE),
+            Action::LaunchInTerminal { .. } | Action::RunCommand { .. } => Some(glyphs::TERMINAL),
+            Action::SetControl { .. } => Some(if item.kind == Kind::Switch {
+                glyphs::TOGGLE
+            } else {
+                glyphs::COG
+            }),
+            Action::CleanSession { mode, .. } => Some(match mode {
+                crate::providers::CleanMode::Restore => glyphs::BOX_ARCHIVE,
+                _ => glyphs::TRASH,
+            }),
+            Action::CleanBatch { .. } => Some(glyphs::TRASH),
+            Action::BlogAdmin { .. } | Action::BlogPreview { .. } => Some(glyphs::SERVER),
+            Action::ServeStop { .. } | Action::ServeStopAll { .. } => Some(glyphs::STOP),
+            Action::CreateBlogPost { .. } => Some(glyphs::PENCIL),
+            // 命令列表（`:` 打出来的）给问号，其余 FillInput 给箭头
+            Action::FillInput(_) => Some(if item.kind == Kind::Help {
+                glyphs::QUESTION
+            } else {
+                glyphs::ARROW
+            }),
+            // 网址已在 `row_icon` 里处理；剩下的是没有图标的 `Launch`
+            _ => None,
+        }
+    }
+
     fn prefetch_icons(&mut self) {
         if self.app.items.is_empty() {
             return;
@@ -1411,22 +1470,7 @@ impl Panel {
                 index,
                 columns: item.columns.clone(),
                 badge: item.kind.badge(),
-                icon: match &item.action {
-                    Action::Launch { command, .. } => self
-                        .icons
-                        .get(command)
-                        .cloned()
-                        .flatten()
-                        .map_or(RowIcon::None, RowIcon::Image),
-                    // 目录走 `Open`、文件走 `Reveal`（go 的 Opener::Default）
-                    Action::Open(path) | Action::Reveal(path) => {
-                        RowIcon::Glyph(glyphs::for_path(path))
-                    }
-                    Action::OpenInEditor { file, .. } => RowIcon::Glyph(glyphs::for_path(file)),
-                    // 网址：favicon 到位就用位图，否则（或 `web_icons = "globe"`）用地球
-                    Action::OpenUrl(url) => self.web_icon(url),
-                    _ => RowIcon::None,
-                },
+                icon: self.row_icon(item),
                 selected: selected == Some(index),
                 color: style::badge_color(item.kind),
                 chip_progress: self.chip_progress(index, selected),
@@ -2388,5 +2432,143 @@ mod tests {
         let (secondary, trailing) = card_parts(&item(&["Downloads", "D:\\"]));
         assert_eq!(secondary, "D:\\");
         assert_eq!(trailing, None);
+    }
+
+    /// `glyph_for`：Kind 优先于 Action，其余按 Action 分流
+    #[test]
+    fn glyphs_by_kind_and_action() {
+        use crate::providers::CleanMode;
+
+        let one = |kind: Kind, action: Action| Item::new(kind, Vec::new(), action);
+        let glyph = |kind: Kind, action: Action| Panel::glyph_for(&one(kind, action));
+
+        // Kind 比 Action 更具体
+        assert_eq!(
+            glyph(Kind::Pi, Action::FillInput("x".into())),
+            Some(glyphs::PI)
+        );
+        assert_eq!(
+            glyph(Kind::History, Action::FillInput("x".into())),
+            Some(glyphs::CLOCK)
+        );
+        // 同一条 FillInput，命令列表是问号、别处是箭头
+        assert_eq!(
+            glyph(Kind::Help, Action::FillInput("x".into())),
+            Some(glyphs::QUESTION)
+        );
+        assert_eq!(
+            glyph(Kind::Command, Action::FillInput("x".into())),
+            Some(glyphs::ARROW)
+        );
+        // :set 的开关与普通动作项
+        let set = Action::SetControl {
+            id: "x".into(),
+            value: "1".into(),
+        };
+        assert_eq!(glyph(Kind::Switch, set.clone()), Some(glyphs::TOGGLE));
+        assert_eq!(glyph(Kind::Setting, set), Some(glyphs::COG));
+        // 终端系
+        let term = Action::LaunchInTerminal {
+            command: "yazi".into(),
+            dir: None,
+        };
+        assert_eq!(glyph(Kind::Command, term), Some(glyphs::TERMINAL));
+        assert_eq!(
+            glyph(
+                Kind::Command,
+                Action::RunCommand {
+                    command: "x".into(),
+                    elevated: false,
+                    background: true,
+                }
+            ),
+            Some(glyphs::TERMINAL)
+        );
+        // 清理：归档箱 / 垃圾桶
+        assert_eq!(
+            glyph(
+                Kind::Clean,
+                Action::CleanSession {
+                    path: PathBuf::new(),
+                    mode: CleanMode::Restore,
+                }
+            ),
+            Some(glyphs::BOX_ARCHIVE)
+        );
+        assert_eq!(
+            glyph(
+                Kind::Clean,
+                Action::CleanSession {
+                    path: PathBuf::new(),
+                    mode: CleanMode::Trash,
+                }
+            ),
+            Some(glyphs::TRASH)
+        );
+        // 博客：服务器 / 停止 / 铅笔
+        assert_eq!(
+            glyph(
+                Kind::Web,
+                Action::BlogPreview {
+                    dir: PathBuf::new(),
+                    url: "http://127.0.0.1:4000".into(),
+                }
+            ),
+            Some(glyphs::SERVER)
+        );
+        assert_eq!(
+            glyph(
+                Kind::Web,
+                Action::ServeStop {
+                    port: 4000,
+                    name: "hexo".into(),
+                }
+            ),
+            Some(glyphs::STOP)
+        );
+        assert_eq!(
+            glyph(
+                Kind::Web,
+                Action::CreateBlogPost {
+                    path: PathBuf::new(),
+                    title: "t".into(),
+                }
+            ),
+            Some(glyphs::PENCIL)
+        );
+        // 文件 / 目录按扩展名走 glyphs::for_path
+        assert_eq!(
+            glyph(Kind::Dir, Action::Reveal(PathBuf::from("D:\\"))),
+            Some(glyphs::FOLDER)
+        );
+        assert_eq!(
+            glyph(
+                Kind::File,
+                Action::Open(PathBuf::from(r"C:\a\b.md"))
+            ),
+            Some(glyphs::MARKDOWN)
+        );
+        assert_eq!(
+            glyph(
+                Kind::File,
+                Action::OpenInEditor {
+                    file: PathBuf::from(r"C:\a\b.pdf"),
+                    line: 3,
+                }
+            ),
+            Some(glyphs::CODE)
+        );
+        // 没有图标的 Launch 交回 chip
+        assert_eq!(
+            glyph(
+                Kind::App,
+                Action::Launch {
+                    command: "steam://rungameid/413150".into(),
+                    args: Vec::new(),
+                    elevated: false,
+                }
+            ),
+            None
+        );
     }
 }
