@@ -6497,6 +6497,7 @@ dependencies = [
  "gpui",
  "open",
  "ratatui",
+ "raw-window-handle",
  "rusqlite",
  "serde",
  "serde_json",
