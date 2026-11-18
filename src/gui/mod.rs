@@ -1747,10 +1747,19 @@ fn render_row(
 /// 两种都占 `BADGE_WIDTH` 宽，所以列宽计算不用跟着变。
 /// 类型列的「文字色」：未选中 = 类型色，选中 = 背景色（chip 反白）。
 ///
-/// Nerd Font 图标也用它 —— 这样图标、chip、mini chip 的渐变是**同一个进度、同一套颜色**，
-/// 选中行整套一起变。
+/// **只给 chip 的文字用**。Nerd Font 图标没有底色，按这套就会在选中时
+/// 变成背景色 → 看着像图标消失，所以它用 [`icon_fg`]。
 fn chip_fg(row: &RowSnapshot, p: &Palette) -> Rgba {
     style::mix(row.color, p.background, row.chip_progress)
+}
+
+/// 字形图标的颜色：**未选中是中性灰，选中才上类型色**。
+///
+/// 和 chip 的底色同一条曲线（灰 → 彩），但用 `p.dim` 而不是半透明类型色 ——
+/// 半透明的绿 / 红在深色面板上仍然是有色的，看着像「没生效」；中性灰才是真的「未选中」。
+/// chip 的文字是反的（选中反白成深色），图标没有底色，按那套会在选中时消失。
+fn icon_fg(row: &RowSnapshot, p: &Palette) -> Rgba {
+    style::mix(p.dim, row.color, row.chip_progress)
 }
 
 fn badge_cell(row: &RowSnapshot, p: Palette) -> AnyElement {
@@ -1775,12 +1784,12 @@ fn badge_cell(row: &RowSnapshot, p: Palette) -> AnyElement {
             )
             .into_any_element(),
         // Nerd Font 字形：文件 / 文件夹 / 网页。字体本身带图标，不需要图片。
-        // 颜色跟 chip 文字同步渐变（选中行反白成背景色）
+        // 颜色跟 chip **底色**同一条曲线（未选中半透明 → 选中亮起来）
         RowIcon::Glyph(glyph) => slot
             .child(
                 div()
                     .text_size(px(style::GLYPH_SIZE))
-                    .text_color(chip_fg(row, &p))
+                    .text_color(icon_fg(row, &p))
                     .child(glyph.to_string()),
             )
             .into_any_element(),

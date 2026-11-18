@@ -441,10 +441,14 @@ fork `vendor/gpui`，把 `directx_renderer.rs` 的 `DirectComposition` 换成 Wi
   第二行用和第一行**镜像**的 flex 结构（number / star / `BADGE_WIDTH` 列 + 同一个 gap），
   所以副标题起点自动和标题对齐（以前是硬编码 `card_indent()`）。
   单行密度模式（`Ctrl+Tab`）只有一行，**保留图标、不画 chip**。
-- **颜色：字形图标和 chip 文字用同一个函数 `chip_fg()`**（`mix(row.color, p.background,
-  row.chip_progress)`）—— 未选中是类型色，选中行反白成背景色，渐变进度也跟着同一个
-  `chip_progress`（所以换行时图标是“跟着 chip 一起变”的）。位图图标（应用 / favicon）
-  是彩色的，不参与渐变。
+- **颜色分两个函数，别搞混**：
+  - `chip_fg()`（`mix(row.color, p.background, chip_progress)`）—— chip / mini chip 的**文字**，
+    未选中类型色、选中反白成背景色
+  - `icon_fg()`（`mix(p.dim, row.color, chip_progress)`）—— Nerd Font **字形图标**，
+    **未选中是中性灰，选中才上类型色**。不能用 `chip_fg`：图标没有底色，反白成背景色
+    就等于图标消失；也不要用「半透明类型色」，深色面板上那仍然是有色的，看着像没生效
+  - 两者的渐变进度都是同一个 `chip_progress`，所以换行时图标和 chip 一起变
+  - 位图图标（应用 / favicon）是彩色的，不参与渐变
 - 缓存：应用按配置里的 `command`、网页按站点 key，**失败也缓存**
   （`wt` / `ms-settings:` / 拉不到的站点每次刷新重试都是白花 COM / 网络时间）。
 - 只给「可视区附近」的行提取（`Panel::prefetch_icons`）：首屏约 15 个，

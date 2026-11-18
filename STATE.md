@@ -28,8 +28,9 @@ updated: 2026-11-18 · code: `11a22d9`（亚克力 + 圆角 + 失焦光标 · �
   `GET /favicon.ico` → 404 就翻首页的 `<link rel="icon">`（实测 `pwn.college` 就是 404），
   WinHTTP 在后台线程跑，缓存 `~/.config/tupa-launcher/icons/<站点>.bin`（失败写空文件），
   开关 `[gui] web_icons = "favicon"（默认）| "globe"`。新配置项已同步 `config.example.toml`。
-  字形图标的颜色和 chip 文字用同一个 `chip_fg()`（`mix(类型色, 背景, chip_progress)`）——
-  未选中类型色、选中反白成深色，和 chip / mini chip 同一个渐变进度；位图图标是彩色的不参与。
+  字形图标的颜色用 `icon_fg()`（`mix(p.dim, 类型色, chip_progress)`）：**未选中中性灰、
+  选中才上类型色**（`chip_fg` 是 chip 文字专用的反白版，图标照抄会在选中时消失）；
+  位图图标是彩色的不参与。
 - **应用图标 + mini chip（2026-11-18 晚）**：卡片第一行图标顶替 chip，第二行图标下挂
   **mini chip**（40×14、字号 9，只在该行有图标时画）；第二行用与第一行**镜像**的 flex
   结构，副标题自动对齐（`card_indent()` 已删）。单行密度模式只保留图标。
