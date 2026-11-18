@@ -1785,14 +1785,21 @@ fn badge_cell(row: &RowSnapshot, p: Palette) -> AnyElement {
             .into_any_element(),
         // Nerd Font 字形：文件 / 文件夹 / 网页。字体本身带图标，不需要图片。
         //
-        // 内层固定 `ICON_SIZE` 宽 + `text_center`：字形 advance 不一定等于 16px
-        // （Nerd Font 有 1em 的也有更宽的），不定宽时它会把整块往右撑，
-        // 看起来就是「图标比下面的 mini chip 偏右」。
-        RowIcon::Glyph(glyph) => slot
+        // 居中方式：`justify_start` + `pl(GLYPH_PAD_LEFT)`（见那个常量的注释 ——
+        // 这个字体的字形 advance 是 20 逻辑像素、ink 又偏右，`text_center` / `.w()`
+        // 在文本元素上都不起作用）。
+        RowIcon::Glyph(glyph) => div()
+            .w(px(style::BADGE_WIDTH))
+            .h(px(style::ICON_SIZE))
+            .flex_shrink_0()
+            .flex()
+            .items_center()
+            // 不用 `justify_center` + 负 margin：flex 会把 margin 算进居中、抵消修正；
+            // 直接定左内边距，位置可预测（见 `GLYPH_PAD_LEFT` 的注释）
+            .justify_start()
+            .pl(px(style::GLYPH_PAD_LEFT))
             .child(
                 div()
-                    .w(px(style::ICON_SIZE))
-                    .text_center()
                     .text_size(px(style::GLYPH_SIZE))
                     .text_color(icon_fg(row, &p))
                     .child(glyph.to_string()),
