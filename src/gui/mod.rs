@@ -264,6 +264,8 @@ struct Panel {
     custom_icons: HashMap<String, PathBuf>,
     /// 系统暂时不能做亚克力（节能模式 / 关了透明效果）时自己铺不透明底色
     opaque_fallback: bool,
+    /// 需要重新下发一次 accent policy（透明可用性刚发生变化）
+    acrylic_refresh: bool,
     /// 正在后台从 Steam CDN 拉封面的命令（避免重复发请求）
     steam_pending: HashSet<String>,
     steam_tx: std::sync::mpsc::Sender<(String, Option<Arc<RenderImage>>)>,
@@ -358,6 +360,9 @@ impl Panel {
                             panel.opaque_fallback = opaque;
                             panel.palette = Palette::new(&panel.app.theme)
                                 .with_opacity(if opaque { 1.0 } else { panel.opacity });
+                            // 光改底色不够：DWM 那边的 accent policy 也要重新下发，
+                            // 否则从节能切回来时窗口还是黑底（用户 2026-11-18 反馈）
+                            panel.acrylic_refresh = true;
                             cx.notify();
                         }
                     }
@@ -479,6 +484,7 @@ impl Panel {
             status_seen: None,
             custom_icons,
             opaque_fallback: !acrylic::transparency_available(),
+            acrylic_refresh: false,
             steam_pending: HashSet::new(),
             steam_tx,
             steam_rx,
@@ -2299,6 +2305,21 @@ impl Render for Panel {
                 && let Err(error) = acrylic::enable(window)
             {
                 crate::tray::log(&format!("[tupa-gui] 亚克力没挂上：{error:#}"));
+            }
+        }
+
+        // 透明可用性刚变过：重新下发 accent policy（不可用时关掉，恢复时重开）
+        if self.acrylic_refresh {
+            self.acrylic_refresh = false;
+            if self.acrylic_on {
+                let result = if self.opaque_fallback {
+                    acrylic::disable(window)
+                } else {
+                    acrylic::enable(window)
+                };
+                if let Err(error) = result {
+                    crate::tray::log(&format!("[tupa-gui] 亚克力切换失败：{error:#}"));
+                }
             }
         }
 
