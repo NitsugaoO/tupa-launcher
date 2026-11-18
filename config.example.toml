@@ -115,6 +115,16 @@ command = "wt"
 name = "文件资源管理器"
 command = "explorer"
 
+# 自定义图标（可选）：png / jpg / ico 的绝对路径。
+# 用在「自动解析推不出图标」的条目上 —— SHELL 图标、MSIX 包资源、Steam 封面
+# 都拿不到时（比如跑在 wt.exe 里的 TUI 程序），用这个直接指定。
+# 顺带一提：`tupa-launcher.exe --icons` 会列出每条实际用的图标和来源。
+#
+# [[apps]]
+# name = "Pi (coding agent)"
+# command = "wt"
+# icon = 'C:\Users\you\.config\tupa-launcher\icons\pi.png'
+
 [[apps]]
 name = "Visual Studio Code"
 command = "code"
