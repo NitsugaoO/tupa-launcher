@@ -479,7 +479,21 @@ fork `vendor/gpui`，把 `directx_renderer.rs` 的 `DirectComposition` 换成 Wi
 - **MSIX 应用的图标别走 SHELL**：`wt.exe` 这种会转发到
   `C:\Program Files\WindowsApps\<包名>\wt.exe`，那个目录受保护，
   `IShellItemImageFactory` 只给通用「应用」图标（白纸 + 蓝块）。`appicon::exe_for`
-  看到路径里有 `WindowsApps` 就跳过，改走开始菜单 `.lnk`（存的是真图标）。
+  看到路径里有 `WindowsApps` 就跳过：跟随 symlink 到包内真 exe，再拼
+  `shell:AppsFolder\<PackageFamilyName>!App`（`AppData\Local\Microsoft\WindowsApps`
+  下那种已是 FamilyName，直接拼 `!App`）。Scoop 的 shim（`shims\x.exe`）同理，
+  要重新回 `apps\x\<版本>\x.exe` 找真程序。
+- **`.url` 也要收进开始菜单索引**：Steam 给每个游戏只生成 `.url`（Internet
+  Shortcut），没有 `.lnk`，里面 `IconFile=` 指向 Steam 缓存的游戏 ico；
+  `start_menu_exe` 对 `.url` 不做 `resolve_shortcut`，直接拿它自己取图标。
+  （Big Walk / How to Fish 就是靠这个才有图）
+- **自动解析不出来就配 `icon`**：`[[apps]] icon = "<png/jpg/ico 路径>"`，
+  用 `appicon::load_image`（`image` 解码，不走 SHELL —— `SIIGBF_ICONONLY`
+  对图片文件只给「白纸」）。`tupa-launcher.exe --icons` 会列出每条实际来源。
+- **节能模式 / 关掉透明效果时会变白底**：DWM 把亚克力静默降级成不透明浅色，
+  这时半透明的文字就糊在白色上。`acrylic::transparency_available()` 同时看
+  `EnableTransparency` 注册表和 `SYSTEM_POWER_STATUS::SystemStatusFlag`，
+  `Panel::opaque_fallback` 为真时根节点改画**不透明**主题色（1.5 秒轮询一次）。
 - **hover / 选框的底色要跟着 `opacity` 走**：`Palette::{row_hover,row_selected}`
   由 `with_opacity(opacity)` 算出来。窗口是亚克力，根节点背景 alpha = `opacity`；
   这两层要是写死实色就把亚克力盖住了。alpha 直接取 `opacity`，两层叠起来
