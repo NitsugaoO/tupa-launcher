@@ -437,10 +437,13 @@ fork `vendor/gpui`，把 `directx_renderer.rs` 的 `DirectComposition` 换成 Wi
 #### 布局与缓存
 
 - 卡片第一行是图标（顶替 chip），第二行图标下面挂一个 **mini chip**
-  （40×14、字号 9，**只在该行有图标时画**；没图标的行第一行已经是 chip，写两遍没意义）。
+  （34×14、字号 9，**只在该行有图标时画**；没图标的行第一行已经是 chip，写两遍没意义）。
+  两行之间 **gap = 0**（mini chip 贴着图标，看着是一整块）。
   第二行用和第一行**镜像**的 flex 结构（number / star / `BADGE_WIDTH` 列 + 同一个 gap），
   所以副标题起点自动和标题对齐（以前是硬编码 `card_indent()`）。
   单行密度模式（`Ctrl+Tab`）只有一行，**保留图标、不画 chip**。
+- 字形容器固定 `ICON_SIZE` 宽 + `text_center`：Nerd Font 字形的 advance 不一定是 16px，
+  不定宽时整块会被往右撑，看起来就是「图标比下面的 mini chip 偏右」。
 - **颜色分两个函数，别搞混**：
   - `chip_fg()`（`mix(row.color, p.background, chip_progress)`）—— chip / mini chip 的**文字**，
     未选中类型色、选中反白成背景色
