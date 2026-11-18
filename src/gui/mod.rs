@@ -934,13 +934,30 @@ impl Panel {
         });
     }
 
-    /// 当前模式最多显示多少条（卡片两行一条，能放的条数是一半多）
+    /// 当前模式最多显示多少条。
+    ///
+    /// 不再写死：卡片两行一条、单行密度一行一条，条数必须和「窗口高度上限」对得上，
+    /// 否则 `desired_height()` 算出的窗口装不下这么多行 → 最后一行被窗口底边裁掉。
+    /// 所以这里按 `max_height` 反算能放几条，再拿常量当上限（大屏 / 小屏都不会跑偏）。
     fn max_visible_rows(&self) -> usize {
-        if self.app.detail {
+        let cap = if self.app.detail {
             style::MAX_VISIBLE_ROWS
         } else {
             style::CARD_VISIBLE_ROWS
+        };
+        // 与 `desired_height()` 里的 `base` / `LIST_TOP` / `STATUS_HEIGHT` 保持一致
+        let chrome = style::PADDING * 2.0
+            + style::BORDER * 2.0
+            + style::INPUT_HEIGHT
+            + 1.0
+            + style::LIST_TOP * 2.0
+            + style::STATUS_HEIGHT;
+        let row_h = self.row_height();
+        if row_h <= 0.0 {
+            return cap;
         }
+        let fits = ((self.max_height - chrome) / row_h).floor().max(1.0) as usize;
+        fits.min(cap)
     }
 
     /// 当前列表的行高（含行间距）。
@@ -994,7 +1011,7 @@ impl Panel {
         self.app.input.is_empty() && self.app.completion.is_none() && !self.hint_open
     }
 
-    /// 窗口应该多高：紧凑时只有输入行，展开时按结果行数算（最多 MAX_VISIBLE_ROWS 行）
+    /// 窗口应该多高：紧凑时只有输入行，展开时按结果行数算（条数见 `max_visible_rows()`）
     fn desired_height(&self) -> f32 {
         let border = style::BORDER * 2.0;
         let base = style::PADDING * 2.0 + border + style::INPUT_HEIGHT + 1.0;
@@ -1110,22 +1127,23 @@ impl Panel {
         self.scroll_viewport = visible_rows as f32 * row_h;
         self.scroll_max = (rows.len() as f32 * row_h - self.scroll_viewport).max(0.0);
 
-        // 选中项保持在可视区内。
+        // 选中项保持在可视区内，但**提前 `SCROLL_MARGIN_ROWS` 行**开始滚
+        // （选框贴着窗口上/下边缘时看不清下一行，像「卡住了」）。
         //
         // 两个细节（都是「看着怪」的真因）：
-        // 1. **不要留余量**：之前用 `margin = row_h`，每次触底滚动都多滚一行
-        // 2. **拿实际视口 `scroll_y` 判断**，不是 `scroll_target`：跟着目标值走时，
-        //    快速连按会提前停住（目标已经推出去了，实际视口还没到）
+        // 1. margin 只当**触发阈值**：目标是「刚好留出 margin」，再 clamp 到 `scroll_max`。
+        //    以前把 margin 直接加在 `bottom - viewport` 上又不 clamp，触底就多滚一行空白
+        // 2. **拿目标位置 `scroll_target` 判断**，不是动画中的 `scroll_y`：后者滞后，
+        //    快速连按时会提前停住 / 向上滚时漏判，选框先跑出视口
         if let Some(index) = self.app.list_state.selected() {
             let top = index as f32 * row_h;
             let bottom = top + row_h;
-            // 用**目标位置**判断，不看动画中的 `scroll_y`：后者滞后，向上滚时
-            // 会因为「视图还没回滚」而漏判，选框会先跑出视口。
+            let margin = style::SCROLL_MARGIN_ROWS * row_h;
             let mut target = self.scroll_target;
-            if top < target {
-                target = top.max(0.0);
-            } else if bottom > target + self.scroll_viewport {
-                target = (bottom - self.scroll_viewport).min(self.scroll_max);
+            if top - margin < target {
+                target = (top - margin).max(0.0);
+            } else if bottom + margin > target + self.scroll_viewport {
+                target = (bottom + margin - self.scroll_viewport).min(self.scroll_max);
             }
             self.aim_scroll(target);
         }

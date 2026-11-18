@@ -17,7 +17,11 @@ pub const HEIGHT_RATIO: f32 = 0.55;
 /// 面板顶部距屏幕顶边的比例（像命令面板那样靠上，不居中）
 pub const TOP_RATIO: f32 = 0.12;
 /// 窗口最多长到屏幕的多少（展开后的硬上限，别顶到任务栏）
-pub const MAX_HEIGHT_RATIO: f32 = 0.62;
+///
+/// 实际能用到的是 `1 - TOP_RATIO`（顶部留白之外的空间），本机 960 逻辑高时是 0.84，
+/// 取 0.72 留出任务栏 + 呼吸余量。**可视条数不再写死**，由 `Panel::max_visible_rows()`
+/// 按这个上限反算 —— 只改这里不会让最后一行被窗口底边裁掉。
+pub const MAX_HEIGHT_RATIO: f32 = 0.72;
 
 /// 面板外框的圆角：`[gui] rounded` 开着时**由 DWM 画窗口圆角**，内容这边只留
 /// 一点点（0 会让草绿边框在四角是尖的）。调大了会在 DWM 圆角内侧露出一条弧形缝。
@@ -34,6 +38,9 @@ pub const MOVE_EASE: f32 = 0.55;
 pub const MOVE_SECS: f32 = 0.16;
 /// 位移小于这个像素数就吸附到目标
 pub const SCROLL_SNAP: f32 = 0.4;
+/// 选框离视口上下边缘还剩几行时就开始滚动（提前量，单位 = 行）。
+/// 只作**触发阈值**：滚动目标仍按「刚好留出这么多行」精确算，别拿它去加宽视口。
+pub const SCROLL_MARGIN_ROWS: f32 = 1.0;
 
 /// chip 灰 ↔ 彩 的渐变时长（秒）
 pub const CHIP_FADE_SECS: f32 = 0.14;
@@ -43,8 +50,9 @@ pub const REVEAL_SECS: f32 = 0.12;
 
 /// 面板自己画的边框（草绿 accent 色，1px）
 pub const BORDER: f32 = 1.0;
-/// 展开后最多显示多少行结果（超出滚动）
-pub const MAX_VISIBLE_ROWS: usize = 12;
+/// 单行密度（`Ctrl+Tab`）最多显示多少行结果（超出滚动）。
+/// 与 [`CARD_VISIBLE_ROWS`] 一样只是**上限**：真正条数由屏幕高度反算后取 min。
+pub const MAX_VISIBLE_ROWS: usize = 19;
 
 /// 等宽字体：输入行与列表都用它，列对齐靠字符宽度而不是 flex 估算
 pub const FONT: &str = "JetBrains Maple Mono";
@@ -94,8 +102,9 @@ pub const SCROLLBAR_ALPHA: f32 = 0.25;
 
 /// 两行卡片（默认形态）：标题行 + 次要信息行
 pub const CARD_HEIGHT: f32 = 46.0;
-/// 卡片模式下最多显示多少条（一条两行，再高就装不下了）
-pub const CARD_VISIBLE_ROWS: usize = 7;
+/// 卡片模式下最多显示多少条（一条两行）。
+/// 同上：**上限**，`Panel::max_visible_rows()` 会按 `MAX_HEIGHT_RATIO` 反算后取 min。
+pub const CARD_VISIBLE_ROWS: usize = 12;
 
 /// 两色插值：`t` = 0 取 `a`，1 取 `b`（chip 灰 ↔ 彩的渐变就用它）
 pub fn mix(a: Rgba, b: Rgba, t: f32) -> Rgba {
