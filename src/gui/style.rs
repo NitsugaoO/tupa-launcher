@@ -19,9 +19,9 @@ pub const TOP_RATIO: f32 = 0.12;
 /// 窗口最多长到屏幕的多少（展开后的硬上限，别顶到任务栏）
 ///
 /// 实际能用到的是 `1 - TOP_RATIO`（顶部留白之外的空间），本机 960 逻辑高时是 0.84，
-/// 取 0.72 留出任务栏 + 呼吸余量。**可视条数不再写死**，由 `Panel::max_visible_rows()`
+/// 取 0.68 留出任务栏 + 呼吸余量（≈11 条卡片）。**可视条数不再写死**，由 `Panel::max_visible_rows()`
 /// 按这个上限反算 —— 只改这里不会让最后一行被窗口底边裁掉。
-pub const MAX_HEIGHT_RATIO: f32 = 0.72;
+pub const MAX_HEIGHT_RATIO: f32 = 0.68;
 
 /// 面板外框的圆角：`[gui] rounded` 开着时**由 DWM 画窗口圆角**，内容这边只留
 /// 一点点（0 会让草绿边框在四角是尖的）。调大了会在 DWM 圆角内侧露出一条弧形缝。
@@ -40,7 +40,7 @@ pub const MOVE_SECS: f32 = 0.16;
 pub const SCROLL_SNAP: f32 = 0.4;
 /// 选框离视口上下边缘还剩几行时就开始滚动（提前量，单位 = 行）。
 /// 只作**触发阈值**：滚动目标仍按「刚好留出这么多行」精确算，别拿它去加宽视口。
-pub const SCROLL_MARGIN_ROWS: f32 = 1.0;
+pub const SCROLL_MARGIN_ROWS: f32 = 2.0;
 
 /// chip 灰 ↔ 彩 的渐变时长（秒）
 pub const CHIP_FADE_SECS: f32 = 0.14;
@@ -71,6 +71,9 @@ pub const ROW_HEIGHT: f32 = 28.0;
 pub const ROW_GAP: f32 = 3.0;
 pub const ROW_RADIUS: f32 = 7.0;
 pub const ROW_SIZE: f32 = 13.0;
+/// 应用图标边长（逻辑像素）。有图标时它**顶替** chip 占那一列（列宽仍是
+/// `BADGE_WIDTH`，所以 `card_indent()` 和列宽计算都不用动）。
+pub const ICON_SIZE: f32 = 20.0;
 /// 徽标 chip：宽 50、高 18、圆角 9（胶囊）、字号 10
 pub const BADGE_WIDTH: f32 = 50.0;
 pub const BADGE_HEIGHT: f32 = 18.0;

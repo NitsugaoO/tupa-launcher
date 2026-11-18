@@ -16,25 +16,28 @@
 
 pub mod icon;
 mod acrylic;
+mod appicon;
 mod frame;
 mod input;
 mod keys;
 mod style;
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
 use gpui::{
     AnyElement, AppContext as _, Bounds, Context, FocusHandle, KeyDownEvent, Render, Rgba,
-    ScrollDelta, ScrollWheelEvent, TitlebarOptions, WeakEntity, Window,
-    WindowBackgroundAppearance, WindowBounds, WindowKind, WindowOptions, div, point, prelude::*, px,
-    relative, size,
+    RenderImage, ScrollDelta, ScrollWheelEvent, TitlebarOptions, WeakEntity, Window,
+    WindowBackgroundAppearance, WindowBounds, WindowKind, WindowOptions, div, img, point,
+    prelude::*, px, relative, size,
 };
 
 use crate::app::App;
 use crate::config::Config;
 use crate::i18n;
+use crate::providers::Action;
 use crate::theme::Theme;
 use crate::util::PanelKind;
 
@@ -217,6 +220,9 @@ struct Panel {
     opacity: f32,
     /// 窗口高度上限（逻辑像素；屏幕的 55%，再高就顶到任务栏了）
     max_height: f32,
+    /// 应用图标缓存：配置里的 `command`（含 `.lnk`）→ 图标。
+    /// **提取失败也存 `None`**，否则裸命令（`wt` / `ms-settings:`）每次刷新都重跑 COM。
+    icons: HashMap<String, Option<Arc<RenderImage>>>,
     /// 选中行变化的时间点（驱动左右滚动）
     scroll_started: std::time::Instant,
     /// 列表展开的时间点（驱动淡入）
@@ -361,6 +367,7 @@ impl Panel {
             scale: 1.0,
             opacity,
             max_height,
+            icons: HashMap::new(),
             scroll_started: std::time::Instant::now(),
             reveal_started: std::time::Instant::now(),
             was_compact: true,
@@ -960,6 +967,30 @@ impl Panel {
         fits.min(cap)
     }
 
+    /// 提前提取「可视区附近」那些行的应用图标。
+    ///
+    /// 只跑 首行-2 .. 首行+可视条数+2 这一段（首屏 ~15 个），滚动时新出现的行
+    /// 下一帧补上，已缓存的直接命中。**失败也缓存**，裸命令不会每帧重试。
+    fn prefetch_icons(&mut self) {
+        if self.app.items.is_empty() {
+            return;
+        }
+        let row_h = self.row_height().max(1.0);
+        let first = (self.scroll_y / row_h).floor() as usize;
+        let end = (first + self.max_visible_rows() + 2).min(self.app.items.len());
+        for i in first.saturating_sub(2)..end {
+            let command = match &self.app.items[i].action {
+                Action::Launch { command, .. } => command.clone(),
+                _ => continue,
+            };
+            if self.icons.contains_key(&command) {
+                continue;
+            }
+            let icon = appicon_for(&command);
+            self.icons.insert(command, icon);
+        }
+    }
+
     /// 当前列表的行高（含行间距）。
     ///
     /// - `detail = true`：单行对齐表（密度模式，`Ctrl+Tab`）
@@ -1112,6 +1143,10 @@ impl Panel {
             },
         };
         self.row_metrics = metrics;
+
+        // 图标只对「可视区附近」的行提取（首屏 ~11 个），没 cache 的才走 COM + GDI；
+        // 不能遍历全部条目 —— 74 个应用全解析一遍会让首屏明显迟滞。
+        self.prefetch_icons();
 
         let rows = Arc::new(self.snapshot(metrics));
         let panel = cx.entity().downgrade();
@@ -1304,6 +1339,10 @@ impl Panel {
                 index,
                 columns: item.columns.clone(),
                 badge: item.kind.badge(),
+                icon: match &item.action {
+                    Action::Launch { command, .. } => self.icons.get(command).cloned().flatten(),
+                    _ => None,
+                },
                 selected: selected == Some(index),
                 color: style::badge_color(item.kind),
                 chip_progress: self.chip_progress(index, selected),
@@ -1425,6 +1464,9 @@ struct RowSnapshot {
     index: usize,
     columns: Vec<String>,
     badge: &'static str,
+    /// 应用图标（`.lnk` / `.exe` 才有）。有值时**顶替** chip 占那一列，
+    /// 无值时（文件 / 网页 / 命令 / 历史）还是画类型胶囊。
+    icon: Option<Arc<RenderImage>>,
     color: Rgba,
     /// 是否是选中行（选中行不做 hover 高亮，否则会盖住 marker）
     selected: bool,
@@ -1516,19 +1558,8 @@ fn render_row(
                 .child(if row.favorite { "\u{2605}" } else { "" }),
         )
         .child(
-            // chip：胶囊底；未选中灰底 + 类型色字，选中行反白成类型色底 + 深色字
-            div()
-                .w(px(style::BADGE_WIDTH))
-                .h(px(style::BADGE_HEIGHT))
-                .flex_shrink_0()
-                .flex()
-                .items_center()
-                .justify_center()
-                .rounded(px(style::BADGE_RADIUS))
-                .bg(style::mix(p.panel, row.color, row.chip_progress))
-                .text_size(px(style::BADGE_SIZE))
-                .text_color(style::mix(row.color, p.background, row.chip_progress))
-                .child(row.badge),
+            // 类型列：有应用图标就画图标，没图标画胶囊标签（见 [`badge_cell`]）
+            badge_cell(row, p),
         )
         .child(
             // 标题：外层定宽裁剪，内层用负 margin 左移 = 左右滚动
@@ -1608,9 +1639,61 @@ fn render_row(
         .into_any_element()
 }
 
+/// 类型列：有应用图标就画图标（顶替 chip），否则画胶囊标签。
+///
+/// 两种都占 `BADGE_WIDTH` 宽，所以 `card_indent()`（卡片第二行缩进）和
+/// `RowMetrics` 里的列宽计算都不用跟着变。
+fn badge_cell(row: &RowSnapshot, p: Palette) -> AnyElement {
+    let slot = div()
+        .w(px(style::BADGE_WIDTH))
+        .h(px(if row.icon.is_some() {
+            style::ICON_SIZE
+        } else {
+            style::BADGE_HEIGHT
+        }))
+        .flex_shrink_0()
+        .flex()
+        .items_center()
+        .justify_center();
+
+    match row.icon.clone() {
+        Some(icon) => slot
+            .child(
+                img(icon)
+                    .w(px(style::ICON_SIZE))
+                    .h(px(style::ICON_SIZE)),
+            )
+            .into_any_element(),
+        // chip：胶囊底；未选中灰底 + 类型色字，选中行反白成类型色底 + 深色字
+        None => slot
+            .rounded(px(style::BADGE_RADIUS))
+            .bg(style::mix(p.panel, row.color, row.chip_progress))
+            .text_size(px(style::BADGE_SIZE))
+            .text_color(style::mix(row.color, p.background, row.chip_progress))
+            .child(row.badge)
+            .into_any_element(),
+    }
+}
+
+/// `command`（`.lnk` / exe / 裸命令）→ 图标。
+///
+/// 统一走 `util::resolve_executable`：它先把 `.lnk` 解到目标 exe，裸命令再按 PATH 搜。
+/// 不直接用 SHELL 对 `.lnk` 取图，是因为那样拿到的是「快捷方式带小箭头」的样子，
+/// 不是应用本来的标志。
+fn appicon_for(command: &str) -> Option<Arc<RenderImage>> {
+    let exe = crate::util::resolve_executable(command).or_else(|| {
+        // 兑底：`command` 万一带着参数（`wt -d C:\...`），只拿首个 token 再试一次
+        command
+            .split_whitespace()
+            .next()
+            .filter(|first| *first != command)
+            .and_then(crate::util::resolve_executable)
+    })?;
+    exe.is_file().then(|| appicon::load(&exe)).flatten()
+}
+
 /// 卡片第二行的缩进（对齐到 chip 右侧）
-fn card_indent() -> f32 {
-    style::ACCENT_BAR + 8.0 * 2.0 + style::STAR_WIDTH + style::BADGE_WIDTH + 8.0
+fn card_indent() -> f32 {    style::ACCENT_BAR + 8.0 * 2.0 + style::STAR_WIDTH + style::BADGE_WIDTH + 8.0
 }
 
 /// 两行卡片（默认形态）：第一行标题 + 右侧尾巴，第二行路径 / 分组（dim 小字）。
@@ -1655,20 +1738,7 @@ fn render_card_row(
                 .text_color(p.warn)
                 .child(if row.favorite { "\u{2605}" } else { "" }),
         )
-        .child(
-            div()
-                .w(px(style::BADGE_WIDTH))
-                .h(px(style::BADGE_HEIGHT))
-                .flex_shrink_0()
-                .flex()
-                .items_center()
-                .justify_center()
-                .rounded(px(style::BADGE_RADIUS))
-                .bg(style::mix(p.panel, row.color, row.chip_progress))
-                .text_size(px(style::BADGE_SIZE))
-                .text_color(style::mix(row.color, p.background, row.chip_progress))
-                .child(row.badge),
-        )
+        .child(badge_cell(row, p))
         .child(
             // 标题：外层定宽裁剪，内层负 margin 左移 = 左右滚动
             div()

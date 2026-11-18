@@ -6493,6 +6493,7 @@ dependencies = [
  "encoding_rs",
  "fuzzy-matcher",
  "gpui",
+ "image",
  "open",
  "ratatui",
  "raw-window-handle",
