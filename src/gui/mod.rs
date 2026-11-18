@@ -56,6 +56,7 @@ pub fn run(cfg: Config, theme: Theme) -> Result<()> {
     // `acrylic::enable` 在我们自己手里补（见 `src/gui/acrylic.rs`）。
     let acrylic_on = cfg.gui.acrylic;
     let always_on_top = cfg.gui.always_on_top;
+    let rounded = cfg.gui.rounded;
     let app = App::new(cfg, theme);
 
     gpui::Application::new().run(move |cx| {
@@ -124,6 +125,7 @@ pub fn run(cfg: Config, theme: Theme) -> Result<()> {
                             animations,
                             always_on_top,
                             acrylic: acrylic_on,
+                            rounded,
                         },
                         max_height,
                         window,
@@ -162,6 +164,8 @@ struct Panel {
     always_on_top: bool,
     /// `[gui] acrylic`
     acrylic_on: bool,
+    /// `[gui] rounded`：外框是否圆角
+    rounded: bool,
     /// 选框滑动的当前 y / 目标 y（像素）
     marker_y: f32,
     marker_target: f32,
@@ -232,6 +236,7 @@ struct Surface {
     animations: bool,
     always_on_top: bool,
     acrylic: bool,
+    rounded: bool,
 }
 
 impl Panel {
@@ -247,6 +252,7 @@ impl Panel {
             animations,
             always_on_top,
             acrylic: acrylic_on,
+            rounded,
         } = surface;
         // 开屏（收藏 + 最近命令）要一次查询，provider 在工作线程里跑
         app.refresh();
@@ -312,6 +318,7 @@ impl Panel {
             animations,
             frame_applied: false,
             always_on_top,
+            rounded,
             acrylic_on,
             marker_y: 0.0,
             marker_target: 0.0,
@@ -1797,7 +1804,7 @@ impl Render for Panel {
         // GPUI 之后还会 show / resize，把 DWM 的 frame 状态（边框、阴影）重置回去。
         if !self.frame_applied {
             self.frame_applied = true;
-            if let Err(error) = frame::apply(window, self.always_on_top) {
+            if let Err(error) = frame::apply(window, self.always_on_top, self.rounded) {
                 crate::tray::log(&format!("[tupa-gui] 窗口外观设置失败：{error:#}"));
             }
             // 必须在 `frame::apply`（里面有 `SWP_FRAMECHANGED`）**之后**：
@@ -1831,7 +1838,7 @@ impl Render for Panel {
             .flex()
             .flex_col()
             .bg(style::with_alpha(p.background, self.opacity))
-            .rounded(px(style::RADIUS))
+            .rounded(px(if self.rounded { style::RADIUS } else { 0.0 }))
             .border(px(style::BORDER))
             .border_color(p.accent)
             .p(px(style::PADDING))

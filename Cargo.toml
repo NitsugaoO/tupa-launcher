@@ -46,3 +46,10 @@ unicode-width = "0.2.2"
 windows = { version = "0.62.2", features = ["Win32_UI_Shell", "Win32_System_Com", "Win32_System_Ole", "Win32_System_Variant", "Win32_Storage_FileSystem", "Win32_System_WinRT", "Win32_System_WinRT_Composition", "Win32_Graphics_Dwm", "Win32_UI_Controls", "UI_Composition", "UI_Composition_Desktop", "Foundation_Numerics", "System"] }
 windows-numerics = "0.3.1"
 windows-sys = { version = "0.61.2", features = ["Win32_UI_Accessibility", "Win32_Graphics_Dwm", "Win32_Graphics_Gdi", "Win32_UI_Controls", "Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Shell", "Win32_System_LibraryLoader", "Win32_System_Threading", "Win32_System_Console", "Win32_System_DataExchange", "Win32_System_Memory", "Win32_System_SystemInformation"] }
+
+# GPUI 0.2.2 拉了一份 vendor 副本，只为一个 patch：`get_client_area_insets` 返回 0
+# （客户区铺满窗口，否则 `WS_THICKFRAME` 那一圈会被 DWM 填成浅灰，开亚克力后
+# 「面板外多一圈」）。0.2.2 官方已停止演进，维护成本可接受。
+# 升级 GPUI 时记得把 patch 重新打一遍，细节见 `docs/06-handover.md` §6。
+[patch.crates-io]
+gpui = { path = "vendor/gpui" }

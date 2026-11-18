@@ -23,7 +23,11 @@ use gpui::Window;
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use windows_sys::Win32::{
     Foundation::HWND,
-    Graphics::Dwm::{DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND, DwmSetWindowAttribute},
+    Graphics::{
+        Dwm::{
+            DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_DONOTROUND, DWMWCP_ROUND, DwmSetWindowAttribute,
+        },
+    },
     UI::WindowsAndMessaging::{
         HWND_TOPMOST, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
         SetWindowPos,
@@ -31,11 +35,12 @@ use windows_sys::Win32::{
 };
 
 /// 窗口创建后调一次：系统圆角（+ 让 DWM 重算一遍 frame）+ 置顶。
-pub fn apply(window: &Window, always_on_top: bool) -> Result<()> {
+pub fn apply(window: &Window, always_on_top: bool, rounded: bool) -> Result<()> {
     let hwnd = hwnd(window)?;
 
-    // Win11 的系统圆角。Win10 没有这个属性，返回失败也照常跑。
-    let round = DWMWCP_ROUND;
+    // Win11 的系统圆角。`rounded = false` 时明确要求直角：亚克力铺满整个窗口矩形，
+    // 圆角只裁内容不裁它，所以只有直角才能让两者边缘重合。
+    let round = if rounded { DWMWCP_ROUND } else { DWMWCP_DONOTROUND };
     let hr = unsafe {
         DwmSetWindowAttribute(
             hwnd,

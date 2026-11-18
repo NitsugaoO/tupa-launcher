@@ -53,6 +53,13 @@ pub struct Gui {
     /// 我们再补一次 `SetWindowCompositionAttribute`（gradient alpha 必须是 1，0 会变黑玻璃）。
     pub acrylic: bool,
 
+    /// 面板外框是否用圆角（默认开）
+    ///
+    /// **关掉它才能让亚克力边缘干净**：DWM 的 `SetWindowCompositionAttribute` 是给
+    /// 整个窗口矩形铺亚克力的，`DWMWA_WINDOW_CORNER_PREFERENCE` 只裁内容不裁它，
+    /// 所以圆角外侧会露出一块方形的亚克力。直角时两者重合，看不出接缝。
+    pub rounded: bool,
+
     /// 面板是否一直置顶（默认开）
     ///
     /// 关掉后窗口会被普通窗口压住 —— GlazeWM 里 `tupa-gui` 是 `ignore`，不会替你抬到前面。
@@ -67,6 +74,7 @@ impl Default for Gui {
             animations: true,
             opacity: 1.0,
             acrylic: false,
+            rounded: true,
             always_on_top: true,
         }
     }
