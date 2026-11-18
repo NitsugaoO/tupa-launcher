@@ -281,10 +281,19 @@ impl Panel {
                     make_overlay_window();
                 }
 
+                // 窗口不激活时不闪（失焦还闪很分散注意力）：光标常亮，也不推帧。
+                let active = cx.update(|window, _| window.is_window_active()).unwrap_or(true);
+
                 match this.update(cx, |panel, cx| {
                     // 光标闪烁：到点就翻一次（移动光标后 `blink_at` 会被推后）
                     let now = std::time::Instant::now();
-                    if now >= panel.blink_at {
+                    if !active {
+                        if !panel.cursor_on {
+                            panel.cursor_on = true;
+                            cx.notify();
+                        }
+                        panel.blink_at = now + Duration::from_millis(500);
+                    } else if now >= panel.blink_at {
                         panel.cursor_on = !panel.cursor_on;
                         panel.blink_at = now + Duration::from_millis(500);
                         cx.notify();
