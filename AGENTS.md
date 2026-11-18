@@ -100,13 +100,20 @@ cargo clippy --release --features gui    # 零警告；必须带 feature，否�
      排查"进程莫名消失"先看这个文件。
   6. **托盘图标**是运行时用 GDI 画的（`gui::icon::draw`，背景色方块 + 草绿 ❯），不依赖
      `.ico` 资源、也没有 `build.rs`；`HICON` 是裸指针，跨线程只能传 `isize`。
-  7. **半透明能用，模糊不行**（2026-11-17 实测过三条路）：
+  7. **半透明能用，模糊不行 —— 除非 fork GPUI**：
      - `Transparent`：纯 alpha，`[gui] opacity` 就是它，效果正常
      - `Blurred`（GPUI 内建的 `ACCENT_ENABLE_ACRYLICBLURBEHIND`）：**会把整窗涂成黑玻璃**
        （四角发黑、底色全黑、看不到模糊）——DComp 合成窗口上 DWM 的 accent 就是这个表现
      - Windhawk 的 translucent-windows（`@include *` 确实注入进来了）同样无效
-     真模糊要往 GPUI 的 DComp 树里插 `IDCompositionBackdropBrush`（社区 issue
-     nowledge-co/con-terminal#55 的结论），属于上游改动；或者自己在应用里「截图 + 模糊」。
+     - **2026-11-18 探针（`examples/acrylic_probe.rs`，跟着 `docs/06-handover.md` §6「窗口模糊」走）**：
+       WinRT `Compositor` + `CreateDesktopWindowTarget` + `CreateBackdropBrush` 在
+       `WS_EX_NOREDIRECTIONBITMAP` 窗口上**能拿到真实的背后桌面内容**（其它窗口也采得到），
+       但**不带任何模糊**；`CreateHostBackdropBrush`（+ `DWMWA_USE_HOSTBACKDROPBRUSH`）
+       在 Win32 窗口上**全黑**，别再试。
+     真模糊只剩两条：fork GPUI、把 DComp 树换成 WinRT 那套并自己实现 Win2D 兼容的
+     `GaussianBlurEffect`（步骤在 `docs/06-handover.md` §6），或者应用层「截一帧 + 模糊」
+     （背后有视频就露馅）。**一个 HWND 只能有一个 DComp target**，fork 只能整体替换，
+     不能「保留 Win32 target 再插一层」。
   8. **动画一律 vsync 驱动，别用定时器 notify**（2026-11-17）：定时器（8ms / 16ms）和屏幕
      刷新是两个独立节拍，互相挤 → 用户感受就是"卡卡的"。做法是在 `render` 末尾按需
      `window.on_next_frame(...)`，回调里 `animate()` + `cx.notify()`，链条自然停在动画结束那帧。
