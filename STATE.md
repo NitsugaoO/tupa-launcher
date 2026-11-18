@@ -13,19 +13,21 @@ updated: 2026-11-18 · code: `7449762`（亚克力 + 圆角 + 失焦光标 · �
 
 ## 阶段
 
-- **图标 73/75 + 自定义 icon + 节能回退（2026-11-18 深夜）**：
+- **图标 73/74 + 自定义 icon + 节能回退（2026-11-18 深夜）**：
   - `[[apps]] icon = "..."`（png/jpg/ico）→ `appicon::load_image`，给自动解析
     推不出图的条目用（本机 pi 跑在 wt.exe 里，用 SVG 转出的三色方块 `icons/pi.png`）
   - 开始菜单索引收 `.url`（Steam 只给游戏生成 `.url`，`IconFile=` 就是游戏 ico）
-    → Big Walk / How to Fish 也能出图
+    → Big Walk 这类只有 `.url` 的游戏也出图；`How to Fish` 在 Steam 商店 CDN 上
+    也是 404（没上架 / 没宣传图），只能等它上架
   - 节能模式 / 关闭透明效果 → `opaque_fallback` 改画不透明底色（1.5s 轮询）。
     判据：`EnableTransparency` + `SystemStatusFlag`（节电）+ **`EnergySaverState == 1`**
     （和 `:set` 的「节能模式」同一个来源）。**别用电源计划判断** —— 本机活动计划
     恒为节能计划 `a1841308-…`，跟那个开关不是一回事，会把亚克力永久判死。
     可用性变化后 `acrylic_refresh` 会重新下发 accent policy（否则切回来仍是黑底）
-  - `--icons` 也会报自定义图标；剩 `GenP`（配置指向的 exe 已不存在）和
-    `How to Fish`（本地无封面，运行时走 CDN）
-- **图标覆盖率 72/75（2026-11-18 晚）**：`tupa-launcher.exe --icons` 能逐条报出
+  - `--icons` 也会报自定义图标；`GenP` 条目已从配置删掉（指向的 exe 不存在），
+    现在 74 条里只剩 `How to Fish` 没图
+- **图标覆盖率 72/75（2026-11-18 晚）** ← 已被上文「图标 73/74」取代（2026-11-18）：
+  `tupa-launcher.exe --icons` 能逐条报出
   每个 app 的图标来源。本轮修好的：MSIX（wt / pwsh / CeleClip → symlink 跟到包内
   真 exe → `shell:AppsFolder\<PFN>!App`）、Scoop shim（`shims\x.exe` → `apps\x\<ver>`）、
   UWP（`ms-windows-store:` / `ms-settings:` → AUMID）、Steam 封面语言变体
