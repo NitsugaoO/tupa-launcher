@@ -67,6 +67,25 @@ pub fn load(path: &Path) -> Option<Arc<RenderImage>> {    ensure_com();
     }
 }
 
+/// 从图片文件（png / jpg / ico）直接解码，**不走 SHELL**。
+///
+/// 配置里的 `icon = "..."` 用这个：`SIIGBF_ICONONLY` 对图片文件返回的是
+/// 「图片文件」的通用图标（白纸），不是图本身；这里用 `image` 解出原图，
+/// 由界面的 `img()` 自己缩放到 20 逻辑像素。
+pub fn load_image(path: &Path) -> Option<Arc<RenderImage>> {
+    let rgba = image::open(path).ok()?.into_rgba8();
+    let (width, height) = rgba.dimensions();
+    if width == 0 || height == 0 {
+        return None;
+    }
+    let mut data = rgba.into_raw();
+    for pixel in data.as_chunks_mut::<4>().0 {
+        pixel.swap(0, 2); // RGBA → BGRA（和 load 一致，不预乘）
+    }
+    let buffer = RgbaImage::from_raw(width, height, data)?;
+    Some(Arc::new(RenderImage::new([Frame::new(buffer)])))
+}
+
 /// `command` → 真正带应用图标的 `.exe`。
 ///
 /// 三层兑底（命中就停）：
@@ -265,6 +284,13 @@ fn start_menu_exe(name: &str) -> Option<PathBuf> {
                 })
                 .map(|(_, path)| path)
         })?;
+    // `.url` 没有可解析的目标（它是 INI + IconFile），直接拿它本身去取图标
+    if lnk
+        .extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("url"))
+    {
+        return Some(lnk.to_path_buf());
+    }
     let target = crate::util::resolve_shortcut(lnk);
     target.is_file().then_some(target)
 }
@@ -347,10 +373,11 @@ fn collect_shortcuts(dir: &Path, map: &mut HashMap<String, PathBuf>, depth: usiz
         let path = entry.path();
         if path.is_dir() {
             collect_shortcuts(&path, map, depth + 1);
-        } else if path
-            .extension()
-            .is_some_and(|ext| ext.eq_ignore_ascii_case("lnk"))
-            && let Some(stem) = path
+        } else if path.extension().is_some_and(|ext| {
+            // `.lnk` 是普通快捷方式；`.url` 是 Steam 给每个游戏生成的 Internet
+            // Shortcut（`IconFile=` 指向 Steam 缓存的游戏 ico），同样能取图
+            ext.eq_ignore_ascii_case("lnk") || ext.eq_ignore_ascii_case("url")
+        }) && let Some(stem) = path
                 .file_stem()
                 .map(|stem| stem.to_string_lossy().to_lowercase())
         {

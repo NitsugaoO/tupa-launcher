@@ -803,6 +803,7 @@ mod tests {
             command: command.to_string(),
             args: Vec::new(),
             keywords: Vec::new(),
+            icon: None,
         }
     }
 

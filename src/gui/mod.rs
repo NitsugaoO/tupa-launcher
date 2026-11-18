@@ -26,6 +26,7 @@ mod keys;
 mod style;
 
 use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -65,6 +66,15 @@ pub fn run(cfg: Config, theme: Theme) -> Result<()> {
     let rounded = cfg.gui.rounded;
     // 默认 `favicon`：抓站点图标，拉不到回落成地球。`globe` 就完全不联网
     let web_favicon = !cfg.gui.web_icons.eq_ignore_ascii_case("globe");
+    // `[[apps]] icon = "..."`：自动解析推不出来的条目（比如跑在 wt.exe 里的 pi）
+    let custom_icons: HashMap<String, PathBuf> = cfg
+        .apps
+        .iter()
+        .filter_map(|entry| {
+            let icon = entry.icon.as_ref()?;
+            Some((entry.command.clone(), PathBuf::from(icon)))
+        })
+        .collect();
     let app = App::new(cfg, theme);
 
     gpui::Application::new().run(move |cx| {
@@ -136,6 +146,7 @@ pub fn run(cfg: Config, theme: Theme) -> Result<()> {
                             rounded,
                             web_favicon,
                         },
+                        custom_icons,
                         max_height,
                         window,
                         cx,
@@ -249,6 +260,10 @@ struct Panel {
     logged_input: String,
     /// 状态栏临时提示的文本 + 首次看到它的时间（超过 `STATUS_HOLD` 就清掉）
     status_seen: Option<(String, std::time::Instant)>,
+    /// `[[apps]] icon = "..."` 指定的自定义图标（key = command）
+    custom_icons: HashMap<String, PathBuf>,
+    /// 系统暂时不能做亚克力（节能模式 / 关了透明效果）时自己铺不透明底色
+    opaque_fallback: bool,
     /// 正在后台从 Steam CDN 拉封面的命令（避免重复发请求）
     steam_pending: HashSet<String>,
     steam_tx: std::sync::mpsc::Sender<(String, Option<Arc<RenderImage>>)>,
@@ -271,6 +286,7 @@ impl Panel {
     fn new(
         mut app: App,
         surface: Surface,
+        custom_icons: HashMap<String, PathBuf>,
         max_height: f32,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -333,6 +349,18 @@ impl Panel {
                     }
 
                     panel.app.tick += 1;
+
+                    // 节能模式 / 关掉「透明效果」时 DWM 会把亚克力降级成不透明白底，
+                    // 这时改由自己铺不透明底色（1.5 秒查一次，代价可忽略）
+                    if panel.app.tick % 20 == 0 {
+                        let opaque = !acrylic::transparency_available();
+                        if opaque != panel.opaque_fallback {
+                            panel.opaque_fallback = opaque;
+                            panel.palette = Palette::new(&panel.app.theme)
+                                .with_opacity(if opaque { 1.0 } else { panel.opacity });
+                            cx.notify();
+                        }
+                    }
 
                     // 临时提示（「单行密度模式」「已复制」这类）只停 `STATUS_HOLD` 秒，
                     // 之后自动回落成 provider 描述 —— 否则要等下一次输入才会变。
@@ -449,6 +477,8 @@ impl Panel {
             logged_rows: usize::MAX,
             logged_input: String::new(),
             status_seen: None,
+            custom_icons,
+            opaque_fallback: !acrylic::transparency_available(),
             steam_pending: HashSet::new(),
             steam_tx,
             steam_rx,
@@ -1137,7 +1167,11 @@ impl Panel {
                     if self.icons.contains_key(&command) {
                         continue;
                     }
-                    let icon = launch_icon(&command, &title);
+                    let icon = self
+                        .custom_icons
+                        .get(&command)
+                        .and_then(|path| appicon::load_image(path))
+                        .or_else(|| launch_icon(&command, &title));
                     // 本地封面也没有（未安装的游戏）→ 后台去 CDN 拉，回来再补上
                     let need_remote = icon.is_none()
                         && steamicon::appid(&command).is_some()
@@ -1963,7 +1997,16 @@ pub fn icon_report(apps: &[crate::config::AppEntry]) -> Vec<(String, String)> {
     apps.iter()
         .map(|app| {
             let command = app.command.as_str();
-            let detail = if let Some(item) = appicon::shell_item_for(command) {
+            let detail = if let Some(icon) = app.icon.as_deref() {
+                let path = std::path::Path::new(icon);
+                if !path.is_file() {
+                    format!("✗ 自定义图标不存在 {icon}")
+                } else if appicon::load_image(path).is_some() {
+                    format!("✓ 自定义 {icon}")
+                } else {
+                    format!("✗ 自定义图标解码失败 {icon}")
+                }
+            } else if let Some(item) = appicon::shell_item_for(command) {
                 match appicon::load(std::path::Path::new(&item)) {
                     Some(_) => format!("✓ UWP {item}"),
                     None => format!("✗ UWP 取图失败 {item}"),
@@ -2280,7 +2323,12 @@ impl Render for Panel {
             .size_full()
             .flex()
             .flex_col()
-            .bg(style::with_alpha(p.background, self.opacity))
+            .bg(if self.opaque_fallback {
+                // 亚克力被系统关掉时，窗口底是白的 —— 再半透明就什么都看不清了
+                p.background
+            } else {
+                style::with_alpha(p.background, self.opacity)
+            })
             // `rounded` 时圆角交给 DWM（窗口级），内容自己不再画一圈：
             // 内容在客户区里（比窗口小一圈 insets），再画 12px 圆角会在
             // DWM 圆角与内容圆角之间露出一条弧形亚克力缝。

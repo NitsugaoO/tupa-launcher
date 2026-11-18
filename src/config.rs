@@ -239,6 +239,12 @@ pub struct AppEntry {
     /// 额外别名（参与模糊匹配）
     #[serde(default)]
     pub keywords: Vec<String>,
+    /// 自定义图标（png / jpg / ico 的路径）。
+    ///
+    /// SHELL / MSIX / Steam 都推不出图标的条目（比如跑在 `wt.exe` 里的 pi）
+    /// 用这个直接指定；`None` 就走自动解析。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
 }
 
 impl AppEntry {

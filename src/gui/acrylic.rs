@@ -50,6 +50,47 @@ pub fn enable(window: &Window) -> Result<()> {
     accent(window, true)
 }
 
+/// 系统当前能不能真的给窗口做亚克力。
+///
+/// 两种情况下 DWM 会**静默降级成不透明的浅色底**（`enable` 照样返回成功）：
+/// - 设置 → 个性化 → 颜色 → 关掉「透明效果」
+/// - 节能模式（电池保养）开启时，系统强制关透明
+///
+/// 降级后如果面板还按半透明画，浅色文字就直接糊在白色上（2026-11-18 用户截图）。
+/// 所以每秒钟轮询一次，不可用时自己铺不透明底色。
+pub fn transparency_available() -> bool {
+    transparency_setting() && !battery_saver()
+}
+
+/// `HKCU\...\Themes\Personalize\EnableTransparency`（读不到就当开着）
+fn transparency_setting() -> bool {
+    use windows::Win32::System::Registry::{HKEY_CURRENT_USER, RRF_RT_REG_DWORD, RegGetValueW};
+    use windows::core::w;
+
+    let mut value: u32 = 1;
+    let mut size = std::mem::size_of::<u32>() as u32;
+    let status = unsafe {
+        RegGetValueW(
+            HKEY_CURRENT_USER,
+            w!(r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"),
+            w!("EnableTransparency"),
+            RRF_RT_REG_DWORD,
+            None,
+            Some(&mut value as *mut _ as *mut _),
+            Some(&mut size),
+        )
+    };
+    status.is_err() || value != 0
+}
+
+/// 节能模式是否开启（`SYSTEM_POWER_STATUS::SystemStatusFlag == 1`）
+fn battery_saver() -> bool {
+    use windows::Win32::System::Power::{GetSystemPowerStatus, SYSTEM_POWER_STATUS};
+
+    let mut status = SYSTEM_POWER_STATUS::default();
+    unsafe { GetSystemPowerStatus(&mut status) }.is_ok() && status.SystemStatusFlag == 1
+}
+
 fn accent(window: &Window, acrylic: bool) -> Result<()> {
     let hwnd = native_handle(window)?;
     type SetAccent = unsafe extern "system" fn(HWND, *mut CompositionData) -> BOOL;
