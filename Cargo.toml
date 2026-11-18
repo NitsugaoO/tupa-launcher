@@ -33,6 +33,8 @@ fuzzy-matcher = "0.3.7"
 # 2026-11 官方已宣布不再为独立应用加功能，跟 Zed 自身需求走）。
 gpui = { version = "=0.2.2", optional = true }
 open = { version = "5.4.4", features = ["shellexecute-on-windows"] }
+# 与 gpui 用的版本一致：`gui::acrylic` 靠它拿 HWND
+raw-window-handle = "0.6.2"
 ratatui = "0.30.2"
 rusqlite = { version = "0.40.2", features = ["bundled"] }
 serde = { version = "1.0.229", features = ["derive"] }

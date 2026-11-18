@@ -15,6 +15,7 @@
 //!   **进程名 + 窗口标题**认人
 
 pub mod icon;
+mod acrylic;
 mod input;
 mod keys;
 mod style;
@@ -50,6 +51,9 @@ pub fn run(cfg: Config, theme: Theme) -> Result<()> {
 
     let opacity = cfg.gui.opacity.clamp(0.3, 1.0);
     let animations = cfg.gui.animations;
+    // 亚克力：GPUI 只负责把窗口设成 `Blurred`，alpha = 1 的修正由
+    // `acrylic::enable` 在我们自己手里补（见 `src/gui/acrylic.rs`）。
+    let acrylic_on = cfg.gui.acrylic;
     let app = App::new(cfg, theme);
 
     gpui::Application::new().run(move |cx| {
@@ -96,11 +100,13 @@ pub fn run(cfg: Config, theme: Theme) -> Result<()> {
                 is_resizable: true,
                 is_minimizable: true,
                 focus: true,
-                // 只用 Transparent（纯 alpha）。`Blurred` 走的是
-                // `SetWindowCompositionAttribute(ACCENT_ENABLE_ACRYLICBLURBEHIND)`，
-                // 但 GPUI 的窗口是 DirectComposition 合成，DWM 的 accent 会把整个窗口
-                // 涂成黑玻璃（实测四角发黑、底色全黑），看不到模糊。
-                window_background: if opacity < 1.0 {
+                // 只用 Transparent（纯 alpha）/ Blurred（亚克力）。`Blurred` 走的是
+                // `SetWindowCompositionAttribute(ACCENT_ENABLE_ACRYLICBLURBEHIND)`，DWM 画的
+                // 是真模糊；但 GPUI 0.2.2 传的 gradient alpha = 0，会变成黑玻璃，
+                // 所以开亚克力时再补一次 `acrylic::enable`（alpha = 1）。
+                window_background: if acrylic_on {
+                    WindowBackgroundAppearance::Blurred
+                } else if opacity < 1.0 {
                     WindowBackgroundAppearance::Transparent
                 } else {
                     WindowBackgroundAppearance::Opaque
@@ -108,6 +114,11 @@ pub fn run(cfg: Config, theme: Theme) -> Result<()> {
                 ..Default::default()
             },
             move |window, cx| {
+                if acrylic_on
+                    && let Err(error) = acrylic::enable(window)
+                {
+                    crate::tray::log(&format!("[tupa-gui] 亚克力没挂上：{error:#}"));
+                }
                 cx.new(|cx| Panel::new(app, opacity, animations, max_height, window, cx))
             },
         );

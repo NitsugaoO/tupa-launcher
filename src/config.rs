@@ -38,11 +38,20 @@ pub struct Gui {
     /// 关掉后所有位移都是瞬时跳变（省电 / 不想要动效时用）。
     pub animations: bool,
 
-    /// 面板背景不透明度（1.0 = 完全不透明；0.9 能透出后面的壁纸/窗口，但不模糊）
+    /// 面板背景不透明度（1.0 = 完全不透明；0.8 能透出后面的壁纸/窗口）
     ///
-    /// 真正的亚克力模糊做不到：GPUI 用 `WS_EX_NOREDIRECTIONBITMAP` + DirectComposition
-    /// 自绘，DWM 不给这种窗口合成背景，Windhawk 的 translucent-windows 也注入不进去。
+    /// 开了 [`Gui::acrylic`] 之后，它就是「亚克力上的 tint 浓度」：越小越能看清背后的模糊。
     pub opacity: f32,
+
+    /// 是否给面板挂 Windows 的亚克力材质（DWM 的 Acrylic：背景实时模糊）
+    ///
+    /// **系统可能自己关掉它**：节能模式（`GetSystemPowerStatus` 的 `SystemStatusFlag`）、
+    /// 「设置 → 个性化 → 颜色 → 透明效果」关闭时，Acrylic/Mica 会被 DWM 降级成不透明纯色
+    /// —— 这不是 bug，排查「开了没效果」先看这两处。
+    ///
+    /// 实现见 `src/gui/acrylic.rs`：GPUI 只负责把窗口设成 `Blurred`，真正生效靠
+    /// 我们再补一次 `SetWindowCompositionAttribute`（gradient alpha 必须是 1，0 会变黑玻璃）。
+    pub acrylic: bool,
 }
 
 impl Default for Gui {
@@ -52,6 +61,7 @@ impl Default for Gui {
             tray: true,
             animations: true,
             opacity: 1.0,
+            acrylic: false,
         }
     }
 }

@@ -38,9 +38,12 @@ hotkey = "alt+0"
 # 是否显示托盘图标（左键显示/隐藏，右键菜单：显示面板 / 退出）
 tray = true
 # 面板背景不透明度：1.0 = 完全不透明，0.88 能透出后面的壁纸/窗口
-# （没有模糊——GPUI 的窗口是 DirectComposition 自绘，DWM 不给它合成背景，
-#  Windhawk 的 translucent-windows 也注入不进去）
+# 开了 acrylic 之后它就是「亚克力上的 tint 浓度」，0.7~0.85 比较好看
 opacity = 1.0
+# 是否给面板挂 Windows 亚克力材质（背景实时模糊）。
+# 注意：节能模式开着、或系统「透明效果」关闭时，DWM 会把 Acrylic 降级成纯色
+# （不是本程序的问题），排查「开了没效果」先看那两处。
+acrylic = false
 
 [blog]
 # 博客仓库根目录（package.json 和 source/_posts 在这里）；留空 = ~/blog
