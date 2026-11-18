@@ -1,6 +1,6 @@
 # tupa-launcher 状态
 
-updated: 2026-11-18 · code: `7449762`（亚克力 + 圆角 + 失焦光标 · 两行卡片 · 窗口高 0.68 + 提前两行滚动 · 应用图标 + mini chip + 文件/网页/Steam 图标 + 全类型图标 + 历史死链回填）
+updated: 2026-11-18 · code: `f67ed8a`（@pi 标题改读 pi-sessions 索引 · 亚克力 + 圆角 + 失焦光标 · 两行卡片 · 窗口高 0.68 + 提前两行滚动 · 应用图标 + mini chip + 文件/网页/Steam 图标 + 全类型图标 + 历史死链回填）
 
 > 判断本文件是否过期：比较 `code` 与 `git log -1 --format=%h -- src Cargo.toml`。
 > 只改文档的提交不算过期。
@@ -13,6 +13,19 @@ updated: 2026-11-18 · code: `7449762`（亚克力 + 圆角 + 失焦光标 · �
 
 ## 阶段
 
+- **`@pi` 显示会话名（2026-11-18 深夜）**：标题不再取「第一条用户消息」。pi 的自动标题
+  （auto-title，每 4 轮重评）写在 jsonl 的 `{"type":"session_info","name":…}` 里，
+  **位置不固定**（改标题就追加一条；本机 448 个会话里最后一条距末尾中位 8KB、p90 648KB、
+  最大 33MB），读前 N 行 / 倒读都拿不全，全文件扫一次又是 652MB。
+  权威源是 pi-sessions 的 `~/.pi/agent/pi-sessions/index.sqlite` 的 `sessions.session_name`
+  （`src/providers/pi_index.rs`，只读打开）：每个 `turn_end` 由 hook 同步，pi 启动还会跟
+  jsonl 对账 → **标题改了下一轮就生效，不需要自己缓存**。目录读 `settings.json` 的
+  `sessions.index.dir`，任何失败（没装 / 重建中 / schema 升级 / 忙）都退化成空表。
+  优先级：索引名 > jsonl 头 80 行的 `session_info` > `session-keywords.json` 的 summary >
+  首条消息 > 文件名。**归档目录不在索引里**（本机 235 条索引 0 条归档）→
+  `:pi:all` / `:pi:clean:restore` 走 jsonl 回退（老会话没 `session_info`，退化是正常的）。
+  `rusqlite` 本来就在依赖里（`web.rs` 读 Edge History），零新增。
+  实测：`--query "@pi"` 234 条全是会话名、热跑 597–599ms（改前 650ms）；GUI 截图确认。
 - **图标 73/74 + 自定义 icon + 节能回退（2026-11-18 深夜）**：
   - `[[apps]] icon = "..."`（png/jpg/ico）→ `appicon::load_image`，给自动解析
     推不出图的条目用（本机 pi 跑在 wt.exe 里，用 SVG 转出的三色方块 `icons/pi.png`）
