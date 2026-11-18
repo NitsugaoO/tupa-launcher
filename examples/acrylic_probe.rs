@@ -18,7 +18,11 @@ use std::time::{Duration, Instant};
 use windows::core::Interface;
 use windows_numerics::Vector2;
 use windows::Win32::Foundation::HWND as W_HWND;
-use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_USE_HOSTBACKDROPBRUSH};
+use windows::Win32::Graphics::Dwm::{
+    DWMWA_SYSTEMBACKDROP_TYPE, DWMWA_USE_HOSTBACKDROPBRUSH, DwmExtendFrameIntoClientArea,
+    DwmSetWindowAttribute,
+};
+use windows::Win32::UI::Controls::MARGINS;
 use windows::Win32::System::Com::{CoInitializeEx, COINIT_APARTMENTTHREADED};
 use windows::Win32::System::WinRT::Composition::ICompositorDesktopInterop;
 use windows::Win32::System::WinRT::{
@@ -36,6 +40,10 @@ const HEIGHT: i32 = 320;
 fn main() -> windows::core::Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let host = args.iter().any(|a| a == "host");
+    // Win11 22H2+ 的系统材质（DWMWA_SYSTEMBACKDROP_TYPE）
+    let system_backdrop = args
+        .iter()
+        .find_map(|a| a.strip_prefix("sb").and_then(|n| n.parse::<u32>().ok()));
     let tint = args
         .iter()
         .find_map(|a| a.parse::<u8>().ok())
@@ -48,8 +56,12 @@ fn main() -> windows::core::Result<()> {
 
         let hwnd = create_window(host)?;
         println!(
-            "[probe] hwnd={hwnd:?} brush={} tint={tint}%",
-            if host { "host" } else { "backdrop" }
+            "[probe] hwnd={hwnd:?} mode={} tint={tint}%",
+            match system_backdrop {
+                Some(kind) => format!("systembackdrop={kind}"),
+                None if host => "host".to_string(),
+                None => "backdrop".to_string(),
+            }
         );
 
         let options = DispatcherQueueOptions {
@@ -74,12 +86,32 @@ fn main() -> windows::core::Result<()> {
             println!("[probe] DWMWA_USE_HOSTBACKDROPBRUSH -> {hr:?}");
         }
 
-        let backdrop = if host {
-            compositor.CreateHostBackdropBrush()?
+        if let Some(kind) = system_backdrop {
+            let margins = MARGINS {
+                cxLeftWidth: -1,
+                cxRightWidth: -1,
+                cyTopHeight: -1,
+                cyBottomHeight: -1,
+            };
+            let hr = DwmExtendFrameIntoClientArea(W_HWND(hwnd), &margins);
+            println!("[probe] DwmExtendFrameIntoClientArea -> {hr:?}");
+            let hr = DwmSetWindowAttribute(
+                W_HWND(hwnd),
+                DWMWA_SYSTEMBACKDROP_TYPE,
+                &kind as *const _ as *const core::ffi::c_void,
+                std::mem::size_of::<u32>() as u32,
+            );
+            println!("[probe] DWMWA_SYSTEMBACKDROP_TYPE = {kind} -> {hr:?}");
+        }
+
+        let backdrop: Option<CompositionBrush> = if system_backdrop.is_some() {
+            None
+        } else if host {
+            Some(compositor.CreateHostBackdropBrush()?.cast()?)
         } else {
-            compositor.CreateBackdropBrush()?
+            Some(compositor.CreateBackdropBrush()?.cast()?)
         };
-        let backdrop_base: CompositionBrush = backdrop.cast()?;
+        let backdrop_base = backdrop;
 
         let root = compositor.CreateContainerVisual()?;
         let size = Vector2 {
@@ -88,10 +120,12 @@ fn main() -> windows::core::Result<()> {
         };
 
         // 底层：backdrop（窗口后面的桌面），它糊不糊就是本次结论
-        let blur = compositor.CreateSpriteVisual()?;
-        blur.SetSize(size)?;
-        blur.SetBrush(&backdrop_base)?;
-        root.Children()?.InsertAtTop(&blur.cast::<Visual>()?)?;
+        if let Some(backdrop_base) = &backdrop_base {
+            let blur = compositor.CreateSpriteVisual()?;
+            blur.SetSize(size)?;
+            blur.SetBrush(backdrop_base)?;
+            root.Children()?.InsertAtTop(&blur.cast::<Visual>()?)?;
+        }
 
         // 上层：tint，模拟面板底色，同时验证叠层顺序
         let tint_visual = compositor.CreateSpriteVisual()?;
