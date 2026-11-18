@@ -54,6 +54,12 @@ cargo clippy --release --features gui    # 零警告；必须带 feature，否�
 只改 lib / TUI 侧（`providers` / `exec` / `ui`）时 `cargo build --release` 就够；
 `tupa-launcher.exe` 手动 `cargo run --release` 跑（守护进程 + TUI 已停用，见下面硬约定）。
 
+**无人值守看面板：别模拟热键，直接 ShowWindow**（2026-11-18 踩过）：`keybd_event` 造的
+`Alt+\`` 不会触发 `RegisterHotKey`（面板根本不出现，`SendKeys` 的字符还会漏进前台终端）。
+正确做法：`EnumWindows` 按 PID 找那个**类名首字符是 `Z`、宽度 > 200** 的顶层窗口
+（GPUI 的窗口类名跨进程只读回首字符），`ShowWindow(h, SW_SHOW)` + `SetForegroundWindow`
+之后再用截图脚本：`pwsh -NoProfile -File "...\screenshot.ps1" -Mode window -Target tupa-gui`。
+
 ## 硬约定
 
 - **不要在这个仓库跑 `cargo fmt`**（2026-11-18 实测）：代码是手写排版（不少行超过 100 列也不折），`cargo fmt` 会一口气重排 20+ 个文件，diff 直接淹没本次改动。要格式化只手动整自己碰过的那几行。
