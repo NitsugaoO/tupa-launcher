@@ -1,6 +1,6 @@
 # tupa-launcher 状态
 
-updated: 2026-11-18 · code: `a8034c4`（亚克力 + 圆角 + 失焦光标 · 两行卡片 · 窗口高 0.68 + 提前两行滚动 · 应用图标 + mini chip + 文件/网页/Steam 图标 + 全类型图标 + 历史死链回填）
+updated: 2026-11-18 · code: `7449762`（亚克力 + 圆角 + 失焦光标 · 两行卡片 · 窗口高 0.68 + 提前两行滚动 · 应用图标 + mini chip + 文件/网页/Steam 图标 + 全类型图标 + 历史死链回填）
 
 > 判断本文件是否过期：比较 `code` 与 `git log -1 --format=%h -- src Cargo.toml`。
 > 只改文档的提交不算过期。
@@ -19,9 +19,10 @@ updated: 2026-11-18 · code: `a8034c4`（亚克力 + 圆角 + 失焦光标 · �
   - 开始菜单索引收 `.url`（Steam 只给游戏生成 `.url`，`IconFile=` 就是游戏 ico）
     → Big Walk / How to Fish 也能出图
   - 节能模式 / 关闭透明效果 → `opaque_fallback` 改画不透明底色（1.5s 轮询）。
-    判据三条：`EnableTransparency`、`SystemStatusFlag`（节电模式）、
-    **`ActivePowerScheme == a1841308-…`（节能电源计划）** —— 最后这条是最容易漏的：
-    节能计划下前两个都正常，但 DWM 已经不画亚克力了
+    判据：`EnableTransparency` + `SystemStatusFlag`（节电）+ **`EnergySaverState == 1`**
+    （和 `:set` 的「节能模式」同一个来源）。**别用电源计划判断** —— 本机活动计划
+    恒为节能计划 `a1841308-…`，跟那个开关不是一回事，会把亚克力永久判死。
+    可用性变化后 `acrylic_refresh` 会重新下发 accent policy（否则切回来仍是黑底）
   - `--icons` 也会报自定义图标；剩 `GenP`（配置指向的 exe 已不存在）和
     `How to Fish`（本地无封面，运行时走 CDN）
 - **图标覆盖率 72/75（2026-11-18 晚）**：`tupa-launcher.exe --icons` 能逐条报出
