@@ -128,7 +128,14 @@ pub fn load(command: &str) -> Option<Arc<RenderImage>> {
 }
 
 fn render(path: &Path) -> Option<Arc<RenderImage>> {
-    let image = image::open(path).ok()?;
+    render_image(image::open(path).ok()?)
+}
+
+fn render_bytes(bytes: &[u8]) -> Option<Arc<RenderImage>> {
+    render_image(image::load_from_memory(bytes).ok()?)
+}
+
+fn render_image(image: image::DynamicImage) -> Option<Arc<RenderImage>> {
     let (width, height) = (image.width(), image.height());
     if width == 0 || height == 0 {
         return None;
@@ -138,11 +145,13 @@ fn render(path: &Path) -> Option<Arc<RenderImage>> {
     let side = width.min(height);
     let left = (width - side) / 2;
     let top = (height - side) / 2;
-    let square = image.crop_imm(left, top, side, side).resize_exact(
-        ICON_PX as u32,
-        ICON_PX as u32,
-        image::imageops::FilterType::Triangle,
-    );
+    let square = image
+        .crop_imm(left, top, side, side)
+        .resize_exact(
+            ICON_PX as u32,
+            ICON_PX as u32,
+            image::imageops::FilterType::Triangle,
+        );
 
     let mut data = square.to_rgba8().into_raw();
     for pixel in data.as_chunks_mut::<4>().0 {
@@ -150,6 +159,34 @@ fn render(path: &Path) -> Option<Arc<RenderImage>> {
     }
     let buffer = RgbaImage::from_raw(ICON_PX as u32, ICON_PX as u32, data)?;
     Some(Arc::new(RenderImage::new([Frame::new(buffer)])))
+}
+
+/// 本地没有封面时去 Steam CDN 拉 `header.jpg`。
+///
+/// **阻塞**，只能在后台线程里调（和 [`super::favicon`] 一样）。缓存到
+/// `~/.config/tupa-launcher/icons/steam/<appid>.bin`，空文件表示 404、不再重试。
+/// 未安装、也从没在 Steam 里看过的游戏本地没有封面，只能走这条路。
+pub fn fetch(command: &str) -> Option<Arc<RenderImage>> {
+    let appid = appid(command)?;
+    let cache = cache_path(appid)?;
+    if let Ok(bytes) = std::fs::read(&cache) {
+        return if bytes.is_empty() {
+            None
+        } else {
+            render_bytes(&bytes)
+        };
+    }
+
+    let path = format!("/steam/apps/{appid}/header.jpg");
+    let bytes = super::favicon::https_get("cdn.akamai.steamstatic.com", &path);
+    let _ = std::fs::write(&cache, bytes.as_deref().unwrap_or_default());
+    bytes.as_deref().and_then(render_bytes)
+}
+
+fn cache_path(appid: u32) -> Option<PathBuf> {
+    let dir = crate::config::config_dir()?.join("icons").join("steam");
+    let _ = std::fs::create_dir_all(&dir);
+    Some(dir.join(format!("{appid}.bin")))
 }
 
 #[cfg(test)]
@@ -162,6 +199,14 @@ mod tests {
         // Steam 自己生成过带尾部斜杠的写法
         assert_eq!(appid("steam://rungameid/413150//"), Some(413150));
         assert_eq!(appid("steam://rungameid/504230/?foo=1"), Some(504230));
+    }
+
+    /// 联网：本地没有封面的游戏（Big Walk / How to Fish）走 CDN
+    #[test]
+    #[ignore = "需要联网"]
+    fn cdn_supplies_cover_when_local_cache_is_missing() {
+        let icon = super::fetch("steam://rungameid/1478500");
+        assert!(icon.is_some(), "CDN 上应该有 header.jpg");
     }
 
     #[test]

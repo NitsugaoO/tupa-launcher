@@ -218,9 +218,13 @@ impl Palette {
     /// alpha 直接取 `opacity`：面板 60% 透，选框也 60% 透，两层叠起来的实际不透明度
     /// 约 `1-(1-0.6)² ≈ 0.84`，文字仍然吃得住。
     pub fn with_opacity(mut self, opacity: f32) -> Self {
-        let alpha = opacity.clamp(0.0, 1.0);
-        self.row_hover = with_alpha(self.panel, alpha);
-        self.row_selected = with_alpha(self.overlay, alpha);
+        // 选框：淡填充。叠色只能增加不透明度 —— 填充 alpha 取 0.6 时合成到 0.84，
+        // 底下的亚克力只剩 16%，看起来就是「完全不透」。0.2 时合成约 0.68，
+        // 和周围 0.6 的差异交给左侧绿条去表达。
+        self.row_selected = with_alpha(self.overlay, 0.2);
+        // hover 比选框再淡一档，跟随面板不透明度
+        let hover = (opacity.clamp(0.0, 1.0) * 0.35).clamp(0.1, 0.3);
+        self.row_hover = with_alpha(self.panel, hover);
         self
     }
 }

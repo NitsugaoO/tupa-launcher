@@ -249,6 +249,10 @@ struct Panel {
     logged_input: String,
     /// 状态栏临时提示的文本 + 首次看到它的时间（超过 `STATUS_HOLD` 就清掉）
     status_seen: Option<(String, std::time::Instant)>,
+    /// 正在后台从 Steam CDN 拉封面的命令（避免重复发请求）
+    steam_pending: HashSet<String>,
+    steam_tx: std::sync::mpsc::Sender<(String, Option<Arc<RenderImage>>)>,
+    steam_rx: std::sync::mpsc::Receiver<(String, Option<Arc<RenderImage>>)>,
 }
 
 /// 面板的外观开关（`[gui]` 里那几项），打包传进来免得 `Panel::new` 参数爆炸。
@@ -281,6 +285,7 @@ impl Panel {
         } = surface;
         // favicon 在后台线程抓（WinHTTP 是阻塞的），结果从 channel 回主线程
         let (favicon_tx, favicon_rx) = std::sync::mpsc::channel();
+        let (steam_tx, steam_rx) = std::sync::mpsc::channel();
         // 开屏（收藏 + 最近命令）要一次查询，provider 在工作线程里跑
         app.refresh();
 
@@ -363,6 +368,18 @@ impl Panel {
                     if got_favicon {
                         cx.notify();
                     }
+                    // Steam：后台拉的 CDN 封面回来了就替换掉「没有图标」的占位
+                    let mut got_steam = false;
+                    while let Ok((command, icon)) = panel.steam_rx.try_recv() {
+                        panel.steam_pending.remove(&command);
+                        if let Some(icon) = icon {
+                            panel.icons.insert(command, Some(icon));
+                            got_steam = true;
+                        }
+                    }
+                    if got_steam {
+                        cx.notify();
+                    }
                     let now_pending = panel.app.pending;
                     if was_pending != now_pending {
                         cx.notify();
@@ -432,6 +449,9 @@ impl Panel {
             logged_rows: usize::MAX,
             logged_input: String::new(),
             status_seen: None,
+            steam_pending: HashSet::new(),
+            steam_tx,
+            steam_rx,
         }
     }
 
@@ -1118,7 +1138,20 @@ impl Panel {
                         continue;
                     }
                     let icon = launch_icon(&command, &title);
-                    self.icons.insert(command, icon);
+                    // 本地封面也没有（未安装的游戏）→ 后台去 CDN 拉，回来再补上
+                    let need_remote = icon.is_none()
+                        && steamicon::appid(&command).is_some()
+                        && !self.steam_pending.contains(&command);
+                    self.icons.insert(command.clone(), icon);
+                    if need_remote {
+                        self.steam_pending.insert(command.clone());
+                        let tx = self.steam_tx.clone();
+                        let key = command.clone();
+                        std::thread::spawn(move || {
+                            let icon = steamicon::fetch(&key);
+                            let _ = tx.send((key, icon));
+                        });
+                    }
                 }
                 Action::OpenUrl(url) => {
                     if !self.web_favicon {

@@ -193,19 +193,28 @@ fn decode(bytes: &[u8]) -> Option<Arc<RenderImage>> {
 
 /// 带路径的 GET：只要 2xx 且非空。**阻塞**。
 fn http_get_path(site: &Site, path: &str) -> Option<Vec<u8>> {
+    http_get(&site.host, site.port, site.secure, path)
+}
+
+/// 给同模块的兄弟（[`super::steamicon`]）复用的 HTTPS GET。**阻塞**，只能在后台线程用。
+pub(super) fn https_get(host: &str, path: &str) -> Option<Vec<u8>> {
+    http_get(host, 443, true, path)
+}
+
+fn http_get(host: &str, port: u16, secure: bool, path: &str) -> Option<Vec<u8>> {
     #[cfg(windows)]
     {
-        winhttp_get(site, path)
+        winhttp_get(host, port, secure, path)
     }
     #[cfg(not(windows))]
     {
-        let _ = (site, path);
+        let _ = (host, port, secure, path);
         None
     }
 }
 
 #[cfg(windows)]
-fn winhttp_get(site: &Site, path: &str) -> Option<Vec<u8>> {
+fn winhttp_get(host: &str, port: u16, secure: bool, path: &str) -> Option<Vec<u8>> {
     use windows::Win32::Networking::WinHttp::*;
     use windows::core::PCWSTR;
 
@@ -225,8 +234,8 @@ fn winhttp_get(site: &Site, path: &str) -> Option<Vec<u8>> {
         let _ = WinHttpSetTimeouts(session, 2000, 2000, 2000, 2000);
 
         let result = (|| {
-            let host_w: Vec<u16> = site.host.encode_utf16().chain(Some(0)).collect();
-            let connect = WinHttpConnect(session, PCWSTR(host_w.as_ptr()), site.port, 0);
+            let host_w: Vec<u16> = host.encode_utf16().chain(Some(0)).collect();
+            let connect = WinHttpConnect(session, PCWSTR(host_w.as_ptr()), port, 0);
             if connect.is_null() {
                 return None;
             }
@@ -234,7 +243,7 @@ fn winhttp_get(site: &Site, path: &str) -> Option<Vec<u8>> {
 
             let verb: Vec<u16> = "GET".encode_utf16().chain(Some(0)).collect();
             let object: Vec<u16> = path.encode_utf16().chain(Some(0)).collect();
-            let flags = if site.secure {
+            let flags = if secure {
                 WINHTTP_FLAG_SECURE
             } else {
                 WINHTTP_OPEN_REQUEST_FLAGS(0)
