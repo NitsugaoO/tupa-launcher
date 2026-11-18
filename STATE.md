@@ -1,6 +1,6 @@
 # tupa-launcher 状态
 
-updated: 2026-11-18 · code: `5ed8773`（亚克力 + 窗口圆角 + 失焦光标 · 显示层两行卡片 · 滚动修复 · 窗口高 72% + 提前滚动）
+updated: 2026-11-18 · code: `ab74244`（亚克力 + 圆角 + 失焦光标 · 两行卡片 · 窗口高 0.68 + 提前两行滚动 · 应用图标）
 
 > 判断本文件是否过期：比较 `code` 与 `git log -1 --format=%h -- src Cargo.toml`。
 > 只改文档的提交不算过期。
@@ -13,21 +13,20 @@ updated: 2026-11-18 · code: `5ed8773`（亚克力 + 窗口圆角 + 失焦光标
 
 ## 阶段
 
-- **窗口高度 0.72 + 提前一行滚动 + 启动项清理（2026-11-18 晚）**：
-  - `MAX_HEIGHT_RATIO` 0.62 → **0.72**（本机 960 逻辑高 → 691px；实测展开窗口 687px、
-    12 条卡片）。**可视条数不再写死**：`Panel::max_visible_rows()` 用 `max_height` 减去
-    与 `desired_height()` 同一份 chrome（PADDING / BORDER / INPUT / LIST_TOP / STATUS）
-    后除以 `row_height()` 反算，`CARD_VISIBLE_ROWS`（7→12）/ `MAX_VISIBLE_ROWS`（12→19）
-    只当上限 —— 只调比例、或换不同 DPI 的屏幕，都不会「最后一行被窗口底边裁掉」。
-  - 选框**提前一行滚动**：新增 `style::SCROLL_MARGIN_ROWS = 1`，只当触发阈值，
-    目标按「刚好留出 margin」算再 clamp 到 `scroll_max`。实测：12/30 时已滚 1 行
-    （选框落在倒数第二行），30/30 最后一条完整可见、没有多滚出来的空白。
-  - 开机弹「NanaZip 无法作为压缩包打开 `…\Startup\tupa-launcher-daemon.lnk.disabled`」：
-    根因是 **Explorer 枚举启动文件夹时对目录里每个文件都 ShellExecute**，`.lnk.disabled`
-    不是快捷方式 → 走文件关联（本机 `.disabled` 只登记过 NanaZip）。证据：
-    `HKCU\...\RunNotification\StartupTNoti<文件名> = 4`（4 = 本次登录已启动）。
-    已删到回收站 + 清 `RunNotification` / `FileExts\.disabled`。
-    **停用启动项只能把文件移出文件夹，别改扩展名**（坑已记 `AGENTS.md` / docs/06 §4）。
+- **应用图标（2026-11-18 晚）**：App 行（以及任何 `Action::Launch` 的行）在类型列画
+  **20×20 应用图标，顶替 chip**；取不到才画回胶囊。实现在 `src/gui/appicon.rs`：
+  `IShellItemImageFactory::GetImage(96×96)` → `GetDIBits`（`biHeight` 负 = 自顶向下、32bpp）
+  → BGRA → `gpui::RenderImage`。列宽仍是 `BADGE_WIDTH`，所以 `card_indent()` / `RowMetrics`
+  都不用动。缓存 key = 配置里的 `command`、**失败也缓存**、只给「可视区附近」的行提取
+  （`prefetch_icons`）。依赖新增 `image`（optional，仅 `gui`）+ windows `Win32_Graphics_Gdi`。
+  **覆盖率**：真 `.lnk` / 全路径 exe 全有图标；裸命令看 PATH（`code` 拿到 `code.cmd` 的脚本图标，
+  不在 PATH 的 `obs64.exe` 没图标 → 回落 chip）。要再高只能加「标题 → 开始菜单 `.lnk`」反查，
+  **未做**。
+- **窗口高度与提前滚动（2026-11-18）**：`MAX_HEIGHT_RATIO` → **0.68**（本机 960 逻辑高，
+  实测窗口 638px、**11 条卡片**），`SCROLL_MARGIN_ROWS` → **2**（选框距边缘还有 2 条就开滚，
+  实测 24/30 时下方仍露 2 条）。**可视条数不写死**：`max_visible_rows()` 用 `max_height`
+  减去与 `desired_height()` 同一份 chrome 后除以 `row_height()` 反算，
+  `CARD_VISIBLE_ROWS`（12）/ `MAX_VISIBLE_ROWS`（19）只当上限。
 
 - **亚克力（窗口模糊）通了（2026-11-18）**：`[gui] acrylic = true` → 面板背后是**实时**模糊桌面
   （能采到别的窗口，不只是壁纸），实测棋盘格铺底只剩一片模糊明暗。
@@ -110,8 +109,8 @@ updated: 2026-11-18 · code: `5ed8773`（亚克力 + 窗口圆角 + 失焦光标
     tiling 挤压、切 workspace 时被 `SW_HIDE`）；尺寸由 GPUI 按主屏 62%×55% 居中算
   - **主入口已切到 GUI**（2026-11-17 晚）：`[gui] hotkey = "alt+\`"`，开机自启是
     `启动	tupa-gui.lnk`；旧的 `tupa-launcher-daemon.lnk` 已**删到回收站**（2026-11-18；
-    别用改扩展名的方式停用，原因见上面「启动项清理」那条）。守护进程在跑时会占着热键，
-    切换前先停它
+    别用改扩展名的方式停用，原因见 `AGENTS.md` 硬约定「停用启动项要把它移出启动文件夹」）。
+    守护进程在跑时会占着热键，切换前先停它
   - 踩过的坑（4 条 GPUI 行为 + 2 条崩溃）都记在 `AGENTS.md`，别重踩
 
 - **动画体系（2026-11-17 晚）**：全部由 **vsync 驱动**（`render` 末尾按需注册
@@ -325,6 +324,9 @@ updated: 2026-11-18 · code: `5ed8773`（亚克力 + 窗口圆角 + 失焦光标
 
 ## 未完成
 
+- **裸命令的图标覆盖率**：只有 `util::resolve_executable` 能解析到的才有图标（`code` 拿到的是
+  `code.cmd` 的脚本图标，不在 PATH 的 `obs64.exe` 直接没图标 → 回落 chip）。要接近 100%
+  得再加一层「标题/文件名 → 开始菜单 `.lnk`」反查，**未做**。
 - **窗口宽度记忆**：面板宽度固定按主屏 62%（高度随内容），拖边改过的宽度还没写回
   `gui.json`（`config.toml` 手写带注释，不能程序回写）。
 - **TUI 侧没跟进的新交互**：紧凑形态、双击执行、chip 配色只在 GUI 有；

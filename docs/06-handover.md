@@ -373,6 +373,31 @@ fork `vendor/gpui`，把 `directx_renderer.rs` 的 `DirectComposition` 换成 Wi
 **host backdrop 自带模糊，不需要 Win2D 的 `GaussianBlurEffect`**，整体约 150 行。
 注意：一个 HWND 只能有一个 DComp target，WinRT target 与 Win32 target 不能并存。
 
+### 应用图标（2026-11-18）
+
+`Kind::App` 行（以及任何 `Action::Launch` 的行）在类型列上画**应用图标**，
+有图标就**顶替 chip**，取不到才画回胶囊标签。实现在 `src/gui/appicon.rs`。
+
+- 取图：`IShellItemImageFactory::GetImage(96×96, SIIGBF_ICONONLY | SIIGBF_BIGGERSIZEOK)`。
+  不用 `SHGetFileInfoW` 是因为它只有 32×32（本机 200% DPI 下 20 逻辑像素 = 40 物理，会糊）；
+  要 256 得走 `SHGetImageList(SHIL_JUMBO)` + `IImageList::GetIcon`，多一层 COM 类型，
+  而 `GetImage` 能**直接要指定尺寸**。96 已经够（2.4 倍余量），没必要拿 256。
+- 格式：`GetDIBits` 指定 `biHeight = -h`（自顶向下）+ 32bpp → 出来就是
+  **BGRA 非预乘**，正好是 GPUI `RenderImage` 要的格式（GPUI 内部把 RGBA 预乘
+  换成 BGRA，见 `vendor/gpui/src/color.rs::swap_rgba_pa_to_bgra`）。
+  别自己再 swap 一次，会变成红蓝互换。
+- **alpha 全 0 的兜底**：老式 16 色图标的 DIB 里 alpha 全是 0，不处理就是「整块透明」
+  （看着像图标丢了）。检测到全 0 就直接置 255 当不透明。
+- 缓存：`Panel::icons: HashMap<String, Option<Arc<RenderImage>>>`，key 是配置里的
+  `command`，**失败也缓存**（`wt` / `ms-settings:` 这类每次刷新重试都是白花 COM 时间）。
+- 只给「可视区附近」的行提取（`Panel::prefetch_icons`）：首屏约 15 个，
+  滚动时新行下一帧补上。别在 `snapshot()` 里遍历全部条目 —— 74 个应用全走一遍
+  COM + GDI 会让首屏明显迟滞。
+- 图标源：`util::resolve_executable`（`.lnk` → 目标 exe，裸命令 → PATH）。
+  **裸命令的覆盖率有限**：`code` 解析到的是 `code.cmd`（显示 cmd 脚本图标），
+  `obs64.exe` 这种不在 PATH 的就是没有图标。要更高的覆盖率只能加一层
+  「标题 → 开始菜单 `.lnk`」反查，目前**没做**。
+
 ## 7. 调试入口
 
 ```bash

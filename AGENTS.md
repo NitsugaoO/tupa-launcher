@@ -191,6 +191,17 @@ cargo clippy --release --features gui    # 零警告；必须带 feature，否�
   例外是选择模式的 `1`–`9`（走私有的 `App::on_key`）。
   注册点在 `gui::input_row` 里那个 **1×1 绝对定位 `canvas`**：`window.handle_input` 只能在
   paint 阶段调，而 0×0 的元素不会 paint（踩过，handler 就永远注册不上）。
+ 18. **应用图标在 GUI 侧做，不污染 `Item` / provider**（2026-11-18）：行数据里已经有
+     `Action::Launch { command }`，`util::resolve_executable` 能解 `.lnk` 也能搜 PATH，
+     所以 `RowSnapshot.icon` 直接在 `snapshot()` 里按 action 取即可，TUI 一行不用改。
+     四个必须记住的点（细节见 `docs/06-handover.md` §6「应用图标」）：
+     - 取图用 `IShellItemImageFactory::GetImage`（可指定尺寸），不用 `SHGetFileInfoW`（只有 32px）
+     - `GetDIBits` 里 `biHeight` 给**负数**（自顶向下），32bpp 出来就是 GPUI 要的 BGRA；
+       **别再 swap 一次红蓝**
+     - 老式图标 alpha 全 0 必须当不透明处理（不然整块透明，像图标丢失）
+     - 只给「可视区附近」的行提取（`Panel::prefetch_icons`），且**失败也缓存**；
+       别在 `snapshot()` 里遍历全部条目，74 个应用全会让首屏迟滞
+     - 图标顶替 chip 但**列宽不变**（仍是 `BADGE_WIDTH`），所以 `card_indent()` / 列宽计算不用跟着改
 - **托盘/热键在后台线程，别塞进 GPUI**：`Application::run` 占住主线程，所以 `src/tray.rs`
   自己开线程跑 message-only 窗口 + `Shell_NotifyIconW` + `RegisterHotKey`，面板显隐直接用
   `ShowWindow` 操作 HWND（`util::find_panel`），不碰 GPUI 状态。托盘菜单用
