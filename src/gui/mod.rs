@@ -20,6 +20,7 @@ mod appicon;
 mod favicon;
 mod frame;
 mod glyphs;
+mod steamicon;
 mod input;
 mod keys;
 mod style;
@@ -1094,7 +1095,7 @@ impl Panel {
                     if self.icons.contains_key(&command) {
                         continue;
                     }
-                    let icon = appicon_for(&command, &title);
+                    let icon = launch_icon(&command, &title);
                     self.icons.insert(command, icon);
                 }
                 Action::OpenUrl(url) => {
@@ -1887,6 +1888,14 @@ fn mini_chip(row: &RowSnapshot, p: Palette) -> AnyElement {
 fn appicon_for(command: &str, title: &str) -> Option<Arc<RenderImage>> {
     let exe = appicon::exe_for(command, title)?;
     exe.is_file().then(|| appicon::load(&exe)).flatten()
+}
+
+/// 一条 `Launch` 的图标：先按 `.exe` / `.lnk` 提取，再试 Steam 的本地封面。
+///
+/// 顺序不能反：`steam://` 这种协议没有可提取的文件，`exe_for` 会走到开始菜单索引，
+/// 只有真装了 Steam 且标题能对上时才会命中，那种情况用 exe 图标也说得过去。
+fn launch_icon(command: &str, title: &str) -> Option<Arc<RenderImage>> {
+    appicon_for(command, title).or_else(|| steamicon::load(command))
 }
 
 /// 两行卡片（默认形态）：第一行标题 + 右侧尾巴，第二行路径 / 分组（dim 小字）。
