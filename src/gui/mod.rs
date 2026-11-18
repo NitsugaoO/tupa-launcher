@@ -1745,6 +1745,14 @@ fn render_row(
 /// 类型列：有应用图标就画图标（顶替 chip），否则画胶囊标签。
 ///
 /// 两种都占 `BADGE_WIDTH` 宽，所以列宽计算不用跟着变。
+/// 类型列的「文字色」：未选中 = 类型色，选中 = 背景色（chip 反白）。
+///
+/// Nerd Font 图标也用它 —— 这样图标、chip、mini chip 的渐变是**同一个进度、同一套颜色**，
+/// 选中行整套一起变。
+fn chip_fg(row: &RowSnapshot, p: &Palette) -> Rgba {
+    style::mix(row.color, p.background, row.chip_progress)
+}
+
 fn badge_cell(row: &RowSnapshot, p: Palette) -> AnyElement {
     let slot = div()
         .w(px(style::BADGE_WIDTH))
@@ -1766,12 +1774,13 @@ fn badge_cell(row: &RowSnapshot, p: Palette) -> AnyElement {
                     .h(px(style::ICON_SIZE)),
             )
             .into_any_element(),
-        // Nerd Font 字形：文件 / 文件夹 / 网页。字体本身带图标，不需要图片
+        // Nerd Font 字形：文件 / 文件夹 / 网页。字体本身带图标，不需要图片。
+        // 颜色跟 chip 文字同步渐变（选中行反白成背景色）
         RowIcon::Glyph(glyph) => slot
             .child(
                 div()
                     .text_size(px(style::GLYPH_SIZE))
-                    .text_color(row.color)
+                    .text_color(chip_fg(row, &p))
                     .child(glyph.to_string()),
             )
             .into_any_element(),
@@ -1780,7 +1789,7 @@ fn badge_cell(row: &RowSnapshot, p: Palette) -> AnyElement {
             .rounded(px(style::BADGE_RADIUS))
             .bg(style::mix(p.panel, row.color, row.chip_progress))
             .text_size(px(style::BADGE_SIZE))
-            .text_color(style::mix(row.color, p.background, row.chip_progress))
+            .text_color(chip_fg(row, &p))
             .child(row.badge)
             .into_any_element(),
     }
@@ -1801,7 +1810,7 @@ fn mini_chip(row: &RowSnapshot, p: Palette) -> AnyElement {
         .rounded(px(style::MINI_CHIP_RADIUS))
         .bg(style::mix(p.panel, row.color, row.chip_progress))
         .text_size(px(style::MINI_CHIP_SIZE))
-        .text_color(style::mix(row.color, p.background, row.chip_progress))
+        .text_color(chip_fg(row, &p))
         .child(row.badge)
         .into_any_element()
 }
