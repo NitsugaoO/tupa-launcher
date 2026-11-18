@@ -1784,10 +1784,15 @@ fn badge_cell(row: &RowSnapshot, p: Palette) -> AnyElement {
             )
             .into_any_element(),
         // Nerd Font 字形：文件 / 文件夹 / 网页。字体本身带图标，不需要图片。
-        // 颜色跟 chip **底色**同一条曲线（未选中半透明 → 选中亮起来）
+        //
+        // 内层固定 `ICON_SIZE` 宽 + `text_center`：字形 advance 不一定等于 16px
+        // （Nerd Font 有 1em 的也有更宽的），不定宽时它会把整块往右撑，
+        // 看起来就是「图标比下面的 mini chip 偏右」。
         RowIcon::Glyph(glyph) => slot
             .child(
                 div()
+                    .w(px(style::ICON_SIZE))
+                    .text_center()
                     .text_size(px(style::GLYPH_SIZE))
                     .text_color(icon_fg(row, &p))
                     .child(glyph.to_string()),
@@ -1963,7 +1968,8 @@ fn render_card_row(
         .flex()
         .flex_col()
         .justify_center()
-        .gap(px(2.))
+        // 两行之间不留缝：mini chip 贴着图标下面，看着是一整块
+        .gap(px(0.))
         .px(px(style::ROW_PAD_X))
         .rounded(px(style::ROW_RADIUS))
         .whitespace_nowrap();

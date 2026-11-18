@@ -79,7 +79,7 @@ pub const ICON_SIZE: f32 = 20.0;
 pub const GLYPH_SIZE: f32 = 16.0;
 /// mini chip：卡片第二行、图标下面那个小的类型标签（`app` / `file`）。
 /// **只在该行有图标时画** —— 没图标的行第一行已经是 chip，没必要写两遍。
-pub const MINI_CHIP_WIDTH: f32 = 40.0;
+pub const MINI_CHIP_WIDTH: f32 = 34.0;
 pub const MINI_CHIP_HEIGHT: f32 = 14.0;
 pub const MINI_CHIP_RADIUS: f32 = 7.0;
 pub const MINI_CHIP_SIZE: f32 = 9.0;
