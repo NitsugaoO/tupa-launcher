@@ -83,6 +83,7 @@ pub fn apply(window: &Window, always_on_top: bool) -> Result<()> {
         if ok == 0 {
             bail!("SetWindowPos(HWND_TOPMOST) 返回 0");
         }
+        crate::tray::log("[tupa-gui] 置顶已设置");
     }
     Ok(())
 }
