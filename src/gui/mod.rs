@@ -116,13 +116,19 @@ pub fn run(cfg: Config, theme: Theme) -> Result<()> {
                 ..Default::default()
             },
             move |window, cx| {
-                if acrylic_on
-                    && let Err(error) = acrylic::enable(window)
-                {
-                    crate::tray::log(&format!("[tupa-gui] 亚克力没挂上：{error:#}"));
-                }
                 cx.new(|cx| {
-                    Panel::new(app, opacity, animations, always_on_top, max_height, window, cx)
+                    Panel::new(
+                        app,
+                        Surface {
+                            opacity,
+                            animations,
+                            always_on_top,
+                            acrylic: acrylic_on,
+                        },
+                        max_height,
+                        window,
+                        cx,
+                    )
                 })
             },
         );
@@ -150,12 +156,12 @@ struct Panel {
     scroll_max: f32,
     /// 是否开动画（`[gui] animations`）
     animations: bool,
-    /// 上一次裁圆角用的窗口尺寸（物理像素）；变了要重裁 region
-    region_size: (i32, i32),
     /// 窗口外观（圆角 / 置顶）是否已经应用过；首帧渲染时才做
     frame_applied: bool,
     /// `[gui] always_on_top`
     always_on_top: bool,
+    /// `[gui] acrylic`
+    acrylic_on: bool,
     /// 选框滑动的当前 y / 目标 y（像素）
     marker_y: f32,
     marker_target: f32,
@@ -219,16 +225,29 @@ struct Panel {
     logged_input: String,
 }
 
+/// 面板的外观开关（`[gui]` 里那几项），打包传进来免得 `Panel::new` 参数爆炸。
+#[derive(Clone, Copy)]
+struct Surface {
+    opacity: f32,
+    animations: bool,
+    always_on_top: bool,
+    acrylic: bool,
+}
+
 impl Panel {
     fn new(
         mut app: App,
-        opacity: f32,
-        animations: bool,
-        always_on_top: bool,
+        surface: Surface,
         max_height: f32,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        let Surface {
+            opacity,
+            animations,
+            always_on_top,
+            acrylic: acrylic_on,
+        } = surface;
         // 开屏（收藏 + 最近命令）要一次查询，provider 在工作线程里跑
         app.refresh();
 
@@ -291,9 +310,9 @@ impl Panel {
             scroll_viewport: 0.0,
             scroll_max: 0.0,
             animations,
-            region_size: (0, 0),
             frame_applied: false,
             always_on_top,
+            acrylic_on,
             marker_y: 0.0,
             marker_target: 0.0,
             marker_from: 0.0,
@@ -1781,19 +1800,12 @@ impl Render for Panel {
             if let Err(error) = frame::apply(window, self.always_on_top) {
                 crate::tray::log(&format!("[tupa-gui] 窗口外观设置失败：{error:#}"));
             }
-        }
-
-        // 窗口尺寸变了要重裁圆角 region（`SetWindowRgn` 不跟着缩放），
-        // 否则圆角外侧会重新露出方角的亚克力。
-        let viewport = window.viewport_size();
-        let region_size = (
-            (f32::from(viewport.width) * self.scale).round() as i32,
-            (f32::from(viewport.height) * self.scale).round() as i32,
-        );
-        if self.region_size != region_size {
-            self.region_size = region_size;
-            if let Err(error) = frame::round_region(window) {
-                crate::tray::log(&format!("[tupa-gui] 圆角 region 更新失败：{error:#}"));
+            // 必须在 `frame::apply`（里面有 `SWP_FRAMECHANGED`）**之后**：
+            // 先设的话会被 frame change 重置回 gpui 的 alpha = 0（黑玻璃）。
+            if self.acrylic_on
+                && let Err(error) = acrylic::enable(window)
+            {
+                crate::tray::log(&format!("[tupa-gui] 亚克力没挂上：{error:#}"));
             }
         }
 
