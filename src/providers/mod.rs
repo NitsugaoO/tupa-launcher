@@ -18,6 +18,7 @@ pub mod go;
 pub mod hist;
 pub mod home;
 pub mod pi;
+pub mod pi_index;
 pub mod run;
 pub mod switch;
 pub mod web;

@@ -106,7 +106,7 @@ Copilot 键是个例外（它的原样组合被 shell 占着），但用钩子**
 | `:ev <关键词>` | Everything 搜文件，**支持原生语法**：`:ev ext:pdf 报告`、`:ev folder:Projects` |
 | `:run <命令>` | 开一个新终端窗口执行（默认 PowerShell；`:run:bg` 后台，`:run:admin` 提权） |
 | `:go <路径>` | 跳到目录 / 定位文件；**空参数读剪贴板**；`:go:code` / `:go:yazi` / `:go:pi` 用指定程序打开 |
-| `:pi [关键词]` | 列出所有 pi 会话（标题 / 项目 / 时间），**回车在新终端里 `pi --session` 打开**；`:pi:all` 包含 `session-archive` 里的归档 |
+| `:pi [关键词]` | 列出所有 pi 会话（标题 / 项目 / 时间），**回车在新终端里 `pi --session` 打开**；标题优先取 pi-sessions 索引里的**会话名**（自动标题 / `/name` 改过的名字），拿不到才回退到首条消息；`:pi:all` 包含 `session-archive` 里的归档 |
 | `:pi:clean [关键词]` | 清理 pi 会话：列出**超过时间窗口**的会话，回车**归档**（长会话）或**删除到回收站**（瘦会话）；`:pi:clean:week` / `:pi:clean:month` 切窗口（默认两周），`:pi:clean:restore` 从归档恢复 |
 | `:pi:cleanall [关键词]` | 同上，但只列**一条汇总项**（归档 N 个 / 删除 M 个 / 总体积），回车**一次处理全部**；可叠窗口：`:pi:cleanall:month` |
 | `:web <网址 / 关键词>` | 搜 Edge 历史（默认**一周内**）；搜不到且输入像网址就直接打开（`:web:month` / `:web:all` 扩大范围，`:web:url` 强制打开） |
@@ -473,7 +473,8 @@ src/
     ├── everything.rs    ev   —— 调用 es.exe + 本地相关性重排
     ├── web.rs           web  —— URL 判断 + Edge 历史（rusqlite）
     ├── hist.rs          hist —— 搜索命令历史（history.json：输入行 + 执行快照）
-    ├── exp.rs           exp  —— 资源管理器最近打开过的文件夹（读跳转列表）
+    ├── pi.rs            pi   —— pi 会话列表（标题来自 pi-sessions 索引，回退 jsonl）
+    ├── pi_index.rs      pi 的标题来源：读 pi-sessions 的 index.sqlite（rusqlite）
     ├── favorites.rs     fav  —— 列出收藏 + 按类型过滤
     ├── commands.rs      `:`  —— 命令列表（也是补全的数据源）
     ├── blog.rs           blog —— 新建文章 / 本地预览 / 管理页 / 站点入口（文章创建的执行也在这）

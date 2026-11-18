@@ -67,6 +67,12 @@ cargo clippy --release --features gui    # 零警告；必须带 feature，否�
   （徽标）、`columns()`（漏了掉回默认两列，开屏混排里排版会歪）、`from_badge()`
   （漏了 `fav:<徽标>` 解析不到）。
 - **加 provider**：`src/providers/xxx.rs` + `providers/mod.rs::build()` 里 push（顺序 = 命令列表顺序）。
+- **`:pi` 的标题来自 pi-sessions 索引，不是首条消息**（2026-11-18）：自动标题写成 jsonl 里的
+  `{"type":"session_info","name":…}`，**位置不固定**（改标题就追加一条，本机最长距末尾 33MB），
+  所以权威源是 `~/.pi/agent/pi-sessions/index.sqlite` 的 `sessions.session_name`
+  （每个 `turn_end` 由 hook 同步）。`src/providers/pi_index.rs` 读它，**任何失败都回退**到
+  jsonl 头 80 行的 `session_info`；`session-archive/` 不在索引里（只能走回退）。
+  改 `read_meta` 的标题优先级时别把「首条用户消息」又提到前面。
 - 命令关键字是 **`set`**（历史上叫 switch，已改名）；文档示例写默认前缀 `:`，
   用户本机 `config.toml` 改成了 `@`，别把两者搞混。
 - **面板渲染只走 `ui::draw`**（TUI 与 GUI 共用），别在 GUI 里另写一套布局。

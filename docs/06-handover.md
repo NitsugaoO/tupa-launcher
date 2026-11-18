@@ -43,6 +43,7 @@ src/
     ├── run.rs     run
     ├── go.rs      go（zoxide + Everything + 剪贴板 + yazi/pi/code）
     ├── pi.rs      pi（pi 会话列表 + 关键词搜索 + -session 打开）
+    ├── pi_index.rs  pi 的标题来源（读 pi-sessions 的 index.sqlite）
     ├── web.rs     web（Edge 历史，rusqlite）
     ├── hist.rs    hist（搜 history.json：输入行 + 执行快照，可带关键词）
     ├── blog.rs      blog（新建文章 / 管理页 / 站点入口；文章创建的执行也在这）
@@ -135,6 +136,8 @@ Control::{Run, Toggle{value}, Choice{options,index}, Number{value,min,max,step,s
 | WezTerm 内联覆盖 | `--config key=value` 只作用于本实例，不动用户的 `wezterm.lua`。面板需要 `enable_tab_bar=false`（单标签也显示 tab 栏）、`window_padding` 全 0、`window_background_opacity=1.0`、`win32_system_backdrop='Disable'`（不透明时 Acrylic 没意义）。`win32_system_backdrop` **没有 `None`**，合法值是 `Disable`/`Acrylic`/`Mica`/`Tabbed`/`Auto` |
 | terminal 兜底 | 配置写了 `wezterm` 但本机没装时，`launch_wezterm` 退回 `launch_wt`；`find_panel` 同时接受两种类名，所以退回后仍能找到窗口，不会每次热键都重启一个 |
 | Edge 历史被独占 | 必须先复制到临时目录再用 SQLite 打开 |
+| `:pi` 的标题不是第一条消息 | pi-sessions 的自动标题写在 jsonl 的 `{"type":"session_info","name":…}` 里，而且**可以出现在文件任何位置**（改了标题就追加一条）：本机 448 个会话里最后一条距文件末尾中位 8KB、p90 648KB、最大 33MB，倒读也拿不全。权威副本是 pi-sessions 的 `~/.pi/agent/pi-sessions/index.sqlite` 的 `sessions.session_name`（每个 `turn_end` 由 hook 同步，标题改了下一轮就是新的），见 `providers/pi_index.rs`。目录可被 `settings.json` 的 `sessions.index.dir` 改掉；库没装 / 重建中 / schema 升级都要静默回退到 jsonl 的头 80 行，**不要把它做成硬依赖** |
+| `:pi` 列了归档会话 | `session-archive/` **不在索引里**（本机 235 条索引 0 条归档），`:pi:all` / `:pi:clean:restore` 只能走 jsonl 回退，这些老会话往往没有 `session_info`，标题退化成首条消息是正常的 |
 | `last_visit_time` 单位 | 是 **Chromium 微秒**（1601 起），`/1_000_000 - 11_644_473_600`；网上的 100ns 是错的 |
 | `Ctrl+Tab` | 被 Windows Terminal 和 WezTerm 都默认占用（切标签），面板收不到；备用键 `Ctrl+O` |
 | 状态栏提示宽度 | 英文比中文宽，必须按 `UnicodeWidthStr::width` 算，写死会截断 |

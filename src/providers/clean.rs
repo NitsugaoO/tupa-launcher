@@ -18,8 +18,8 @@ use std::time::SystemTime;
 
 use anyhow::{bail, Context, Result};
 
-use super::pi::{self, Meta};
-use super::{Action, CleanMode, CleanOp, Item, Kind};
+use super::pi::{self, Meta};use super::{Action, CleanMode, CleanOp, Item, Kind};
+use super::pi_index::load_names;
 use crate::i18n;
 
 /// 默认只看两周以前的会话
@@ -38,6 +38,7 @@ pub(super) fn query(args: &str, flags: &[String]) -> Vec<Item> {
     };
     let keywords = pi::load_keywords(&root);
     let favorites = pi::load_favorites(&root);
+    let names = load_names();
     let restore = flags.iter().any(|flag| flag == "restore");
     // cleanall 只对清理有意义；恢复要一条条挑（恢复 131 个归档会瞬间撑大 sessions/）
     let batch = flags.iter().any(|flag| flag == "cleanall") && !restore;
@@ -51,10 +52,17 @@ pub(super) fn query(args: &str, flags: &[String]) -> Vec<Item> {
             &root.join("session-archive"),
             &keywords,
             &favorites,
+            &names,
             &mut metas,
         );
     } else {
-        pi::collect(&root.join("sessions"), &keywords, &favorites, &mut metas);
+        pi::collect(
+            &root.join("sessions"),
+            &keywords,
+            &favorites,
+            &names,
+            &mut metas,
+        );
     }
 
     let mut rows: Vec<(SystemTime, Item)> = Vec::new();

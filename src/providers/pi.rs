@@ -4,9 +4,16 @@
 //! 归档在 `session-archive/`（用 `:pi:all` 才包含）。每个文件：
 //!
 //! - 第一行 `{"type":"session","id":…,"timestamp":…,"cwd":…}`
-//! - 后面是 `message` 事件，第一条 `role=user` 的文本拿来当标题
+//! - 后面是 `message` 事件
+//! - `pi-sessions` 的自动标题写成 `{"type":"session_info","name":…}`，
+//!   **可以出现在任意位置**（改了标题就追加一条）
 //!
-//! 只读每个文件的前几十行（找到第一条用户消息就停），不会把几 MB 的会话全读进来。
+//! 标题优先级（见 [`read_meta`]）：pi-sessions 索引里的 `session_name` >
+//! 本文件前 80 行里最后一条 `session_info` > `session-keywords.json` 的 summary >
+//! 第一条 `role=user` 的文本 > 文件名。索引优先是因为它由 pi 自己在每个 `turn_end`
+//! 同步，能拿到本文件前 80 行看到的最新标题。
+//!
+//! 只读每个文件的前几十行（不会把几 MB 的会话全读进来），索引查询是 SQLite 只读的。
 
 use std::collections::HashMap;
 use std::fs::File;
@@ -16,6 +23,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::Deserialize;
 
+use super::pi_index::key_of;
 use super::{Action, Column, Item, Kind, Provider};
 use crate::i18n;
 
@@ -78,14 +86,22 @@ impl Provider for PiSessions {
         let root = home.join(".pi").join("agent");
         let keywords = load_keywords(&root);
         let favorites = load_favorites(&root);
+        let names = super::pi_index::load_names();
 
         let mut metas = Vec::new();
-        collect(&root.join("sessions"), &keywords, &favorites, &mut metas);
+        collect(
+            &root.join("sessions"),
+            &keywords,
+            &favorites,
+            &names,
+            &mut metas,
+        );
         if flags.iter().any(|flag| flag == "all") {
             collect(
                 &root.join("session-archive"),
                 &keywords,
                 &favorites,
+                &names,
                 &mut metas,
             );
         }
@@ -144,6 +160,7 @@ pub(super) fn collect(
     dir: &Path,
     keywords: &HashMap<String, KeywordInfo>,
     favorites: &[String],
+    names: &HashMap<String, String>,
     out: &mut Vec<Meta>,
 ) {
     let Ok(projects) = std::fs::read_dir(dir) else {
@@ -162,7 +179,7 @@ pub(super) fn collect(
             if path.extension().and_then(|e| e.to_str()) != Some("jsonl") {
                 continue;
             }
-            if let Some(meta) = read_meta(&path, keywords, favorites) {
+            if let Some(meta) = read_meta(&path, keywords, favorites, names) {
                 out.push(meta);
             }
         }
@@ -173,12 +190,16 @@ pub(super) fn read_meta(
     path: &Path,
     keywords: &HashMap<String, KeywordInfo>,
     favorites: &[String],
+    names: &HashMap<String, String>,
 ) -> Option<Meta> {
     let file = File::open(path).ok()?;
     let reader = BufReader::new(file);
 
     let mut cwd = None;
-    let mut title = None;
+    // `session_info` 里的会话名（自动标题 / 手动 `/name`），后出现的覆盖前面的
+    let mut session_name = None;
+    // 第一条用户消息，作为没有名字时的兜底
+    let mut first_user = None;
     let mut messages = 0u32;
 
     for line in reader.lines().take(80) {
@@ -200,7 +221,7 @@ pub(super) fn read_meta(
                 if matches!(role, Some("user") | Some("assistant")) {
                     messages += 1;
                 }
-                if role != Some("user") || title.is_some() {
+                if role != Some("user") || first_user.is_some() {
                     continue;
                 }
                 let Some(text) = message.get("content").and_then(extract_text) else {
@@ -208,7 +229,17 @@ pub(super) fn read_meta(
                 };
                 let first = text.lines().next().unwrap_or("").trim();
                 if !first.is_empty() {
-                    title = Some(truncate(first, 80));
+                    first_user = Some(truncate(first, 80));
+                }
+            }
+            Some("session_info") => {
+                let name = value
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .map(str::trim)
+                    .filter(|name| !name.is_empty());
+                if let Some(name) = name {
+                    session_name = Some(truncate(name, 80));
                 }
             }
             _ => {}
@@ -217,9 +248,16 @@ pub(super) fn read_meta(
 
     let key = path.to_string_lossy().into_owned();
     let keyword_info = keywords.get(&key);
-    let title = keyword_info
-        .and_then(|info| (!info.summary.is_empty()).then(|| info.summary.clone()))
-        .or(title)
+    // 索引里的名字最可信：它由 pi 自己同步，能看到前 80 行之外的最新标题
+    let title = names
+        .get(&key_of(&key))
+        .map(|name| truncate(name, 80))
+        .or(session_name)
+        .or_else(|| {
+            keyword_info
+                .and_then(|info| (!info.summary.is_empty()).then(|| info.summary.clone()))
+        })
+        .or(first_user)
         .unwrap_or_else(|| {
             path.file_stem()
                 .map(|s| s.to_string_lossy().into_owned())
@@ -299,6 +337,80 @@ pub(super) fn age(mtime: SystemTime) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn temp_session(tag: &str, lines: &[&str]) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("tupa-pi-meta-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(format!("{tag}.jsonl"));
+        std::fs::write(&path, lines.join("\n")).unwrap();
+        path
+    }
+
+    fn meta_of(path: &Path, names: &HashMap<String, String>) -> Meta {
+        read_meta(path, &HashMap::new(), &[], names).unwrap()
+    }
+
+    const HEAD: &str = r#"{"type":"session","cwd":"C:\\Users\\x"}"#;
+
+    #[test]
+    fn session_info_name_beats_first_user_message() {
+        let path = temp_session(
+            "name",
+            &[
+                HEAD,
+                r#"{"type":"message","message":{"role":"user","content":"第一条消息"}}"#,
+                r#"{"type":"session_info","name":"自动标题"}"#,
+            ],
+        );
+        assert_eq!(meta_of(&path, &HashMap::new()).title, "自动标题");
+    }
+
+    #[test]
+    fn later_session_info_wins() {
+        let path = temp_session(
+            "retitle",
+            &[
+                HEAD,
+                r#"{"type":"session_info","name":"旧标题"}"#,
+                r#"{"type":"session_info","name":"新标题"}"#,
+            ],
+        );
+        assert_eq!(meta_of(&path, &HashMap::new()).title, "新标题");
+    }
+
+    #[test]
+    fn empty_or_missing_name_falls_back() {
+        let path = temp_session(
+            "fallback",
+            &[
+                HEAD,
+                r#"{"type":"session_info","name":"   "}"#,
+                r#"{"type":"message","message":{"role":"user","content":"第一条消息\n第二行"}}"#,
+            ],
+        );
+        assert_eq!(meta_of(&path, &HashMap::new()).title, "第一条消息");
+    }
+
+    #[test]
+    fn index_name_beats_everything_in_the_file() {
+        let path = temp_session(
+            "indexed",
+            &[
+                HEAD,
+                r#"{"type":"session_info","name":"文件里的名字"}"#,
+                r#"{"type":"message","message":{"role":"user","content":"第一条消息"}}"#,
+            ],
+        );
+        let key = key_of(&path.to_string_lossy());
+        let names = HashMap::from([(key, "索引里的名字".to_string())]);
+        assert_eq!(meta_of(&path, &names).title, "索引里的名字");
+    }
+
+    #[test]
+    fn file_stem_is_the_last_resort() {
+        let path = temp_session("only-stem", &[HEAD]);
+        assert_eq!(meta_of(&path, &HashMap::new()).title, "only-stem");
+    }
 
     #[test]
     fn extracts_text_from_string_and_parts() {
