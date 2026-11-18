@@ -52,6 +52,11 @@ pub struct Gui {
     /// 实现见 `src/gui/acrylic.rs`：GPUI 只负责把窗口设成 `Blurred`，真正生效靠
     /// 我们再补一次 `SetWindowCompositionAttribute`（gradient alpha 必须是 1，0 会变黑玻璃）。
     pub acrylic: bool,
+
+    /// 面板是否一直置顶（默认开）
+    ///
+    /// 关掉后窗口会被普通窗口压住 —— GlazeWM 里 `tupa-gui` 是 `ignore`，不会替你抬到前面。
+    pub always_on_top: bool,
 }
 
 impl Default for Gui {
@@ -62,6 +67,7 @@ impl Default for Gui {
             animations: true,
             opacity: 1.0,
             acrylic: false,
+            always_on_top: true,
         }
     }
 }

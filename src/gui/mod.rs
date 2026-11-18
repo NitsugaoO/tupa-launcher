@@ -16,6 +16,7 @@
 
 pub mod icon;
 mod acrylic;
+mod frame;
 mod input;
 mod keys;
 mod style;
@@ -54,6 +55,7 @@ pub fn run(cfg: Config, theme: Theme) -> Result<()> {
     // 亚克力：GPUI 只负责把窗口设成 `Blurred`，alpha = 1 的修正由
     // `acrylic::enable` 在我们自己手里补（见 `src/gui/acrylic.rs`）。
     let acrylic_on = cfg.gui.acrylic;
+    let always_on_top = cfg.gui.always_on_top;
     let app = App::new(cfg, theme);
 
     gpui::Application::new().run(move |cx| {
@@ -119,7 +121,9 @@ pub fn run(cfg: Config, theme: Theme) -> Result<()> {
                 {
                     crate::tray::log(&format!("[tupa-gui] 亚克力没挂上：{error:#}"));
                 }
-                cx.new(|cx| Panel::new(app, opacity, animations, max_height, window, cx))
+                cx.new(|cx| {
+                    Panel::new(app, opacity, animations, always_on_top, max_height, window, cx)
+                })
             },
         );
         if let Err(error) = result {
@@ -146,6 +150,12 @@ struct Panel {
     scroll_max: f32,
     /// 是否开动画（`[gui] animations`）
     animations: bool,
+    /// 上一次裁圆角用的窗口尺寸（物理像素）；变了要重裁 region
+    region_size: (i32, i32),
+    /// 窗口外观（圆角 / 置顶）是否已经应用过；首帧渲染时才做
+    frame_applied: bool,
+    /// `[gui] always_on_top`
+    always_on_top: bool,
     /// 选框滑动的当前 y / 目标 y（像素）
     marker_y: f32,
     marker_target: f32,
@@ -214,6 +224,7 @@ impl Panel {
         mut app: App,
         opacity: f32,
         animations: bool,
+        always_on_top: bool,
         max_height: f32,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -280,6 +291,9 @@ impl Panel {
             scroll_viewport: 0.0,
             scroll_max: 0.0,
             animations,
+            region_size: (0, 0),
+            frame_applied: false,
+            always_on_top,
             marker_y: 0.0,
             marker_target: 0.0,
             marker_from: 0.0,
@@ -1759,6 +1773,29 @@ impl Render for Panel {
         }
 
         self.scale = window.scale_factor().max(0.5);
+
+        // 窗口外观要等**首帧渲染**时再设：`open_window` 的那个闭包里调太早，
+        // GPUI 之后还会 show / resize，把 DWM 的 frame 状态（边框、阴影）重置回去。
+        if !self.frame_applied {
+            self.frame_applied = true;
+            if let Err(error) = frame::apply(window, self.always_on_top) {
+                crate::tray::log(&format!("[tupa-gui] 窗口外观设置失败：{error:#}"));
+            }
+        }
+
+        // 窗口尺寸变了要重裁圆角 region（`SetWindowRgn` 不跟着缩放），
+        // 否则圆角外侧会重新露出方角的亚克力。
+        let viewport = window.viewport_size();
+        let region_size = (
+            (f32::from(viewport.width) * self.scale).round() as i32,
+            (f32::from(viewport.height) * self.scale).round() as i32,
+        );
+        if self.region_size != region_size {
+            self.region_size = region_size;
+            if let Err(error) = frame::round_region(window) {
+                crate::tray::log(&format!("[tupa-gui] 圆角 region 更新失败：{error:#}"));
+            }
+        }
 
         // 高度跟内容走（紧凑态只有输入行、出结果后向下展开）。
         // 用 `window.on_next_frame` 推后一帧再 resize：直接在 render 里调会触发
