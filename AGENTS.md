@@ -100,24 +100,22 @@ cargo clippy --release --features gui    # 零警告；必须带 feature，否�
      排查"进程莫名消失"先看这个文件。
   6. **托盘图标**是运行时用 GDI 画的（`gui::icon::draw`，背景色方块 + 草绿 ❯），不依赖
      `.ico` 资源、也没有 `build.rs`；`HICON` 是裸指针，跨线程只能传 `isize`。
-  7. **半透明能用，模糊不行 —— 除非 fork GPUI**：
-     - `Transparent`：纯 alpha，`[gui] opacity` 就是它，效果正常
-     - `Blurred`（GPUI 内建的 `ACCENT_ENABLE_ACRYLICBLURBEHIND`）：**会把整窗涂成黑玻璃**
-       （四角发黑、底色全黑、看不到模糊）——DComp 合成窗口上 DWM 的 accent 就是这个表现
-     - Windhawk 的 translucent-windows（`@include *` 确实注入进来了）同样无效
-     - **2026-11-18 探针（`examples/acrylic_probe.rs`，跟着 `docs/06-handover.md` §6「窗口模糊」走）**：
-       WinRT `Compositor` + `CreateDesktopWindowTarget` + `CreateBackdropBrush` 在
-       `WS_EX_NOREDIRECTIONBITMAP` 窗口上**能拿到真实的背后桌面内容**（其它窗口也采得到），
-       但**不带任何模糊**；`CreateHostBackdropBrush`（+ `DWMWA_USE_HOSTBACKDROPBRUSH`）
-       在 Win32 窗口上**全黑**，别再试；Win11 的 `DWMWA_SYSTEMBACKDROP_TYPE`
-       （Mica / Acrylic / MicaAlt）配合 `DwmExtendFrameIntoClientArea` 也只有**纯灰块**。
-       **Zed 上游和 ELYTerminal 在 Windows 上同样没做出模糊**（都是 GPUI 的 acrylic /
-       systembackdrop，实测 ELY 只有半透明；`dux-web/gpui` 的 `BackdropBlur` 只有
-       Metal/wgpu，DirectX 没实现）—— Windows 上没有现成轮子可抄，别再花时间找。
-     真模糊只剩两条：fork GPUI、把 DComp 树换成 WinRT 那套并自己实现 Win2D 兼容的
-     `GaussianBlurEffect`（步骤在 `docs/06-handover.md` §6），或者应用层「截一帧 + 模糊」
-     （背后有视频就露馅）。**一个 HWND 只能有一个 DComp target**，fork 只能整体替换，
-     不能「保留 Win32 target 再插一层」。
+  7. **亚克力是能用的，别再以为做不到**（2026-11-18 实测跑通，`[gui] acrylic = true`）：
+     - 做法：`window_background = Blurred` → GPUI 调 `SetWindowCompositionAttribute`，
+       但 **0.2.2 传的 gradient alpha = 0 会变黑玻璃**；`src/gui/acrylic.rs` 在窗口创建后
+       再补一次同参数、**alpha = 1** 的调用（照上游 `if is_acrylic && color.3 == 0 { color.3 = 1 }`）。
+       **不用 fork GPUI**，也不用 Win2D 的 `GaussianBlurEffect`。
+     - **排查顺序（上次就是栽在这里，浪费了一整轮）**：先看**节能模式**
+       （`GetSystemPowerStatus().SystemStatusFlag`，1 = 省电开着）和
+       「设置 → 个性化 → 颜色 → 透明效果」。两者任一为真时 DWM 会把 Acrylic/Mica
+       **降级成不透明纯色**（黑玻璃 / 纯灰块），此时所有材质 API 都「调用成功但没效果」。
+     - 判据不要靠壁纸：用**棋盘格**铺底再截图（`copyfromscreen`，`PrintWindow` 抓不到
+       DComp 合成结果）。探针在 `examples/acrylic_probe.rs`（`backdrop` / `host` /
+       `sb2..sb4`），细节与结论见 `docs/06-handover.md` §6「窗口模糊」。
+     - 独立结论（仍然成立，别再试）：`CreateHostBackdropBrush` 在 Win32 上依赖
+       `DWMWA_USE_HOSTBACKDROPBRUSH` 且自带模糊，可作为**后备方案**（要换 WinRT 合成树）；
+       `CreateBackdropBrush` 只「透」不糊；`DWMWA_SYSTEMBACKDROP_TYPE` 在 DComp 窗口上
+       只有纯色。Zed 上游 / ELYTerminal 的 Windows 实现就是 SWCA acrylic，没有别的魔法。
   8. **动画一律 vsync 驱动，别用定时器 notify**（2026-11-17）：定时器（8ms / 16ms）和屏幕
      刷新是两个独立节拍，互相挤 → 用户感受就是"卡卡的"。做法是在 `render` 末尾按需
      `window.on_next_frame(...)`，回调里 `animate()` + `cx.notify()`，链条自然停在动画结束那帧。

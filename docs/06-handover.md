@@ -248,12 +248,43 @@ cargo build --release --features gui     # 产出 tupa-gui.exe + tupa-launcher.e
 实测：微软拼音可正常上屏。**英文/数字输入**走同一条 `WM_CHAR` 路径，如果出现
 "打一个字出两个"，先查 `handle_key` 的 `plain_text` 判断是不是被改坏了。
 
-### 窗口模糊（acrylic）：探针结论与 fork 路线（2026-11-18）
+### 窗口模糊（acrylic）：已经跑通（2026-11-18）
 
-目标：面板背后是**实时的**模糊桌面（真亚克力），不是「截一帧再模糊」。
-`[gui] opacity` 现在只是纯 alpha，什么也糊不了。
+`[gui] acrylic = true` + `[gui] opacity ≈ 0.7~0.85` → 面板背后是**实时的**模糊桌面
+（真 Acrylic，能采到别的窗口，不只是壁纸）。实测：棋盘格铺底，面板上只剩一片模糊的明暗渐变。
 
-**先跑的探针**：`examples/acrylic_probe.rs`（留着，改这块前先拿它回归）
+实现只有两处，**没有 fork GPUI、没有 Win2D、没有自写 blur**：
+
+1. `src/gui/mod.rs::run` —— acrylic 开着时把 `window_background` 设成
+   `WindowBackgroundAppearance::Blurred`。
+2. `src/gui/acrylic.rs` —— 窗口创建后再补一次
+   `SetWindowCompositionAttribute(ACCENT_ENABLE_ACRYLICBLURBEHIND, gradient alpha = 1)`。
+   **alpha 必须是 1**：GPUI 0.2.2 自己传的是 `(0,0,0,0)`，alpha = 0 在 DComp 窗口上会
+   变成整窗黑玻璃；上游 0.3.8 也补了同一条 `if is_acrylic && color.3 == 0 { color.3 = 1 }`。
+   所以我们不改 gpui 源码，调完覆盖它即可。
+
+#### 之前为什么判成「做不到」（教训）
+
+真因是 **节能模式**（`GetSystemPowerStatus().SystemStatusFlag == 1`）和
+「设置 → 个性化 → 颜色 → 透明效果」关闭。这两者任一为真时，**DWM 会把 Acrylic / Mica /
+host backdrop 全部降级成不透明纯色**——所有材质 API 都「调用成功但没有效果」，
+看起来就像框架不支持。
+
+排查顺序（照这个走，别直接怀疑框架）：
+
+```powershell
+# 1) 节能模式：SystemStatusFlag = 1 说明省电中，材质一定被降级
+# 2) 透明效果：EnableTransparency 必须为 1
+(Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize').EnableTransparency
+```
+
+判据不要靠壁纸（纯黑壁纸下模糊和纯色看起来一样）：用**棋盘格**铺底再 `copyfromscreen`
+截图，糊了就是糊了。`PrintWindow` 抓不到 DComp 合成结果，只能看到窗口自己的内容。
+
+#### 探针（留着做回归）
+
+`examples/acrylic_probe.rs`，`WindowKind` 是 `WS_EX_NOREDIRECTIONBITMAP` 的 `WS_POPUP`、
+**没有 swapchain**，画面全由 WinRT 合成层构成，20 秒自动退出：
 
 ```bash
 cargo run --release --example acrylic_probe              # CreateBackdropBrush
@@ -262,94 +293,42 @@ cargo run --release --example acrylic_probe -- host 30   # 第二个参数 = tin
 cargo run --release --example acrylic_probe -- sb2       # Win11 系统材质：2=Mica 3=Acrylic 4=MicaAlt
 ```
 
-窗口是 `WS_EX_NOREDIRECTIONBITMAP` 的 `WS_POPUP`、**没有 swapchain**，画面全由 WinRT
-合成层构成（backdrop 层 + tint 层），20 秒自动退出。实测（Win11 26200 / Intel Arc B390）：
+实测（Win11 26200 / Intel Arc B390，**节能模式关闭**）：
 
 | 做法 | 结果 |
 |---|---|
-| `Compositor::CreateBackdropBrush` + `SpriteVisual` | **有效**：真实显示窗口后面的桌面/别的窗口（Explorer、PDF 正文都看得见），但**完全不模糊** |
-| `Compositor::CreateHostBackdropBrush` + `DWMWA_USE_HOSTBACKDROPBRUSH` | **全黑**（`DwmSetWindowAttribute` 返回 `Ok`，但没有内容）。Win32 上不可用，别再试 |
-| `DWMWA_SYSTEMBACKDROP_TYPE`（`sb2`/`sb3`/`sb4`，配合 `DwmExtendFrameIntoClientArea`） | **纯灰块**：Mica / Acrylic / MicaAlt 三个值都退化成一块不透明灰，不采样背后、不模糊 |
-| `SetWindowCompositionAttribute(4)`（= GPUI 的 `Blurred`） | 黑玻璃 / 无效果（DComp 窗口没有 redirection bitmap 可混） |
-| `CreateDesktopWindowTarget(hwnd, true)` + 多层合成 + `CreateColorBrushWithColor` | 正常，叠层顺序也对 |
+| `SetWindowCompositionAttribute(4)`，alpha = 1 | **真模糊**（现在 `[gui] acrylic` 用的就是它） |
+| `CreateHostBackdropBrush` + `DWMWA_USE_HOSTBACKDROPBRUSH` | **真模糊**，自带模糊强度，采到的是窗口后面的真实内容（别的窗口也行）→ 后备方案 |
+| `Compositor::CreateBackdropBrush` | 能采到真实背景（别的窗口也行），但**不模糊**（只「透」） |
+| `DWMWA_SYSTEMBACKDROP_TYPE`（2/3/4）+ `DwmExtendFrameIntoClientArea` | **纯灰块**，即使节能关闭也不采样背后 |
+| `SetWindowCompositionAttribute(4)`，alpha = 0（GPUI 0.2.2 的原始行为） | 整窗黑玻璃 |
 
-**结论**：底座（WinRT 合成层 + backdrop 采样）在这台机器上是通的，堵点只有「模糊」——
-`CreateBackdropBrush` 只透不糊，要亚克力必须给 effect 图一个 Win2D 兼容的
-`GaussianBlurEffect`（`Compositor::CreateEffectFactory` 只认 Win2D 那套 effect 类）。
-**所有系统级旁路已经试完**（accent / systembackdrop / host backdrop），都不采样窗口后方。
+节能模式开着时，上表除 `CreateBackdropBrush` 外的所有行都会退化（黑玻璃 / 全黑 / 纯灰块）。
 
-**别家怎么做的（2026-11-18 调研，别再重查）：**
+#### 别家怎么做的（2026-11-18 调研，别再重查）
 
-- **Zed / 上游 GPUI**（`crates/gpui_windows/src/window.rs`，HEAD `9636213`）：
-  `Blurred` → `SetWindowCompositionAttribute(4)`；`MicaBackdrop` / `MicaAltBackdrop` →
-  `DWMWA_SYSTEMBACKDROP_TYPE` 2 / 4（build ≥ 22621）。**两条路都只对自身窗口生效，
-  在 `WS_EX_NOREDIRECTIONBITMAP` + DComp 窗口上不出模糊**（上表已验证）。
-  真实现只在 macOS（`NSVisualEffectView`）。上游也明确没做 backdrop 采样
-  （`longbridge/gpui-kit` issue #3598：「DirectX: outside-only drop shadows, no backdrop sampling yet」）。
-  唯一值得抄的一行：上游 acrylic 会把 gradient alpha 从 0 补成 **1**
-  （`if is_acrylic && color.3 == 0 { color.3 = 1 }`），0.2.2 里没有这句。
-  它只影响「黑玻璃 vs 半透明」，**依旧不是模糊**，所以不值得为此升级。
-- **ELYTerminal**（`ELY-Open-Source/ELYTerminal`，本机装了、有源码）：**没有 fork renderer**，
-  用的是 crates.io 上的 `gpui-pre 0.3.8` + 自写 `src/blur/`。Windows 侧只有：
-  GPUI 的 `Blurred`（acrylic）或 Mica/MicaAlt，外加 Win10 的「移动/缩放时 acrylic 变清晰、
-  窗口跟不上鼠标」的 wndproc 补丁（build ≥ 22000 直接跳过）。Linux 侧是给合成器发 blur 请求
-  （KWin 等画），macOS 是 `NSVisualEffectView`。**实测（本机、它的日志
-  `blur: Blurred on windows`，settings `background_opacity 0.88 + background_blur true`）：
-  背后内容清晰可读，没有模糊** —— 它 README 说的 Windows blur 实际只有半透明。
-- **`dux-web/gpui`（发布名 `bezel-gpui`，Apache-2.0）**：目前唯一做了 `BackdropBlur` 场景原语的
-  fork（`Window::paint_backdrop_blur`，带 blur 半径 / 圆角 / tint / 饱和度 / 玻璃边缘），
-  但只有 **Metal 和 wgpu** 后端有实现，**DirectX 只做了 outside-only drop shadow**。
-  Windows 上拿不到，且它跟的是 `gpui-pre 0.3.4`，移植过来代价不比我们自己写小。
+- **Zed / 上游 GPUI**（`crates/gpui_windows/src/window.rs`）：`Blurred` →
+  `SetWindowCompositionAttribute(4)` + `color.3 = 1` 的修正；`MicaBackdrop` /
+  `MicaAltBackdrop` → `DWMWA_SYSTEMBACKDROP_TYPE` 2/4。真实现只在 macOS（`NSVisualEffectView`）。
+  上游没有 backdrop 采样（`longbridge/gpui-kit` issue #3598：「DirectX: outside-only drop
+  shadows, no backdrop sampling yet」），Windows 上也没有别的机制。
+- **ELYTerminal**：没有 fork renderer，用 `gpui-pre 0.3.8` + 自写 `src/blur/`。
+  Windows 侧就是 GPUI 的 acrylic / Mica，外加 Win10 的「移动时 acrylic 变清晰、窗口跟不上
+  鼠标」的 wndproc 补丁。**节能模式关闭后它确实有真模糊**（本机实测），这就是我们照抄的路径。
+  Linux 侧是给合成器发 blur 请求，macOS 侧是 `NSVisualEffectView`。
+- **`dux-web/gpui`（bezel-gpui）**：有 `BackdropBlur` 场景原语，但只有 Metal / wgpu 后端，
+  DirectX 没实现 backdrop 采样。
 
-所以：**Windows 上真 backdrop 模糊没有现成轮子可抄**，可复用的只有
-「WinRT 合成层 + `CreateBackdropBrush`」这套底座（我们的探针已经证明了它能用）。
+#### 后备方案（万一 SWCA 哪天被系统彻底干掉）
 
-
-**为什么 GPUI 现在出不来**（两个独立原因，别再猜）：
-
-1. `WindowBackgroundAppearance::Blurred` → `SetWindowCompositionAttribute(ACCENT_ENABLE_ACRYLICBLURBEHIND)`，
-   DWM 把 accent 画在窗口的 **redirection bitmap** 上；GPUI 走 DComp 时带
-   `WS_EX_NOREDIRECTIONBITMAP`（`gpui/src/platform/windows/window.rs`），没有那张表面，
-   所以只剩「整窗黑玻璃」。
-2. 反过来去掉 `WS_EX_NOREDIRECTIONBITMAP` 也不行：GPUI 认环境变量
-   `GPUI_DISABLE_DIRECT_COMPOSITION=1`，会退回 `CreateSwapChainForHwnd`，但那条路的
-   swapchain 写死 `DXGI_ALPHA_MODE_IGNORE`，DWM 把窗口当全不透明 —— 模糊被自己的像素
-   盖死，`[gui] opacity` 也一起失效。
-
-**待实施：fork GPUI**
-
-1. `vendor/gpui`（0.2.2）+ `[patch.crates-io] gpui = { path = "vendor/gpui" }`。
-   fork 的 `Cargo.toml` 给 windows 依赖加 `UI_Composition` / `UI_Composition_Desktop` /
-   `UI_Composition_Effects` / `Win32_System_WinRT` / `Win32_System_WinRT_Composition` /
-   `Win32_System_WinRT_Graphics_Direct2D` / `Graphics_Effects` / `Foundation_Numerics`。
-2. 把 `src/platform/windows/directx_renderer.rs` 的 `DirectComposition`（现在只有
-   `comp_device` / `comp_target` / `comp_visual` 三个字段 + `set_swap_chain`）换成 WinRT 树：
-   同线程 `CreateDispatcherQueueController` → `Compositor` →
-   `ICompositorDesktopInterop::CreateDesktopWindowTarget(hwnd, true)`（IID
-   `29e691fa-4567-4dca-b319-d0f207eb6807`）→ swapchain 用
-   `ICompositorInterop::CreateCompositionSurfaceForSwapChain` → `CreateSurfaceBrushWithSurface`
-   → `SpriteVisual`（尺寸 = 窗口物理像素）→ root `ContainerVisual`。
-   **这一步先不加模糊层**，验证渲染 / 滚动 / IME / 缩放都没坏。
-3. 模糊层：root 里 surface visual **下面**再插一个 `SpriteVisual`，brush =
-   `CreateEffectFactory(GaussianBlurEffect)` + `SetSourceParameter("backdrop", CreateBackdropBrush())`。
-   effect 类照 `ALTaleX531/Win32Acrylic` 的 `CompositionEffect.h`（210 行 C++）移植，要手写
-   `IGraphicsEffect` / `IGraphicsEffectSource` / `IGraphicsEffectD2D1Interop`
-   （`GetEffectId` 返回 `CLSID_D2D1GaussianBlur`，属性走 `IPropertyValue`），估计 400~500 行
-   unsafe COM。窗口 resize 时同步 `SetSize`。
-4. 开关与收尾：`[gui] acrylic`、`config.example.toml`、STATE / AGENTS 同步。fork 侧用
-   `GPUI_ACRYLIC` 之类的环境变量控制，**别动 GPUI 的 `WindowOptions`**（少一处 patch 点）。
-
-备选（不 fork）：呼出前截屏 + box blur + `window.paint_image()` 当底图。
-`RenderImage::new(BGRA)` 那条路是通的，但拿到的是「一帧死图」，背后播视频会露馅。
-
-动手前记住：
-
-- `CreateHostBackdropBrush` 在 Win32 窗口上**全黑**，只有 `CreateBackdropBrush` 有效。
-- **一个 HWND 只能有一个 DComp target**：WinRT `CreateDesktopWindowTarget` 与 Win32
-  `CreateTargetForHwnd` 不能并存，fork 必须整体替换，不能「保留 Win32 target 再插一层」。
-- WinRT 侧要求同线程 `DispatcherQueue`，GPUI 的 GUI 线程得先补这一步。
-- windows 0.62 的 `Vector2` 在独立 crate `windows-numerics` 里（tupa 已加依赖）；
-  `Visual::SetSize` 要它，`windows::Foundation::Numerics` 里没有 `Vector2`。
+fork `vendor/gpui`，把 `directx_renderer.rs` 的 `DirectComposition` 换成 WinRT 树：
+`CreateDispatcherQueueController` → `Compositor` →
+`ICompositorDesktopInterop::CreateDesktopWindowTarget(hwnd, true)`（IID
+`29e691fa-4567-4dca-b319-d0f207eb6807`）→ swapchain 走
+`ICompositorInterop::CreateCompositionSurfaceForSwapChain` → surface brush → root visual，
+再在最底层加一个 `CreateHostBackdropBrush()` 的 `SpriteVisual`（+ `DWMWA_USE_HOSTBACKDROPBRUSH`）。
+**host backdrop 自带模糊，不需要 Win2D 的 `GaussianBlurEffect`**，整体约 150 行。
+注意：一个 HWND 只能有一个 DComp target，WinRT target 与 Win32 target 不能并存。
 
 ## 7. 调试入口
 

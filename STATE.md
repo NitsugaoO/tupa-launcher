@@ -1,6 +1,6 @@
 # tupa-launcher 状态
 
-updated: 2026-11-18 · code: `193e225`（显示层两行卡片 · 输入框选区/剪贴板 · 滚动修复 · 模糊探针）
+updated: 2026-11-18 · code: `e7213d2`（显示层两行卡片 · 输入框选区/剪贴板 · 滚动修复 · 模糊探针）
 
 > 判断本文件是否过期：比较 `code` 与 `git log -1 --format=%h -- src Cargo.toml`。
 > 只改文档的提交不算过期。
@@ -13,35 +13,17 @@ updated: 2026-11-18 · code: `193e225`（显示层两行卡片 · 输入框选�
 
 ## 阶段
 
-- **窗口模糊探针（2026-11-18）**：新增 `examples/acrylic_probe.rs`，结论写进
-  `docs/06-handover.md` §6「窗口模糊」。实测：WinRT `CreateBackdropBrush` 在
-  `WS_EX_NOREDIRECTIONBITMAP` 窗口上**能采到真实的背后桌面**（其它窗口的内容也采得到），
-  但**完全不模糊**；`CreateHostBackdropBrush` + `DWMWA_USE_HOSTBACKDROPBRUSH` 在 Win32 上
-  **全黑**；Win11 系统材质 `DWMWA_SYSTEMBACKDROP_TYPE`（Mica/Acrylic/MicaAlt 三个值）
-  配合 `DwmExtendFrameIntoClientArea` 退化成**纯灰块**，也不采样背后。
-  2026-11-18 调研过别家（详见 docs/06）：**Zed 上游、ELYTerminal 在 Windows 上也都没做出模糊**
-  （都是 GPUI 的 acrylic / systembackdrop，实测 ELY 只有半透明；`dux-web/gpui` 的
-  `BackdropBlur` 只有 Metal/wgpu，DirectX 没实现）→ Windows 上没有现成轮子可抄。
-  真模糊只剩 fork GPUI（换 WinRT 合成树 + 自实现 Win2D 兼容 `GaussianBlurEffect`），
-  或应用层截一帧再模糊。
-  本次**只动了 `Cargo.toml`（windows 的 WinRT features + `windows-numerics`）与 `examples/`**，
-  `src/` 一行未改 —— 面板行为完全不变。
-
-- **窗口位置 / 滚动（2026-11-18）**：
-  - 窗口从「屏幕居中」改成 **顶部 12% 屏高**（`style::TOP_RATIO`），高度硬上限
-    屏高 62%（`Panel::max_height`，resize 时 clamp）；展开时不再滑到屏幕中间
-  - 列表底部多留 `LIST_TOP`：滚到底时最后一行不贴着状态栏
-  - 循环跳转（最后一条 ↓ 回第一条）：marker / scroll 位移超过一屏就**瞬移**，
-    之前选框会从列表底端扫到顶端（看着像「跳出可见范围」）
-  - 滚动动画改成**定长 ease-out**（`MOVE_SECS` 0.16s），选框和滚动**共享同一个进度**；
-    滚轮**一格只走一行**（Windows 默认 3 行，一格跳三条太粗）；判据用目标位置
-    `scroll_target`，不用动画中的 `scroll_y`（滞后，向上滚会漏判）
-  - **滚到深处列表变空白的根因**：`inner` 只渲染 `first..last`，偏移却写 `-scroll_y`，
-    少减了 `first * row_h` —— 滚得越深偏得越多，到底部整片内容被推到容器外。
-    这条也是「滚动怪怪的」的一部分（浅滚时偏差不到一屏，看不出来）
-  - 卡片底色试过、用户不要（要的是两行结构不是色块），已去掉；
-    第二行多段之间改用竖线 ` │ ` 分隔
-
+- **亚克力（窗口模糊）通了（2026-11-18）**：`[gui] acrylic = true` → 面板背后是**实时**模糊桌面
+  （能采到别的窗口，不只是壁纸），实测棋盘格铺底只剩一片模糊明暗。
+  实现只有两处：`gui::run` 把 `window_background` 设成 `Blurred`，
+  `src/gui/acrylic.rs` 再补一次 `SetWindowCompositionAttribute`
+  （**gradient alpha 必须是 1**；GPUI 0.2.2 传的是 0，会变成整窗黑玻璃）。
+  **不用 fork GPUI、不用 Win2D、不写 blur shader。**
+  之前判成「做不到」的真因是**节能模式**（`GetSystemPowerStatus().SystemStatusFlag == 1`）
+  或系统「透明效果」关闭：那时 DWM 把 Acrylic / Mica / host backdrop 全降级成不透明纯色，
+  所有材质 API 都「调用成功但没效果」。排查顺序、探针对照表、Zed / ELYTerminal 的做法
+  见 `docs/06-handover.md` §6「窗口模糊」。`examples/acrylic_probe.rs` 留着做回归
+  （`host` 模式就是后备方案 —— WinRT host backdrop brush —— 的真模糊验证）。
 - **显示层：两行卡片（2026-11-18）**：普通模式从「标题 + 一条 ` · ` 拼起来的附注」
   改成**两行卡片**（第一行 标题 + 右侧状态/次数/时间，第二行 路径/分组 dim 小字），
   `Ctrl+Tab` 切**单行密度表**（一屏 12 条）。要点：
@@ -310,17 +292,6 @@ updated: 2026-11-18 · code: `193e225`（显示层两行卡片 · 输入框选�
 
 ## 未完成
 
-- **真亚克力（模糊）**：**探针已跑完，路线已定，代码还没动**（2026-11-18）。
-  实测结论：WinRT `CreateBackdropBrush` 能采到窗口后面的真实桌面（别的窗口也行）但不模糊；
-  `CreateHostBackdropBrush` 在 Win32 上全黑；`Blurred` / `DWMWA_SYSTEMBACKDROP_TYPE` /
-  Windhawk 三条老路在 `WS_EX_NOREDIRECTIONBITMAP` + DComp 窗口上全都无效。
-  剩下的活是 fork 三步，**一步都还没做**（详细步骤/API/IID/坑见 `docs/06-handover.md` §6）：
-  ① vendor gpui 0.2.2，把 DComp 段换成 WinRT `Compositor` + `CreateDesktopWindowTarget`
-  + swapchain→`CompositionSurface` 的 surface brush（先不加模糊层，验证渲染没坏）；
-  ② 移植 Win2D 兼容的 `GaussianBlurEffect`（`IGraphicsEffect` / `IGraphicsEffectSource` /
-  `IGraphicsEffectD2D1Interop`，约 400~500 行 unsafe）并插到 surface visual 下面；
-  ③ `[gui] acrylic` 开关 + 配置/文档收尾。
-  注：**一个 HWND 只能有一个 DComp target**，WinRT target 与 Win32 target 不能并存 → 只能整体替换。
 - **窗口宽度记忆**：面板宽度固定按主屏 62%（高度随内容），拖边改过的宽度还没写回
   `gui.json`（`config.toml` 手写带注释，不能程序回写）。
 - **TUI 侧没跟进的新交互**：紧凑形态、双击执行、chip 配色只在 GUI 有；
@@ -336,7 +307,7 @@ updated: 2026-11-18 · code: `193e225`（显示层两行卡片 · 输入框选�
 |---|---|
 | 权威源码 | `~/Projects/tupa-launcher`（git → `NitsugaoO/tupa-launcher`） |
 | GPUI 面板 | `target/release/tupa-gui.exe`（`cargo build --release --features gui` 才产出）。
-  配置在 `config.toml` 的 `[gui]`：`hotkey` / `tray` / `opacity`；托盘左键显隐、右键菜单 |
+  配置在 `config.toml` 的 `[gui]`：`hotkey` / `tray` / `opacity` / `acrylic`；托盘左键显隐、右键菜单 |
 | GlazeWM 规则 | 权威源 `~/Projects/my_dot/dotfiles/glazewm/config.yaml`（`tupa-gui` → `ignore`），
   改完 `sync-dotfiles.ps1` + `Alt+Shift+R` 热重载 |
 | 生效配置 | `~/.config/tupa-launcher/{config,actions,theme}.toml`（改完下次启动生效，**不用编译**） |
