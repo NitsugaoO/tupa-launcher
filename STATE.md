@@ -1,6 +1,6 @@
 # tupa-launcher 状态
 
-updated: 2026-11-19 · code: `d32f200`（↑↓ 终端化 + 补全默认关 · 列表模式补键 · chip 只留渲染 · @hist 隐藏 · 右键菜单 · 删 @pi / @run · @go → @z · clip 同步出 · clean 迁到 HTML）
+updated: 2026-11-19 · code: `d32f200`（列表模式 + 鼠标切焦点 + 绿条跟随焦点 · ↑↓ 终端化 + 补全默认关 · chip 只留渲染（光标进块时降级） · @hist 隐藏 · 右键菜单 · 删 @pi / @run · @go → @z · clip 同步出 · clean 迁到 HTML）
 
 > 判断本文件是否过期：比较 `code` 与 `git log -1 --format=%h -- src Cargo.toml`。
 > 只改文档的提交不算过期。
@@ -101,7 +101,10 @@ updated: 2026-11-19 · code: `d32f200`（↑↓ 终端化 + 补全默认关 · �
   - 单测：`App` 在 `cfg!(test)` 下关闭剪贴板（`clipboard_on`），否则测试会读真实剪贴板，
     并行时还会被 `STATUS_HEAP_CORRUPTION` 崩（实测碰到过一次）。
 
-- **输入框 provider chip（2026-11-19）**：关键字一命中 provider（`@pi`，**不必敲空格** ——
+- **输入框 provider chip（2026-11-19）** ← **「编辑上真原子」那一段已被 2026-11-19
+  「四项交互调整 / chip 不再原子」取代**：现在只剩胶囊渲染，光标能进块内、退格逐字删、
+  `Home` 到行首；光标 / 选区落入关键字范围时胶囊还会降级成普通文字。文中 `@pi` 示例按
+  `@z` 读（provider 已删）：关键字一命中 provider（`@pi`，**不必敲空格** ——
   列表就是那一刻切到 pi 会话的），输入框最前面那段就从纯文本变成原子胶囊
   （字形 + 关键字，本机 `@` 前缀下是 `(π pi)`），后面继续打的才是查询词。
   状态是 `App::chip_end`（**字符**下标，`0..chip_end`），在 `refresh_with` 里算：
@@ -519,9 +522,7 @@ updated: 2026-11-19 · code: `d32f200`（↑↓ 终端化 + 补全默认关 · �
   CreateProcess / `.cmd` 走 `cmd.exe /C` / `.lnk` 走 `open::that_detached` → ShellExecuteExW），
   都带了不建控制台的标志。怀疑落在**条目本身**（scoop shim / 某 `.cmd` 再起 cmd）。
   定位办法：在 `launch` 里加 `tray::log` 打出「走了哪条路 + 路径」，复现一次看
-  `%TEMP%	upa-gui.log`。兜底方案是 `.exe` / `.cmd` 也统一改 `ShellExecuteExW`。
-- **`/clean` 服务端（my-pi-plugins 侧）**：页面 `web/clean/index.html` 与契约
-  `docs/09-clean-api.md` 已交付，插件里要实现三个接口并托管页面。
+  `%TEMP%\tupa-gui.log`。兜底方案是 `.exe` / `.cmd` 也统一改 `ShellExecuteExW`。
 - **窗口宽度记忆**：面板宽度固定按主屏 62%（高度随内容），拖边改过的宽度还没写回
   `gui.json`（`config.toml` 手写带注释，不能程序回写）。
 - **TUI 侧没跟进的新交互**：紧凑形态、双击执行、chip 配色只在 GUI 有（输入框的
