@@ -1,6 +1,6 @@
 # tupa-launcher 状态
 
-updated: 2026-11-19 · code: `cdac206`（输入框 provider chip · @pi 标题改读 pi-sessions 索引 · 亚克力 + 圆角 + 失焦光标 · 两行卡片 · 窗口高 0.68 + 提前两行滚动 · 应用图标 + mini chip + 文件/网页/Steam 图标 + 全类型图标 + 历史死链回填）
+updated: 2026-11-19 · code: `27c5494`（输入框 provider chip · @pi 标题改读 pi-sessions 索引 · 亚克力 + 圆角 + 失焦光标 · 两行卡片 · 窗口高 0.68 + 提前两行滚动 · 应用图标 + mini chip + 文件/网页/Steam 图标 + 全类型图标 + 历史死链回填）
 
 > 判断本文件是否过期：比较 `code` 与 `git log -1 --format=%h -- src Cargo.toml`。
 > 只改文档的提交不算过期。
