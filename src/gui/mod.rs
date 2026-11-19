@@ -940,11 +940,20 @@ impl Panel {
         // 已激活的命令前缀（`@pi `）→ 原子 chip：字形 + 关键字。
         // chip 盖住 `input[..chip_end]`，但只显示「去掉前缀符」的部分（`@pi` → `pi`）——
         // `@` 的语义已经由 chip 这个形状承担，再写进去只是占位。
-        let chip = self.app.chip_end.map(|end| {
-            let label: String = self.app.input.chars().skip(1).take(end - 1).collect();
-            let keyword = self.app.chip_keyword().unwrap_or_default().to_string();
-            (end, label, glyphs::for_keyword(&keyword))
-        });
+        // chip 只是渲染：光标 / 选区一旦落进关键字范围，就**降级成普通文字**重画。
+        // 不降级的话光标在胶囊内部没地方放（旧代码把光标画在胶囊末尾），
+        // 表现就是 `@app` 按 Home 后光标「跳到胶囊后面」（2026-11-19 反馈）。
+        let chip = self
+            .app
+            .chip_end
+            .filter(|end| {
+                self.app.cursor >= *end && self.app.anchor.map_or(true, |anchor| anchor >= *end)
+            })
+            .map(|end| {
+                let label: String = self.app.input.chars().skip(1).take(end - 1).collect();
+                let keyword = self.app.chip_keyword().unwrap_or_default().to_string();
+                (end, label, glyphs::for_keyword(&keyword))
+            });
         let chip_end = chip.as_ref().map(|(end, _, _)| *end);
         // 光标的目标位置：提示符 + chip（若已激活）+ 已输入 + 预编辑（全部按真实字形宽度量）
         let preedit = self.preedit.as_ref().map(|(_, text)| text.clone());
@@ -961,12 +970,11 @@ impl Panel {
             .unwrap_or(0.0);
         // chip 盖住的那段文字不再按字符宽度算（它已经被画成胶囊了）
         let before_width = match chip_end {
-            Some(end) if self.app.cursor >= end => {
+            // 走到这里光标一定在块之后（进块时 chip 已降级为 None，见上面）
+            Some(end) => {
                 let rest: String = before.chars().skip(end).collect();
                 chip_width + text_width(window, &rest, style::INPUT_SIZE)
             }
-            // 光标在 chip 内部（理论上进不去）—— 当它停在 chip 末尾
-            Some(_) => chip_width,
             None => text_width(window, before, style::INPUT_SIZE),
         };
         let preedit_width = preedit
@@ -1013,6 +1021,17 @@ impl Panel {
             .flex_row()
             .items_center()
             .overflow_hidden()
+            // 点输入行 = 把焦点收回输入框（用户 2026-11-19：鼠标点哪边焦点在哪边）
+            .on_mouse_down(
+                gpui::MouseButton::Left,
+                cx.listener(|panel: &mut Panel, _: &gpui::MouseDownEvent, window, cx| {
+                    panel.leave_list_mode();
+                    panel.cursor_on = true;
+                    panel.blink_at = std::time::Instant::now() + Duration::from_millis(500);
+                    window.focus(&panel.focus);
+                    cx.notify();
+                }),
+            )
             .child(
                 // 文本输入 / IME 的注册点：`handle_input` 只能在 paint 阶段调用。
                 // 用 1×1 的绝对定位块贴在行首——0×0 的元素不会 paint，handler 就注册不上。
@@ -1891,6 +1910,16 @@ impl Panel {
             .overflow_hidden()
             .pb(px(style::LIST_TOP))
             .on_scroll_wheel(cx.listener(Self::on_scroll))
+            // 点列表区（含空白）= 焦点给列表
+            .on_mouse_down(
+                gpui::MouseButton::Left,
+                cx.listener(|panel: &mut Panel, _: &gpui::MouseDownEvent, window, cx| {
+                    panel.list_mode = true;
+                    panel.hint_open = true;
+                    window.focus(&panel.focus);
+                    cx.notify();
+                }),
+            )
             .child(inner);
 
         // 滚动条（只做指示，不能拖）：轨道铺满列表区右边，滑块高度 = 可视/内容。
@@ -2312,6 +2341,9 @@ fn row_click_handler(
         );
         let _ = panel.update(cx, |panel, cx| {
             panel.menu = None;
+            // 点击列表 = 焦点交给列表（输入框失焦）
+            panel.list_mode = true;
+            panel.hint_open = true;
             panel.app.list_state.select(Some(index));
             if double {
                 panel.run_selected(cx);
