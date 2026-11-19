@@ -228,6 +228,9 @@ struct Panel {
     preedit: Option<(usize, String)>,
     /// 紧凑态下按 ↓ 手动展开的开屏列表（收藏 + 最近命令）
     hint_open: bool,
+    /// 上一次看到的「窗口是否有系统焦点」。只用来在**变化时**推一帧：
+    /// 窗口失焦要立刻把绿条 / 提示符变灰，不能等下一次交互才重绘。
+    window_active: bool,
     /// 列表模式：输入框失焦，键全部作用于列表（↑↓ / Enter / 空格开菜单）。
     ///
     /// 用户 2026-11-19 的要求：「列表区和输入框分开，操作列表时输入框失焦，Esc 回输入框」。
@@ -373,6 +376,12 @@ impl Panel {
                         cx.notify();
                     }
 
+                    // 系统焦点变了就推一帧：失焦时绿条 / 提示符要立刻变灰
+                    if panel.window_active != active {
+                        panel.window_active = active;
+                        cx.notify();
+                    }
+
                     panel.app.tick += 1;
 
                     // 输入从「有字」变成「没字」就收回紧凑态（不管清空是怎么发生的：
@@ -494,6 +503,7 @@ impl Panel {
             blink_at: std::time::Instant::now() + Duration::from_millis(500),
             preedit: None,
             hint_open: false,
+            window_active: true,
             list_mode: false,
             menu: None,
             was_empty: true,
@@ -1052,11 +1062,12 @@ impl Panel {
                 .h(px(1.)),
             );
 
-        // 提示符（列表模式下变暗：输入框已失焦）
+        // 提示符：列表模式（输入框失焦）或**整个窗口失去系统焦点**时都变暗
+        let input_dimmed = self.list_mode || !window.is_window_active();
         row = row.child(
             div()
                 .text_size(px(style::INPUT_SIZE))
-                .text_color(if self.list_mode { p.faint } else { p.accent })
+                .text_color(if input_dimmed { p.faint } else { p.accent })
                 .child(style::PROMPT),
         );
 
@@ -1887,10 +1898,15 @@ impl Panel {
                     .h(px(row_h - style::ROW_GAP))
                     .rounded(px(style::ROW_RADIUS))
                     // 左侧绿条用边框画：不占内容宽度，列表能整体左移。
-                    // **焦点在列表时才亮绿**，焦点在输入框时是灰的（2026-11-19 用户要求）：
-                    // 绿条 = 「键盘现在作用在列表上」，不然两个区同时高亮会分不清焦点在哪。
+                    // **只有「窗口有系统焦点 + 键盘作用在列表上」才亮绿**，其余全灰
+                    // （2026-11-19 用户要求）：绿条 = 「按键现在会作用到这一行」。
+                    // 窗口被别的程序抢走焦点时，整窗都不该显示「我在响应」。
                     .border_l(px(style::ACCENT_BAR))
-                    .border_color(if self.list_mode { p.accent } else { p.dim })
+                    .border_color(if self.list_mode && window.is_window_active() {
+                        p.accent
+                    } else {
+                        p.dim
+                    })
                     .bg(p.row_selected),
             );
         }
