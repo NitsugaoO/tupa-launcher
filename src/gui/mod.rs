@@ -651,6 +651,20 @@ impl Panel {
             }
         }
 
+        // 开屏紧凑态（只有输入行）按 Enter：**先展开列表**，不要直接执行第一项。
+        // 空输入时用户根本没选，回车就打开某个收藏/历史太容易误触（2026-11-19 反馈）。
+        // 展开后再按 Enter 才执行；↓ 仍是「展开 + 到第二项」。
+        if self.app.input.is_empty()
+            && !self.hint_open
+            && matches!(&key, Some(k) if k.code == crossterm::event::KeyCode::Enter && k.modifiers.is_empty())
+        {
+            self.list_mode = true;
+            self.hint_open = true;
+            window.focus(&self.focus);
+            cx.notify();
+            return;
+        }
+
         // 紧凑态（或任意输入模式）按 ↓：**进列表模式**，并把开屏列表拉下来。
         // 不移动选择 —— 进模式后 ↓ 才管移动（用户 2026-11-19：列表与输入区要分开）。
         let plain_down = matches!(

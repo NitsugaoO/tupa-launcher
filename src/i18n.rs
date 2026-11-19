@@ -366,7 +366,7 @@ pub fn gui_help() -> Vec<(&'static str, &'static str)> {
         Lang::Zh => vec![
             ("↓", "进列表模式并选中下一项；列表模式里是向下移"),
             ("↑", "翻输入历史（更早一条）；列表模式里是向上移"),
-            ("Enter", "执行当前项"),
+            ("Enter", "执行当前项；开屏紧凑态时先展开列表"),
             ("Space / →", "列表模式：打开当前行菜单（← 关闭）"),
             ("Home / End", "列表模式：第一条 / 最后一条"),
             ("Tab", "补全命令 / 参数（`[general] completion`，默认关）"),
@@ -387,7 +387,7 @@ pub fn gui_help() -> Vec<(&'static str, &'static str)> {
         Lang::En => vec![
             ("↓", "enter list mode + next item; move down in list mode"),
             ("↑", "input history (older); move up in list mode"),
-            ("Enter", "run the selected item"),
+            ("Enter", "run the selected item; at home (compact) it expands the list first"),
             ("Space / →", "list mode: open the row menu (← closes)"),
             ("Home / End", "list mode: first / last item"),
             ("Tab", "complete command / argument (`[general] completion`, off by default)"),
