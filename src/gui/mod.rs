@@ -647,6 +647,33 @@ impl Panel {
             &key,
             Some(k) if k.code == crossterm::event::KeyCode::Down && k.modifiers.is_empty()
         );
+        // 输入历史模式：↑ 更早、↓ 更新（翻到底自动回草稿并退出）。
+        // 这一层必须在 ↓ 进列表之前判 —— 否则历史里按 ↓ 会直接跳到列表模式（2026-11-19 反馈）。
+        if !self.list_mode && self.app.in_history() {
+            use crossterm::event::KeyCode as Kc;
+            if let Some(k) = key.as_ref() {
+                match k.code {
+                    Kc::Up => {
+                        self.app.history_prev();
+                        self.cursor_on = true;
+                        self.blink_at = std::time::Instant::now() + Duration::from_millis(500);
+                        window.focus(&self.focus);
+                        cx.notify();
+                        return;
+                    }
+                    Kc::Down => {
+                        self.app.history_next();
+                        self.cursor_on = true;
+                        self.blink_at = std::time::Instant::now() + Duration::from_millis(500);
+                        window.focus(&self.focus);
+                        cx.notify();
+                        return;
+                    }
+                    _ => {}
+                }
+            }
+        }
+
         // 输入模式 ↓：进列表模式，并**直接选中下一项**（回车执行第 1 项，↓ 就该到第 2 项）。
         // 已经在列表模式里，↓ 归下面的导航分支。
         if plain_down && !self.list_mode {
@@ -759,7 +786,9 @@ impl Panel {
         }
 
         // 展开着的时候，Esc 先收回紧凑形态，而不是直接隐藏面板
-        if self.hint_open && is_escape {
+        // 收紧凑只管「开屏展开着」的情况（输入为空）。输入非空时 Esc 的语义是**清空输入**，
+        // 不能被这一层吃掉 —— 否则 `@app` → ↓ → Esc → Esc 要按两次才清空（2026-11-19 反馈）。
+        if is_escape && self.hint_open && self.app.input.is_empty() {
             self.hint_open = false;
             window.focus(&self.focus);
             cx.notify();
