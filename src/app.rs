@@ -54,11 +54,12 @@ pub struct App {
     pub active: usize,
     /// 命令前缀的结束位置（字节下标），用于高亮
     pub prefix_end: Option<usize>,
-    /// 已激活的命令前缀占 `input` 的前几个**字符**（`@pi ` → `Some(3)`）。
+    /// 已激活的命令前缀占 `input` 的前几个**字符**（`@pi` → `Some(3)`）。
     ///
-    /// 要同时满足：关键字命中**真实 provider**（命令列表不算）、后面已经敲了空格。
-    /// 光打 `@pi` 还没定下来（用户可能接着打 `@pix`），那时仍是普通文字。
-    /// GUI 把这一段画成原子 chip（字形 + 关键字）；编辑上也不许光标进入其中。
+    /// 判据就一条：关键字命中**真实 provider**（命令列表 / 默认搜索不算）。
+    /// **不要求空格** —— `parse` 本身不要求，列表在 `@pi` 就已经切到 pi 会话了，
+    /// chip 必须同一时刻出现，否则看着错位。带修饰符的 `@pi:clean` 也整体成块。
+    /// GUI 把它画成原子 chip（字形 + 关键字）；编辑上也不许光标进入其中。
     pub chip_end: Option<usize>,
     /// 当前结果的列宽规格
     pub columns: &'static [Column],
@@ -240,10 +241,15 @@ impl App {
             None
         };
         self.prefix_end = prefix_end;
-        // 原子前缀：`@pi ` 这个形状才成块。加上空格是刻意的 —— 空格就是「定下来」这个动作
-        self.chip_end = prefix_end
-            .filter(|end| activated && line[*end..].starts_with(' '))
-            .map(|end| line[..end].chars().count());
+        // 原子前缀：关键字**一命中 provider 就成块**，不等空格 —— 列表切到该 provider 是
+        // 同一时刻发生的（`parse` 就不要求空格），只让 chip 等空格会出现「列表已经换了、
+        // 输入框还是纯文字」的错位（2026-11-19 用户反馈）。带修饰符的 `@pi:clean` 同理。
+        // 代价：被打错时（`@pix`）chip 消失回普通文字，只能整块删重打 —— 原子语义本意。
+        self.chip_end = if activated {
+            prefix_end.map(|end| line[..end].chars().count())
+        } else {
+            None
+        };
         // chip 之间不许有光标：所有编辑路径最后都会走到 refresh，在这里统一兜一次
         self.cursor = self.snap_cursor(self.cursor);
         self.pending_selection = if keep_selection {
@@ -1748,28 +1754,34 @@ mod tests {
         assert_eq!(app.cursor, 4, "「报告」开头在 4");
     }
 
-    /// chip 只在「关键字命中 provider **并且** 后面已经敲了空格」时出现
+    /// chip 与「列表切 provider」同一时刻出现：关键字一命中就成块，不等空格
     #[test]
-    fn chip_needs_space_and_known_provider() {
+    fn chip_appears_as_soon_as_provider_matches() {
         let mut app = app_with_prefix("@");
 
         app.set_input("@pi".to_string());
-        assert_eq!(app.chip_end, None, "没敲空格时还是普通文字");
-
-        app.set_input("@pi ".to_string());
-        assert_eq!(app.chip_end, Some(3));
+        assert_eq!(app.chip_end, Some(3), "命中 provider 就已经进 pi 会话了，chip 必须同步");
         assert_eq!(app.chip_text().as_deref(), Some("@pi"));
         assert_eq!(app.chip_keyword(), Some("pi"));
 
-        // 关键字没打全 / 只打了前缀：都还是文字
-        app.set_input("@p ".to_string());
+        app.set_input("@pi ".to_string());
+        assert_eq!(app.chip_end, Some(3), "空格不改变 chip 范围");
+
+        // 关键字没打全 / 只打了前缀：都还是文字（列表也是命令列表）
+        app.set_input("@p".to_string());
         assert_eq!(app.chip_end, None);
-        app.set_input("@ ".to_string());
+        app.set_input("@".to_string());
+        assert_eq!(app.chip_end, None);
+
+        // 打错关键字：退回普通文字（和列表退回命令列表一致）
+        app.set_input("@pix".to_string());
         assert_eq!(app.chip_end, None);
 
         // 带修饰符时整体成一块（`@pi:clean` 不该拆成两半）
-        app.set_input("@pi:clean ".to_string());
+        app.set_input("@pi:clean".to_string());
         assert_eq!(app.chip_end, Some(9));
+        app.set_input("@pi:clean:week".to_string());
+        assert_eq!(app.chip_end, Some(14), "chip 跟着修饰符一起变长");
 
         // 不是命令：一律没有 chip
         app.set_input("随便写点东西 ".to_string());
@@ -1819,9 +1831,9 @@ mod tests {
         app.on_key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::CONTROL));
         assert_eq!(app.input, "", "第二次整个 chip 一起走，不留 `@`");
 
-        // chip 消失后光标又能回到 0（`@pi` 没空格 = 普通文字）
+        // `@pi`（还没空格）时也是原子块：一次退格整块清空
         app.set_input("@pi".to_string());
-        app.on_key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE));
-        assert_eq!(app.cursor, 2);
+        app.on_key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE));
+        assert_eq!(app.input, "", "chip 一旦成块就整体删，不逐字退");
     }
 }

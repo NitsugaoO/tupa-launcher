@@ -13,20 +13,24 @@ updated: 2026-11-19 · code: `cdac206`（输入框 provider chip · @pi 标题�
 
 ## 阶段
 
-- **输入框 provider chip（2026-11-19）**：打完 `@pi ` **按空格激活**后，输入框最前面那段
-  从纯文本变成原子胶囊（字形 + 关键字，本机 `@` 前缀下是 `(π pi)`），后面继续打的才是
-  查询词。状态是 `App::chip_end`（**字符**下标，`0..chip_end`），在 `refresh_with` 里算：
-  `Parsed::Command` **且** 关键字后紧跟空格 —— 只打 `@pi` 不算（`providers::parse`
-  不要求空格，不额外判空格的话 chip 会在拼关键字时提前冒出来）。
+- **输入框 provider chip（2026-11-19）**：关键字一命中 provider（`@pi`，**不必敲空格** ——
+  列表就是那一刻切到 pi 会话的），输入框最前面那段就从纯文本变成原子胶囊
+  （字形 + 关键字，本机 `@` 前缀下是 `(π pi)`），后面继续打的才是查询词。
+  状态是 `App::chip_end`（**字符**下标，`0..chip_end`），在 `refresh_with` 里算：
+  **只看 `Parsed::Command`**。曾经加过「必须跟空格」的条件，结果列表已经换了、chip 还
+  没出现，看着错位（2026-11-19 用户反馈，已改掉）。代价：关键字打错（`@pix`）chip
+  会消失回普通文字，只能整块删重打 —— 原子语义本意。
   编辑上真原子：`snap_cursor` 在 `refresh_with` 末尾统一夹光标（覆盖输入 / 粘贴 / IME），
-  `Backspace` 贴着 chip 一次删掉整块（含分隔空格），`Ctrl+Backspace` 反向跳词落到 0
-  而不是停在 `@pi` 中间，`Home` 落在 chip 之后。`@pi:clean` 这类带修饰符的整体成一块。
+  `Backspace` 贴着 chip 一次删掉整块（含分隔空格；`@pi` 无空格时直接清空），
+  `Ctrl+Backspace` 反向跳词落到 0 而不是停在 `@pi` 中间，`Home` 落在 chip 之后。
+  `@pi:clean` / `@pi:clean:week` 这类带修饰符的整体成一块，chip 跟着变长。
   GUI 在 `gui/mod.rs::input_row` 画胶囊（`style::CHIP_INPUT_*` 常量），光标位置用
   `text_width` 实量 chip 宽度 + 后续文本，`bounds_for_range`（IME 候选窗）也补了偏移；
   选中覆盖 chip 时底色亮一档，chip 不被当普通文字重画。TUI **仍只有黄色高亮**，
   但原子语义在 app 层，TUI 一样生效。
-  实测：`@p ` / `@pi`（无空格）不成块、`@pi abc` chip + 光标贴字、删完 abc 再退格
-  整块消失回开屏、Shift+Home 选中 chip 亮一档。
+  实测：`@p` / `@pix`（未命中）不成块且回普通文字、`@pi`（无空格）chip 与列表同时出现、
+  `@pi abc` chip + 光标贴字、删完 abc 再退格整块消失回开屏、`@pi` 时一次退格直接清空、
+  Shift+Home 选中 chip 亮一档。
 - **`@pi` 显示会话名（2026-11-18 深夜）**：标题不再取「第一条用户消息」。pi 的自动标题
   （auto-title，每 4 轮重评）写在 jsonl 的 `{"type":"session_info","name":…}` 里，
   **位置不固定**（改标题就追加一条；本机 448 个会话里最后一条距末尾中位 8KB、p90 648KB、
