@@ -158,6 +158,8 @@ cargo clippy --release --features gui    # 零警告；必须带 feature，否�
   9. **marker（选框）的坐标基准**：`inner` 里只渲染 `first..last` 这几行，第一行落在 y=0，
      所以 `top = marker_y - first * row_h`。漏掉这个减项时「只看第一屏永远正确」，
      滚到第二屏才暴露成"选框一路往下漂"。
+      **左侧强调条的颜色跟着焦点走**：`list_mode` 时 `p.accent`（绿）、否则 `p.dim`（灰）——
+      绿条 = 「键盘现在作用在列表上」；两个区同时亮会分不清焦点在哪（2026-11-19 用户要求）。
  10. **选中行不要挂 `hover` 底色**：行画在 marker 之后，hover 会把选框盖住。
      选中态只由 marker 负责，hover 只表示「鼠标在这行但没选中」。
  11. **chip 渐变的两个时间戳别混用**：`chip_settled_at` 会在 marker 落地时被重置，

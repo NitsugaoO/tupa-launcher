@@ -1886,9 +1886,11 @@ impl Panel {
                     .w_full()
                     .h(px(row_h - style::ROW_GAP))
                     .rounded(px(style::ROW_RADIUS))
-                    // 左侧绿条用边框画：不占内容宽度，列表能整体左移
+                    // 左侧绿条用边框画：不占内容宽度，列表能整体左移。
+                    // **焦点在列表时才亮绿**，焦点在输入框时是灰的（2026-11-19 用户要求）：
+                    // 绿条 = 「键盘现在作用在列表上」，不然两个区同时高亮会分不清焦点在哪。
                     .border_l(px(style::ACCENT_BAR))
-                    .border_color(p.accent)
+                    .border_color(if self.list_mode { p.accent } else { p.dim })
                     .bg(p.row_selected),
             );
         }
