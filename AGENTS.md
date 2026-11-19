@@ -251,11 +251,14 @@ cargo clippy --release --features gui    # 零警告；必须带 feature，否�
     **已全部删除**。加回来之前先想清楚是不是又要"整体"语义。
   - **新增 provider 要补 `gui/glyphs.rs::for_keyword`**，漏了只是回落问号（没有编译错误）。
 - **输入区 / 列表区分开（列表模式，2026-11-19）**：输入框有焦点时所有键都是输入（空格是分隔符）；
-  按 `↓`（或 `↑`）进入 `Panel::list_mode`，此时输入框「失焦」：提示符变暗、光标隐藏、
-  **IME 与字符输入都被忽略**（`gui/input.rs` 三个 handler 里判 `list_mode`），
-  键只作用于列表：`↑↓` 移动、`Space` 开当前行菜单、`Enter` 执行、`Esc` 回到输入框。
+  `↓` 进入 `Panel::list_mode`（并直接选中下一项），此时输入框「失焦」：提示符变暗、光标隐藏，
+  键只作用于列表：`↑↓` 移动、`Home` / `End` 到首尾、`Space` / `→` 开当前行菜单、`←` 关菜单、
+  `Enter` 执行、`Esc` 回到输入框、**打字自动回输入框并插入**（`Panel::leave_list_mode`，
+  在 IME 的两个 handler 里调）。
+  - **↑ 不是「进列表」而是「翻输入历史」**（终端语义）：输入模式下 `↑` 调 `App::history_prev`，
+    `Esc` 用 `App::in_history()` 判断先退出历史。`Ctrl+↑/↓` 已删除，别再四处加回来。
   - **空格能当菜单键的前提就是这条**：输入模式下空格必须能打出来（`:blog:new 我的 文章`）。
-  - `Esc` 是逐层退：列表模式 → 输入框；展开着的列表 → 紧凑；开屏 → 隐藏面板。
+  - `Esc` 是逐层退：输入历史 → 列表模式 → 输入框 → 紧凑 → 隐藏面板。
   - **不能**每帧检查「输入变空就退回紧凑」—— 紧凑态按 ↓ 展开时输入本来就是空的；
     只在「非空 → 空」的跳变上复位（`Panel::was_empty`）。
 - **浮层只有一套绘制**（2026-11-19）：右键菜单和补全候选共用 `Panel::popup_list`
@@ -263,8 +266,10 @@ cargo clippy --release --features gui    # 零警告；必须带 feature，否�
   菜单优先于补全；超出窗口往内夹。
   - 菜单状态是 `MenuState { row, x, y, selected }`：**键盘和鼠标都能开**
     （右键 → 鼠标坐标；列表模式空格 → `open_menu_for_row` 按行号算坐标）。
-  - 有补全候选时：`Tab` 立即套用（老行为）、`↑↓` 只移高亮（`App::cycle_completion`）、
-    `Enter` 套用高亮项（`App::complete_to`）——**不要再让回车去执行列表项**。
+  - 补全**默认关**（`[general] completion = false`，2026-11-19）：`App::update_completion` 里
+    一次都不算候选，浮层 / 状态栏说明 / Tab 循环全没有。代码一行没删，打开就恢复。
+    打开时：`Tab` 立即套用、`↑↓` 只移高亮（`App::cycle_completion`）、`Enter` 套用高亮项
+    （`App::complete_to`）——**有候选时别再让回车去执行列表项**。
 - **`[[apps]] icon = "..."` 给的图要用 `image` 解，别过 SHELL**（2026-11-18）：
   `SIIGBF_ICONONLY` 对 png / jpg 返回的是「图片文件」通用图标（白纸），不是图本身。
   用 `appicon::load_image`（`image::open` + RGBA→BGRA），给自动解析推不出图的条目用

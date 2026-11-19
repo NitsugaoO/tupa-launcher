@@ -23,6 +23,8 @@ show_hints = true
 frecency = true
 # 剪贴板里是存在的路径 / http(s) 网址时，开屏第一行多一条「跳过去」（默认不选中）
 clipboard = true
+# 输入框的命令 / 修饰符补全（候选浮层 + Tab 循环）。默认关：收益不大，还占住 ↑↓ 两个键
+completion = false
 language = "zh"
 command_prefix = ":"
 

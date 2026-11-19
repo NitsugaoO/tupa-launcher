@@ -97,6 +97,8 @@ pub struct App {
     home: String,
     /// `[general] clipboard`：开屏要不要给一条「剪贴板里的路径 / 网址」
     clipboard_on: bool,
+    /// `[general] completion`：要不要算命令 / 修饰符补全（默认关，见 `config.rs`）
+    completion_on: bool,
     /// 开屏那条剪贴板条目。
     ///
     /// 在 `refresh_with` 里**同步**算好并插到列表前面 —— 不要把这件事留给后台
@@ -199,6 +201,7 @@ impl App {
             animate: false,
             home,
             clipboard_on: cfg.general.clipboard && !cfg!(test),
+            completion_on: cfg.general.completion,
             clip: None,
             prefix,
             generation: 0,
@@ -503,8 +506,8 @@ impl App {
             }
             KeyCode::Home => self.move_cursor(0, shift),
             KeyCode::End => self.move_cursor(self.char_len(), shift),
-            KeyCode::Up if ctrl => self.history_prev(),
-            KeyCode::Down if ctrl => self.history_next(),
+            // 历史翻页不再占用 Ctrl+↑/↓：输入模式下 ↑ 直接翻（GUI 决定，见 `handle_key`），
+            // 列表模式下 ↑↓ 仍是移动选择
             KeyCode::Up => self.move_selection(-1),
             KeyCode::Down => self.move_selection(1),
             // Ctrl+Tab 在部分终端里会被识别成 BackTab + Ctrl
@@ -699,7 +702,12 @@ impl App {
     // -----------------------------------------------------------------
 
     fn update_completion(&mut self) {
-        self.completion = self.compute_completion();
+        // 关掉补全（默认）就一次都不算：候选浮层、状态栏说明、Tab 循环全都没有
+        self.completion = if self.completion_on {
+            self.compute_completion()
+        } else {
+            None
+        };
     }
 
     /// 光标前那个词里，若最后一个 `:` 后面还在输入，就给出候选：
@@ -887,7 +895,8 @@ impl App {
     }
 
     /// Ctrl+↑：上一条（更早的）输入
-    fn history_prev(&mut self) {
+    /// ↑：翻出上一条历史（GUI 输入模式直接调，TUI 也能用）
+    pub fn history_prev(&mut self) {
         if self.history.is_empty() {
             return;
         }
@@ -905,7 +914,8 @@ impl App {
     }
 
     /// Ctrl+↓：下一条（更新的）输入，到底就回到原来的草稿
-    fn history_next(&mut self) {
+    /// ↓：往更新的方向翻；翻到底回草稿并退出历史模式
+    pub fn history_next(&mut self) {
         match self.history_cursor {
             None => {}
             Some(0) => {
@@ -922,7 +932,8 @@ impl App {
     }
 
     /// 任何手动编辑都退出历史浏览模式
-    fn leave_history(&mut self) {
+    /// 退出历史浏览（Esc / 任何编辑操作）
+    pub fn leave_history(&mut self) {
         self.history_cursor = None;
         self.draft.clear();
     }
@@ -1008,7 +1019,7 @@ impl App {
             };
             menu.push((label.to_string(), MenuAction::ToggleFavorite));
         }
-        if self.in_history(item) {
+        if self.history_has(item) {
             menu.push((
                 i18n::menu_remove_history().to_string(),
                 MenuAction::RemoveHistory,
@@ -1021,7 +1032,7 @@ impl App {
     ///
     /// 只比 `item.action`：老记录只有输入行（`item: None`），那些行是 `FillInput`，
     /// 对不上任何具体目标，也就不给「删除」选项。
-    fn in_history(&self, item: &Item) -> bool {
+    fn history_has(&self, item: &Item) -> bool {
         self.history
             .iter()
             .any(|entry| entry.item.as_ref().is_some_and(|snapshot| snapshot.action == item.action))
@@ -1102,6 +1113,25 @@ impl App {
         self.applying = false;
         self.pending_selection = None;
         self.set_home();
+    }
+
+    /// 当前是不是在翻输入历史（GUI 用它决定 Esc 先退历史还是清输入）
+    pub fn in_history(&self) -> bool {
+        self.history_cursor.is_some()
+    }
+
+    /// 列表模式 `Home`：选中第一条
+    pub fn select_first(&mut self) {
+        if !self.items.is_empty() {
+            self.list_state.select(Some(0));
+        }
+    }
+
+    /// 列表模式 `End`：选中最后一条
+    pub fn select_last(&mut self) {
+        if !self.items.is_empty() {
+            self.list_state.select(Some(self.items.len() - 1));
+        }
     }
 
     fn move_selection(&mut self, delta: isize) {
@@ -1402,7 +1432,10 @@ mod tests {
 
     /// 测试用的 App：不动真实配置文件（历史在内存里替换掉）
     fn app() -> App {
-        let mut app = App::new(Config::default(), Theme::default());
+        // 补全在配置里默认关（`[general] completion = false`），但它的单测还要测
+        let mut cfg = Config::default();
+        cfg.general.completion = true;
+        let mut app = App::new(cfg, Theme::default());
         app.history = vec![
             history::Entry {
                 line: "app code".to_string(),
@@ -1617,7 +1650,24 @@ mod tests {
     fn app_with_prefix(prefix: &str) -> App {
         let mut cfg = Config::default();
         cfg.general.command_prefix = prefix.to_string();
+        cfg.general.completion = true; // 同上：测补全时要开
         App::new(cfg, Theme::default())
+    }
+
+    /// 补全默认关：不打开配置时 `completion` 永远是 `None`（连 Tab 都没得循环）
+    #[test]
+    fn completion_is_off_by_default() {
+        let mut app = App::new(Config::default(), Theme::default());
+        app.set_input("@".to_string());
+        assert!(app.completion.is_none(), "默认配置不该算候选");
+
+        // 打开开关就有（证明只是被开关挡住，逻辑没坏）
+        let mut cfg = Config::default();
+        cfg.general.command_prefix = "@".to_string();
+        cfg.general.completion = true;
+        let mut app = App::new(cfg, Theme::default());
+        app.set_input("@".to_string());
+        assert!(app.completion.is_some(), "打开 completion 后应该有候选");
     }
 
     #[test]

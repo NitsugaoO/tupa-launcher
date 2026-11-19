@@ -488,6 +488,14 @@ pub fn menu_empty() -> &'static str {
     t("这一行没有可用的操作", "No actions for this row")
 }
 
+/// 正在翻输入历史时状态栏的提示
+pub fn hint_history_mode() -> &'static str {
+    t(
+        "输入历史：↑ 更早 · ↓ 更新 · Esc 退出",
+        "Input history: ↑ older · ↓ newer · Esc to exit",
+    )
+}
+
 /// 列表模式（输入框失焦）时状态栏的提示
 pub fn hint_list_mode() -> &'static str {
     t(

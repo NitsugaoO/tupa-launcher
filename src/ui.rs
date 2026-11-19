@@ -1106,6 +1106,7 @@ mod render_tests {
     fn status_shows_completion_description() {
         let mut cfg = Config::default();
         cfg.general.command_prefix = "@".to_string();
+        cfg.general.completion = true; // 补全默认关，这两个用例专门测它
         let mut app = App::new(cfg, Theme::default());
         app.input = "@app:ad".to_string();
         app.cursor = app.input.chars().count();
@@ -1143,6 +1144,7 @@ mod render_tests {
     fn completion_row_shows_flag_candidates() {
         let mut cfg = Config::default();
         cfg.general.command_prefix = "@".to_string();
+        cfg.general.completion = true; // 补全默认关，这两个用例专门测它
         let mut app = App::new(cfg, Theme::default());
         app.input = "@app:ad".to_string();
         app.cursor = app.input.chars().count();

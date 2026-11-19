@@ -261,3 +261,103 @@ cargo clippy --release --features gui      # 零警告
 ```
 
 改完写回 `STATE.md`（阶段 / 未完成 / 首行 `code`）；文档与代码不一致的改**文档**。
+
+
+---
+
+# 第二轮（2026-11-19 晚，交互细化）
+
+> 基线：`code 901726c`。六项都改 GUI 交互层，`App` 只加少量方法。
+
+## 5. 补全先去掉，加开关（**先做**，它决定了 ↑↓ 的语义）
+
+**现状**：补全贯穿 `App`（`completion` 字段 / `update_completion` / `compute_completion` /
+`complete` / `complete_to` / `cycle_completion` / `completion_description`）、GUI（`completion_panel`
++ `handle_key` 里的 ↑↓/Enter 分支）、TUI（`ui.rs::draw_completion` + 高度计算）。共 12 处引用。
+
+**做法（不删代码，只加开关）**：
+
+| # | 改哪里 | 怎么确认 |
+|---|---|---|
+| 5.1 | `config.rs` 加 `general.completion`（bool，默认 **false**）；`App` 存 `completion_on`，`update_completion()` 里直接 `self.completion = None` | `config --check` 不报错；`@w` 时没有候选浮层 |
+| 5.2 | 设成 `true` 时行为完全恢复（代码一行没删） | 配置文件改回 true，`@` 后 Tab 有候选 |
+| 5.3 | `config.example.toml` + README 记一行 | 文档里搜 `completion` 能看到 |
+
+> 关掉之后：`Tab` 在输入模式无动作（`Tab` 的选择模式 / `Ctrl+Tab` 详情不受影响）；
+> 状态栏不再显示候选说明；TUI 的候选行也不占高度。
+
+## 1. ↑↓ 语义（终端化）
+
+| 状态 | `↓` | `↑` |
+|---|---|---|
+| 输入模式 | 进列表模式 **并选中下一项**（回车执行第 1 项 → ↓ 就是第 2 项） | **进入输入历史模式**（翻出上一条执行过的命令） |
+| 输入历史模式 | 更新一条；到底回草稿并退出模式 | 更早一条 |
+| 列表模式 | 向下移一项 | 向上移一项 |
+
+- **`Ctrl+↑` / `Ctrl+↓` 取消**（`App::on_key` 里那两个分支删掉，`history_prev` / `history_next`
+  改由 ↑↓ 直接调用）。
+- **`Esc` 退出输入历史模式**（`App::leave_history()`），不清空输入、不隐藏面板。
+- 历史模式里打任何字 → 自动退出历史模式并正常编辑（现有 `leave_history` 已在编辑路径上）。
+- 「输入模式 → 列表模式」的进入点现在只有 `↓`（`↑` 不再兼任），逻辑更简单。
+
+**怎么确认**：开屏按 `↓` → 选框到第 2 条；按 `↑` → 输入框里出现上一条命令且状态栏有提示；
+`Esc` → 回到刚才没翻历史前的输入；再按 `Esc` → 收紧凑 → 隐藏。
+
+## 2. 菜单的 → / ←
+
+| 状态 | 键 | 作用 |
+|---|---|---|
+| 列表模式 | `→` | 打开当前行菜单（`open_menu_for_row`） |
+| 列表模式 | `←` | 关闭菜单（没开时无动作） |
+| 菜单打开 | `←` / `Esc` | 关闭菜单 |
+| 菜单打开 | `↑↓` / `Enter` | 移高亮 / 执行（已完成） |
+
+只在列表模式生效：输入模式里 `←` `→` 是光标移动，不能抢。
+
+## 3. Home / End 到列表首尾
+
+- 列表模式：`Home` → 选中第 1 项，`End` → 最后一项（`App::select_first` / `select_last`）。
+- 输入模式：`Home` / `End` 仍是**行首 / 行尾**（不变）。
+
+## 6. 列表模式打字 → 自动回输入框
+
+**现状**：列表模式下 `gui/input.rs` 的三个 handler 直接 `return`，字符被丢弃（上一轮按「完全忽略」做的）。
+现在改成「打字就回输入模式并插入」：
+
+| # | 改哪里 | 怎么确认 |
+|---|---|---|
+| 6.1 | `replace_text_in_range` / `replace_and_mark_text_in_range`：`list_mode` 时先 `list_mode = false`、恢复光标，**再走正常插入** | 列表模式敲 `a` → 回输入框且输入框里有 `a` |
+| 6.2 | 中文输入法：组字（预编辑）时也要切回输入模式，候选窗位置正常 | 列表模式下打拼音 → 回到输入框、候选窗贴着光标 |
+| 6.3 | 状态栏提示同步恢复（不再是「列表模式」） | 打字后状态栏回到 provider 描述 |
+
+## 4. 打开应用时闪两下 cmd 窗口
+
+**调研结果**：`exec.rs::spawn_executable` 分三路：
+- `.exe` / `.com` → `detached_command`（`CREATE_NO_WINDOW` + stdin/out/err 全 null）
+- `.cmd` / `.bat` → `cmd.exe /C` + 同样标志
+- `.lnk` 及其它 → `open::that_detached` → **`ShellExecuteExW`**（理论上不建控制台）
+
+`open` crate 开了 `shellexecute-on-windows`，所以 `.lnk` 不走 `cmd /c start`。
+**两下闪窗**最可能的来源是**第三条路之外**：scoop shim / 某些 `.exe` 自己再起 `cmd`（例如
+node 系包），或者条目本身是 `.cmd`（`detached_command` 的 `CREATE_NO_WINDOW` 挡不住子进程新建控制台）。
+
+**要先定位再改**（盲改容易把「正常打开带控制台的程序」也弄坏）：
+
+| # | 做什么 |
+|---|---|
+| 4.1 | 在 `exec.rs::launch` / `spawn_executable` 里加 `tray::log` 一行：走的是哪条路、路径是什么（`%TEMP%	upa-gui.log`） |
+| 4.2 | 你复现一次 → 看日志确定是哪个条目 / 哪条路 |
+| 4.3 | 按结论改：若是 `.cmd` → 改用 `ShellExecuteExW`（shell 自己决定要不要窗口）；若是 shim → 该条目在配置里改指向真 exe；若是 `open` 之外的路径 → 统一改 ShellExecute |
+
+**兜底方案**（如果定位不到）：把 `.exe` / `.cmd` 也统一改成 `ShellExecuteExW`（Explorer 双击就是这条路），
+代价是拿不到退出码（启动器不需要）、`elevated` 仍走 `runas` 单独处理。
+
+## 顺序
+
+```
+#5 补全开关（先，去掉 ↑↓ 的补全分支）
+#1 ↑↓ 语义（终端化）+ Esc 退出历史
+#2 + #3 菜单 →/←、Home/End
+#6 列表模式打字回输入框
+#4 cmd 闪窗（要你配合定位一次）
+```

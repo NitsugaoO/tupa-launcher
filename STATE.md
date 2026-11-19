@@ -1,6 +1,6 @@
 # tupa-launcher 状态
 
-updated: 2026-11-19 · code: `901726c`（列表模式 + 补全浮层 · chip 只留渲染 · @hist 隐藏 · 右键菜单 · 删 @pi / @run · @go → @z · clip 同步出 · clean 迁到 HTML）
+updated: 2026-11-19 · code: `PENDING`（↑↓ 终端化 + 补全默认关 · 列表模式补键 · chip 只留渲染 · @hist 隐藏 · 右键菜单 · 删 @pi / @run · @go → @z · clip 同步出 · clean 迁到 HTML）
 
 > 判断本文件是否过期：比较 `code` 与 `git log -1 --format=%h -- src Cargo.toml`。
 > 只改文档的提交不算过期。
@@ -12,6 +12,18 @@ updated: 2026-11-19 · code: `901726c`（列表模式 + 补全浮层 · chip 只
 > **每次会话收尾只需要改这一个文件的两节**（阶段 / 未完成），并更新首行。
 
 ## 阶段
+
+- **交互再细化（2026-11-19 晚，第二轮）**：
+  - **补全默认关**：`[general] completion`（默认 `false`）。`App::update_completion` 里一次都不算，
+    浮层 / 状态栏候选说明 / Tab 循环全没有；代码一行没删，配置改 `true` 就恢复。
+  - **↑↓ 终端化**：输入模式 `↓` = 进列表模式并**直接选中下一项**（回车执行第 1 项）；
+    `↑` = **翻输入历史**（`App::history_prev`），`Esc` 用 `App::in_history()` 判断先退出历史模式。
+    **`Ctrl+↑/↓` 已删除**。列表模式里 `↑↓` 仍是移动选择。
+  - **列表模式补键**：`Home` / `End` 到首尾（`App::select_first` / `select_last`）；
+    `→` 开当前行菜单、`←` 关菜单（输入模式下这两个仍是光标移动）。
+  - **列表模式打字自动回输入框**：`Panel::leave_list_mode()` 在 IME 的两个 handler 里调，
+    中文组字时也会切回（原先是「完全忽略」）。
+  - 菜单项「从最近记录移除」的内部方法改名 `App::history_has`（避免和 `in_history()` 撞名）。
 
 - **四项交互调整（2026-11-19 晚）**：
   - **`@hist` 从 `@` 命令列表里隐藏**：`Provider::listed()`（默认 true）返回 false 只影响
@@ -480,6 +492,11 @@ updated: 2026-11-19 · code: `901726c`（列表模式 + 补全浮层 · chip 只
 
 ## 未完成
 
+- **打开应用时闪两下 cmd 窗口（未定位）**：`exec.rs::spawn_executable` 三路（`.exe` 直接
+  CreateProcess / `.cmd` 走 `cmd.exe /C` / `.lnk` 走 `open::that_detached` → ShellExecuteExW），
+  都带了不建控制台的标志。怀疑落在**条目本身**（scoop shim / 某 `.cmd` 再起 cmd）。
+  定位办法：在 `launch` 里加 `tray::log` 打出「走了哪条路 + 路径」，复现一次看
+  `%TEMP%	upa-gui.log`。兜底方案是 `.exe` / `.cmd` 也统一改 `ShellExecuteExW`。
 - **`/clean` 服务端（my-pi-plugins 侧）**：页面 `web/clean/index.html` 与契约
   `docs/09-clean-api.md` 已交付，插件里要实现三个接口并托管页面。
 - **窗口宽度记忆**：面板宽度固定按主屏 62%（高度随内容），拖边改过的宽度还没写回

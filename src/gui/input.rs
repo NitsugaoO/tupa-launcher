@@ -112,10 +112,11 @@ impl EntityInputHandler for Panel {
         cx: &mut Context<Self>,
     ) {
         // 帮助浮层开着（或刚关）：`?` 那一下的 `WM_CHAR` 不能落进来
-        // 列表模式下输入框是「失焦」的：字符一律不接（用户 2026-11-19 定的）
-        if self.text_blocked() || self.list_mode {
+        if self.text_blocked() {
             return;
         }
+        // 列表模式下打字 = 想回输入框（用户 2026-11-19：检测输入自动回去）
+        self.leave_list_mode();
 
         // 中文输入法把 Shift+/ 直接当全角「？」提交（没有对应的 WM_KEYDOWN），
         // `handle_key` 里那个帮助开关就永远收不到。这里补一道：
@@ -157,9 +158,11 @@ impl EntityInputHandler for Panel {
         cx: &mut Context<Self>,
     ) {
         // 预编辑：只是「显示在光标处」，先不动输入框本身，等 commit 再落进去
-        if self.text_blocked() || self.list_mode {
+        if self.text_blocked() {
             return;
         }
+        // 中文输入法在列表模式下开始组字：同样回输入框，否则候选窗没地方贴
+        self.leave_list_mode();
         let start = match range {
             Some(range) => utf16_to_char(&self.app.input, range.start),
             None => self.app.cursor,

@@ -178,6 +178,11 @@ pub struct General {
     /// 剪贴板里是**存在的路径**或 **http(s) 网址**时，开屏第一行多一条
     /// 「跳过去」的条目（默认不选中，按 `↑` 才选它）。
     pub clipboard: bool,
+    /// 输入框的命令 / 修饰符补全（候选浮层 + Tab 循环）。
+    ///
+    /// 2026-11-19 起默认 **false**：实际用下来收益不大，还占掉 ↑↓ 两个键。
+    /// 代码没删，想要就把它打开。
+    pub completion: bool,
 }
 
 impl Default for General {
@@ -192,6 +197,7 @@ impl Default for General {
             show_hints: true,
             frecency: true,
             clipboard: true,
+            completion: false,
         }
     }
 }

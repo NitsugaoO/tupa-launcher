@@ -537,7 +537,7 @@ impl Panel {
             let count = self.app.menu_for(menu.row).len().max(1);
             if let Some(k) = key.as_ref() {
                 match k.code {
-                    Kc::Esc => {
+                    Kc::Esc | Kc::Left => {
                         self.menu = None;
                         window.focus(&self.focus);
                         cx.notify();
@@ -647,9 +647,15 @@ impl Panel {
             &key,
             Some(k) if k.code == crossterm::event::KeyCode::Down && k.modifiers.is_empty()
         );
-        if plain_down {
+        // 输入模式 ↓：进列表模式，并**直接选中下一项**（回车执行第 1 项，↓ 就该到第 2 项）。
+        // 已经在列表模式里，↓ 归下面的导航分支。
+        if plain_down && !self.list_mode {
             self.list_mode = true;
             self.hint_open = true;
+            self.app.on_key(crossterm::event::KeyEvent::new(
+                crossterm::event::KeyCode::Down,
+                crossterm::event::KeyModifiers::NONE,
+            ));
             window.focus(&self.focus);
             cx.notify();
             return;
@@ -680,13 +686,40 @@ impl Panel {
                 cx.notify();
                 return;
             }
+            // → 开菜单、← 关菜单（输入模式下这两个是光标移动，不能抢）
+            if k.code == Kc::Right {
+                let index = self.app.list_state.selected().unwrap_or(0);
+                if !self.open_menu_for_row(index) {
+                    self.app.status = Some((i18n::menu_empty().to_string(), true));
+                }
+                window.focus(&self.focus);
+                cx.notify();
+                return;
+            }
+            if k.code == Kc::Left {
+                self.menu = None;
+                window.focus(&self.focus);
+                cx.notify();
+                return;
+            }
+            // Home / End：到列表首尾（`App::select_first` / `select_last`）
+            if k.code == Kc::Home {
+                self.app.select_first();
+                window.focus(&self.focus);
+                cx.notify();
+                return;
+            }
+            if k.code == Kc::End {
+                self.app.select_last();
+                window.focus(&self.focus);
+                cx.notify();
+                return;
+            }
             // 只放行导航 / 执行类键；字符键一律忽略（先 Esc 回输入框，用户定的）
             if !matches!(
                 k.code,
                 Kc::Up
                     | Kc::Down
-                    | Kc::Home
-                    | Kc::End
                     | Kc::PageUp
                     | Kc::PageDown
                     | Kc::Tab
@@ -698,18 +731,34 @@ impl Panel {
             }
         }
 
-        // 输入模式下按 ↑：也进列表模式，并**顺手向上移动**（不然得按两次才动）
-        if matches!(&key, Some(k) if k.code == crossterm::event::KeyCode::Up && k.modifiers.is_empty())
+        // 输入模式 ↑：**翻输入历史**（终端语义），不进列表、不动选择。
+        // 列表模式里的 ↑ 仍是「向上移一项」（走下面的导航分支）。
+        if !self.list_mode
+            && matches!(&key, Some(k) if k.code == crossterm::event::KeyCode::Up && k.modifiers.is_empty())
         {
-            self.list_mode = true;
-            self.hint_open = true;
+            self.app.history_prev();
+            // 翻历史会改输入内容：光标重新亮起并开始闪
+            self.cursor_on = true;
+            self.blink_at = std::time::Instant::now() + Duration::from_millis(500);
+            window.focus(&self.focus);
+            cx.notify();
+            return;
         }
 
-        // 展开着的时候，Esc 先收回紧凑形态，而不是直接隐藏面板
         let is_escape = matches!(
             &key,
             Some(k) if k.code == crossterm::event::KeyCode::Esc
         );
+
+        // Esc 逐层退的第一层：正在翻输入历史就退出历史模式（不清输入、不收紧凑）
+        if is_escape && self.app.in_history() {
+            self.app.leave_history();
+            window.focus(&self.focus);
+            cx.notify();
+            return;
+        }
+
+        // 展开着的时候，Esc 先收回紧凑形态，而不是直接隐藏面板
         if self.hint_open && is_escape {
             self.hint_open = false;
             window.focus(&self.focus);
@@ -1123,9 +1172,22 @@ impl Panel {
         self.list_area(window, cx, p)
     }
 
-    /// 键盘打开菜单（空格）：位置对齍那一行，不用鼠标坐标。
+    /// 键盘打开菜单（空格）：位置对齐那一行，不用鼠标坐标。
     ///
     /// 返回 `false` = 这行没有可做的菜单项（调用方给提示，别静默没反应）。
+    /// 列表模式下收到字符输入：切回输入框（用户 2026-11-19：打字就回输入）。
+    ///
+    /// 调用方是 IME 的两个 handler —— 它们本来在列表模式下直接丢弃字符，
+    /// 现在改成先回输入模式再插入，避免「怎么打不上字」。
+    fn leave_list_mode(&mut self) {
+        if !self.list_mode {
+            return;
+        }
+        self.list_mode = false;
+        self.cursor_on = true;
+        self.blink_at = std::time::Instant::now() + Duration::from_millis(500);
+    }
+
     fn open_menu_for_row(&mut self, index: usize) -> bool {
         if self.app.menu_for(index).is_empty() {
             return false;
@@ -2084,6 +2146,7 @@ impl Panel {
             Some((message, true)) => (message.clone(), p.bad),
             Some((message, false)) => (message.clone(), p.good),
             // 列表模式：状态栏换成键位提示（不然看不出「现在在操作列表」）
+            None if self.app.in_history() => (i18n::hint_history_mode().to_string(), p.muted),
             None if self.list_mode => (i18n::hint_list_mode().to_string(), p.muted),
             None => (self.app.active_description().to_owned(), p.muted),
         };
