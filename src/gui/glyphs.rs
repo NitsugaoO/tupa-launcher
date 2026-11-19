@@ -103,6 +103,34 @@ pub const ARROW: char = '\u{F054}';
 /// pi 会话。**故意用普通希腊字母**（不是 Nerd Font 码点）：π 一眼就是 pi，
 /// 而且和「终端」区分开 —— `:pi` 那些行除了标题，本来就靠这个形状认。
 pub const PI: char = '\u{03C0}';
+/// 放大镜 —— `:all`（应用 + 历史混排的默认搜索）
+pub const SEARCH: char = '\u{F002}';
+/// 星标 —— `:fav` 收藏
+pub const STAR: char = '\u{F005}';
+
+/// provider 关键字 → 字形。
+///
+/// 给 GUI 输入框那颗**原子 chip**（`(π pi)`）用：打完 `@pi ` 之后关键字成块，
+/// 块头这个图标和列表里同类条目的图标是同一个语义（`:pi` 的会话行就是 π）。
+/// 关键字表在 `providers::build()`（顺序即命令列表顺序），新增 provider 记得补一行，
+/// 漏了只是回落到问号（没有编译错误可依赖）。
+pub fn for_keyword(keyword: &str) -> char {
+    match keyword {
+        "app" => EXEC,
+        "all" => SEARCH,
+        "ev" => FILE,
+        "run" => TERMINAL,
+        "pi" => PI,
+        "go" => FOLDER,
+        "web" => GLOBE,
+        "blog" => PENCIL,
+        "fav" => STAR,
+        "cfg" => COG,
+        "set" => TOGGLE,
+        "hist" => CLOCK,
+        _ => QUESTION,
+    }
+}
 
 /// 路径 → 字形（目录给文件夹，其余按扩展名）
 pub fn for_path(path: &Path) -> char {

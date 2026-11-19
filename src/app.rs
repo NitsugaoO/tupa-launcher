@@ -54,6 +54,12 @@ pub struct App {
     pub active: usize,
     /// 命令前缀的结束位置（字节下标），用于高亮
     pub prefix_end: Option<usize>,
+    /// 已激活的命令前缀占 `input` 的前几个**字符**（`@pi ` → `Some(3)`）。
+    ///
+    /// 要同时满足：关键字命中**真实 provider**（命令列表不算）、后面已经敲了空格。
+    /// 光打 `@pi` 还没定下来（用户可能接着打 `@pix`），那时仍是普通文字。
+    /// GUI 把这一段画成原子 chip（字形 + 关键字）；编辑上也不许光标进入其中。
+    pub chip_end: Option<usize>,
     /// 当前结果的列宽规格
     pub columns: &'static [Column],
     /// 这一屏的行宽怎么算（开屏是自然排，其余是对齐表）
@@ -149,6 +155,7 @@ impl App {
             home_idx,
             active: default_idx,
             prefix_end: None,
+            chip_end: None,
             columns: DEFAULT_COLUMNS,
             layout: RowLayout::Aligned,
             args: String::new(),
@@ -205,19 +212,21 @@ impl App {
         let default_idx = self.default_idx;
 
         // 开屏（输入为空）走 home：收藏 + 最近命令；一开始打字就回到正常解析
-        let (idx, flags, args, is_command) = if line.is_empty() {
-            (self.home_idx, Vec::new(), String::new(), false)
+        // 最后一个字段 `activated` = 关键字真的落到了某个 provider 上
+        // （命令列表 / 默认搜索都不算 —— 那两种情况下前缀还只是普通文字）
+        let (idx, flags, args, is_command, activated) = if line.is_empty() {
+            (self.home_idx, Vec::new(), String::new(), false, false)
         } else {
             match providers::parse(&self.infos, &line, self.prefix) {
-                Parsed::Default => (default_idx, Vec::new(), line.clone(), false),
+                Parsed::Default => (default_idx, Vec::new(), line.clone(), false, false),
                 Parsed::Command {
                     provider,
                     flags,
                     args,
-                } => (provider, flags, args, true),
+                } => (provider, flags, args, true, true),
                 Parsed::CommandList { query } => match commands_idx {
-                    Some(idx) => (idx, Vec::new(), query, true),
-                    None => (default_idx, Vec::new(), line.clone(), false),
+                    Some(idx) => (idx, Vec::new(), query, true, false),
+                    None => (default_idx, Vec::new(), line.clone(), false, false),
                 },
             }
         };
@@ -225,11 +234,18 @@ impl App {
         self.active = idx;
         self.args = args;
         self.flags = flags;
-        self.prefix_end = if is_command {
+        let prefix_end = if is_command {
             providers::prefix_end(&line, self.prefix)
         } else {
             None
         };
+        self.prefix_end = prefix_end;
+        // 原子前缀：`@pi ` 这个形状才成块。加上空格是刻意的 —— 空格就是「定下来」这个动作
+        self.chip_end = prefix_end
+            .filter(|end| activated && line[*end..].starts_with(' '))
+            .map(|end| line[..end].chars().count());
+        // chip 之间不许有光标：所有编辑路径最后都会走到 refresh，在这里统一兜一次
+        self.cursor = self.snap_cursor(self.cursor);
         self.pending_selection = if keep_selection {
             self.list_state.selected()
         } else {
@@ -946,6 +962,30 @@ impl App {
         self.update_completion();
     }
 
+    /// 光标落在命令 chip 内部时夹到 chip 末尾 —— chip 是**原子**的，不能从中间插字。
+    ///
+    /// 只夹 `cursor`，不夹 `anchor`：`Ctrl+A` 的选区起点就是 0（整行含 chip），
+    /// 强行夹锚点会让全选变成「选不中 chip」。
+    fn snap_cursor(&self, pos: usize) -> usize {
+        let pos = pos.min(self.char_len());
+        match self.chip_end {
+            Some(end) if pos < end => end,
+            _ => pos,
+        }
+    }
+
+    /// chip 覆盖的文本（不含尾随空格），`None` = 还没成块
+    pub fn chip_text(&self) -> Option<String> {
+        let end = self.chip_end?;
+        Some(self.input.chars().take(end).collect())
+    }
+
+    /// 当前 chip 对应的 provider 关键字（GUI 用它选字形）
+    pub fn chip_keyword(&self) -> Option<&str> {
+        self.chip_end?;
+        self.infos.get(self.active).map(|info| info.keyword.as_str())
+    }
+
     /// 移动光标。`extend` = Shift 按下：不动锚点、只改活动端（延伸选区）
     fn move_cursor(&mut self, to: usize, extend: bool) {
         if extend {
@@ -956,7 +996,7 @@ impl App {
         } else {
             self.anchor = None;
         }
-        self.cursor = to.min(self.char_len());
+        self.cursor = self.snap_cursor(to);
         self.update_completion();
     }
 
@@ -1001,7 +1041,8 @@ impl App {
                     i -= 1;
                 }
             }
-            i
+            // chip 是原子块：反向跳词要么整个跳过（落到 0），不许停在 `@pi` 中间
+            if self.chip_end.is_some_and(|end| i < end) { 0 } else { i }
         }
     }
 
@@ -1092,6 +1133,18 @@ impl App {
             return;
         }
         if self.cursor == 0 {
+            return;
+        }
+        // chip 原子化：贴着 chip 按退格（光标在关键字上或紧跟其后的空格后）一次删掉整块，
+        // 包括那个分隔空格。再往里退一格就只剩 `@pi`，chip 自然消失、退回普通文字。
+        if let Some(end) = self.chip_end
+            && self.cursor <= end + 1
+        {
+            let to = self.byte_index((end + 1).min(self.char_len()));
+            self.input.replace_range(0..to, "");
+            self.cursor = 0;
+            self.leave_history();
+            self.refresh();
             return;
         }
         let from = self.byte_index(self.cursor - 1);
@@ -1693,5 +1746,82 @@ mod tests {
         assert_eq!(app.cursor, 7, "「第一期」开头在 7");
         app.on_key(KeyEvent::new(KeyCode::Left, KeyModifiers::CONTROL));
         assert_eq!(app.cursor, 4, "「报告」开头在 4");
+    }
+
+    /// chip 只在「关键字命中 provider **并且** 后面已经敲了空格」时出现
+    #[test]
+    fn chip_needs_space_and_known_provider() {
+        let mut app = app_with_prefix("@");
+
+        app.set_input("@pi".to_string());
+        assert_eq!(app.chip_end, None, "没敲空格时还是普通文字");
+
+        app.set_input("@pi ".to_string());
+        assert_eq!(app.chip_end, Some(3));
+        assert_eq!(app.chip_text().as_deref(), Some("@pi"));
+        assert_eq!(app.chip_keyword(), Some("pi"));
+
+        // 关键字没打全 / 只打了前缀：都还是文字
+        app.set_input("@p ".to_string());
+        assert_eq!(app.chip_end, None);
+        app.set_input("@ ".to_string());
+        assert_eq!(app.chip_end, None);
+
+        // 带修饰符时整体成一块（`@pi:clean` 不该拆成两半）
+        app.set_input("@pi:clean ".to_string());
+        assert_eq!(app.chip_end, Some(9));
+
+        // 不是命令：一律没有 chip
+        app.set_input("随便写点东西 ".to_string());
+        assert_eq!(app.chip_end, None);
+    }
+
+    /// chip 是原子的：光标进不去，\u{9000}格一次吃掉整块（连那个空格）
+    #[test]
+    fn chip_is_atomic_for_editing() {
+        let mut app = app_with_prefix("@");
+        app.set_input("@pi abc".to_string());
+
+        for _ in 0..10 {
+            app.on_key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE));
+        }
+        assert_eq!(app.cursor, 3, "光标停在 chip 末尾，不进 `@pi` 内部");
+
+        app.on_key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE));
+        assert_eq!(app.input, "abc", "整块 `@pi ` 一起走，只留下后面那个词");
+        assert_eq!(app.chip_end, None);
+        assert_eq!(app.cursor, 0);
+
+        // 真实顺序：删完查询词（光标回到 chip 后的空格）再一次退格 → 整块走
+        let mut app = app_with_prefix("@");
+        app.set_input("@pi abc".to_string());
+        for _ in 0..3 {
+            app.on_key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE));
+        }
+        assert_eq!(app.input, "@pi ", "逐字删 abc，chip 原样留着");
+        app.on_key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE));
+        assert_eq!(app.input, "");
+        assert_eq!(app.chip_end, None);
+    }
+
+    /// Home 跳到 chip 之后（chip 就是这个输入行的开头）；Ctrl+Backspace 也不许剩个 `@`
+    #[test]
+    fn chip_respects_word_jumps() {
+        let mut app = app_with_prefix("@");
+        app.set_input("@pi abc".to_string());
+
+        app.on_key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE));
+        assert_eq!(app.cursor, 3);
+
+        app.set_input("@pi abc".to_string());
+        app.on_key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::CONTROL));
+        assert_eq!(app.input, "@pi ", "第一次只删 abc");
+        app.on_key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::CONTROL));
+        assert_eq!(app.input, "", "第二次整个 chip 一起走，不留 `@`");
+
+        // chip 消失后光标又能回到 0（`@pi` 没空格 = 普通文字）
+        app.set_input("@pi".to_string());
+        app.on_key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE));
+        assert_eq!(app.cursor, 2);
     }
 }

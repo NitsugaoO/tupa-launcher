@@ -61,6 +61,17 @@ pub const FONT_WEIGHT: FontWeight = FontWeight::NORMAL;
 /// 输入行：高 40、字号 15
 pub const INPUT_HEIGHT: f32 = 40.0;
 pub const INPUT_SIZE: f32 = 15.0;
+/// 输入框里那颗「已激活命令前缀」的 chip（`@pi ` → `(π pi)`）。
+/// 字号比输入文字（15）小一档，才不会把输入行撑得太挤。
+pub const CHIP_INPUT_SIZE: f32 = 13.0;
+pub const CHIP_INPUT_HEIGHT: f32 = 22.0;
+pub const CHIP_INPUT_RADIUS: f32 = 11.0;
+/// 左右内边距
+pub const CHIP_INPUT_PAD_X: f32 = 7.0;
+/// 字形与关键字之间的间距
+pub const CHIP_INPUT_INNER_GAP: f32 = 4.0;
+/// chip 与后面查询词之间的间距
+pub const CHIP_INPUT_GAP: f32 = 6.0;
 /// 光标块的尺寸（`app.cursor` 处那根竖线）。
 /// 高度跟字号一致（15px），比 18 更贴合字形上下边界——之前高出字头一截，看着像错位。
 /// 宽度 2px：1px 在 200% DPI 下就是半像素，看着像缺了一块。

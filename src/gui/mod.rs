@@ -662,10 +662,38 @@ impl Panel {
             .map(|(index, _)| index)
             .unwrap_or(self.app.input.len());
         let (before, _after) = self.app.input.split_at(at);
-        // 光标的目标位置：提示符 + 已输入 + 预编辑（全部按真实字形宽度量，不猜格数）
+        // 已激活的命令前缀（`@pi `）→ 原子 chip：字形 + 关键字。
+        // chip 盖住 `input[..chip_end]`，但只显示「去掉前缀符」的部分（`@pi` → `pi`）——
+        // `@` 的语义已经由 chip 这个形状承担，再写进去只是占位。
+        let chip = self.app.chip_end.map(|end| {
+            let label: String = self.app.input.chars().skip(1).take(end - 1).collect();
+            let keyword = self.app.chip_keyword().unwrap_or_default().to_string();
+            (end, label, glyphs::for_keyword(&keyword))
+        });
+        let chip_end = chip.as_ref().map(|(end, _, _)| *end);
+        // 光标的目标位置：提示符 + chip（若已激活）+ 已输入 + 预编辑（全部按真实字形宽度量）
         let preedit = self.preedit.as_ref().map(|(_, text)| text.clone());
         let prompt_width = text_width(window, style::PROMPT, style::INPUT_SIZE);
-        let before_width = text_width(window, before, style::INPUT_SIZE);
+        let chip_width = chip
+            .as_ref()
+            .map(|(_, label, glyph)| {
+                text_width(window, &glyph.to_string(), style::CHIP_INPUT_SIZE)
+                    + style::CHIP_INPUT_INNER_GAP
+                    + text_width(window, label, style::CHIP_INPUT_SIZE)
+                    + style::CHIP_INPUT_PAD_X * 2.0
+                    + style::CHIP_INPUT_GAP
+            })
+            .unwrap_or(0.0);
+        // chip 盖住的那段文字不再按字符宽度算（它已经被画成胶囊了）
+        let before_width = match chip_end {
+            Some(end) if self.app.cursor >= end => {
+                let rest: String = before.chars().skip(end).collect();
+                chip_width + text_width(window, &rest, style::INPUT_SIZE)
+            }
+            // 光标在 chip 内部（理论上进不去）—— 当它停在 chip 末尾
+            Some(_) => chip_width,
+            None => text_width(window, before, style::INPUT_SIZE),
+        };
         let preedit_width = preedit
             .as_ref()
             .map(|text| text_width(window, text, style::INPUT_SIZE))
@@ -738,6 +766,40 @@ impl Panel {
                 .child(style::PROMPT),
         );
 
+        // 已激活的 provider chip：胶囊底 + 类型字形 + 关键字（选中时底色亮一档）
+        if let Some((_, label, glyph)) = &chip {
+            let selected = self
+                .app
+                .selection()
+                .is_some_and(|(start, _)| start < chip_end.unwrap_or(0));
+            let tint = if selected { 0.42 } else { 0.2 };
+            row = row.child(
+                div()
+                    .h(px(style::CHIP_INPUT_HEIGHT))
+                    .flex_shrink_0()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap(px(style::CHIP_INPUT_INNER_GAP))
+                    .px(px(style::CHIP_INPUT_PAD_X))
+                    .mr(px(style::CHIP_INPUT_GAP))
+                    .rounded(px(style::CHIP_INPUT_RADIUS))
+                    .bg(style::mix(p.panel, p.accent, tint))
+                    .child(
+                        div()
+                            .text_size(px(style::CHIP_INPUT_SIZE))
+                            .text_color(p.accent)
+                            .child(glyph.to_string()),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(style::CHIP_INPUT_SIZE))
+                            .text_color(p.fg)
+                            .child(label.clone()),
+                    ),
+            );
+        }
+
         // 输入行按「选区边界」切成假设干段：普通段不着色，选中段给一层 `overlay` 底色。
         // 光标可能落在选区中间（Shift+← 往左就一直如此），所以前后两半都要按 cursor 再切一次。
         //
@@ -754,11 +816,13 @@ impl Panel {
             };
             let mut parts: Vec<(String, bool)> = Vec::new();
 
-            let before_sel = sel_start.min(c);
-            if before_sel > 0 {
-                parts.push((cut(0, before_sel), false));
+            // chip 盖住的前缀不再当普通文字重画（它已经是胶囊），切段从 chip 之后开始
+            let start = chip_end.unwrap_or(0);
+            let before_sel = sel_start.min(c).max(start);
+            if before_sel > start {
+                parts.push((cut(start, before_sel), false));
             }
-            let before_sel_end = sel_end.min(c);
+            let before_sel_end = sel_end.min(c).max(before_sel);
             if before_sel_end > before_sel {
                 parts.push((cut(before_sel, before_sel_end), true));
             }
@@ -807,7 +871,8 @@ impl Panel {
             };
             let mut parts: Vec<(String, bool)> = Vec::new();
 
-            let after_sel = sel_start.max(c);
+            // 光标之后也不重画 chip 那一段（防御：`c` 理论上已 >= chip 末尾）
+            let after_sel = sel_start.max(c).max(chip_end.unwrap_or(0));
             if after_sel > c {
                 parts.push((cut(c, after_sel), false));
             }

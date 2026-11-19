@@ -137,6 +137,11 @@ impl EntityInputHandler for Panel {
                 .selection()
                 .unwrap_or((self.app.cursor, self.app.cursor)),
         };
+        // chip 是原子的：系统报的插入点若落在 `@pi` 中间，就夹到 chip 之后
+        let (start, end) = match self.app.chip_end {
+            Some(chip_end) => (start.max(chip_end), end.max(chip_end)),
+            None => (start, end),
+        };
 
         let from = byte_index(&self.app.input, start);
         let to = byte_index(&self.app.input, end);
@@ -177,9 +182,21 @@ impl EntityInputHandler for Panel {
     ) -> Option<Bounds<Pixels>> {
         // `element_bounds` 来自输入行最前面那个 0 宽 canvas，所以它 left() 就是行首。
         // 等宽字体下：字符数 × 单字符宽度 = 光标横坐标。
+        // 已激活的命令 chip 比原来的字符宽（胶囊内边距 + 字形），整体往右补一个固定偏移 ——
+        // 它只影响输入法候选窗位置，不需要像素级精确。
         let chars = utf16_to_char(&self.app.input, range_utf16.start);
         let advance = style::INPUT_SIZE * 0.6;
-        let x = element_bounds.left() + px(advance * (style::PROMPT_CHARS + chars as f32));
+        let chip_extra = match self.app.chip_end {
+            Some(end) if chars >= end => {
+                style::CHIP_INPUT_PAD_X * 2.0
+                    + style::CHIP_INPUT_INNER_GAP
+                    + style::CHIP_INPUT_GAP
+                    + style::CHIP_INPUT_SIZE
+                    - advance
+            }
+            _ => 0.0,
+        };
+        let x = element_bounds.left() + px(advance * (style::PROMPT_CHARS + chars as f32) + chip_extra);
         let y = element_bounds.top() + px((style::INPUT_HEIGHT - style::CURSOR_HEIGHT) / 2.0);
         Some(Bounds::new(
             point(x, y),

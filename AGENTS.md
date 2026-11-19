@@ -240,6 +240,17 @@ cargo clippy --release --features gui    # 零警告；必须带 feature，否�
      少了第二步一个图标都拿不到）。缓存存原始字节、**失败写空文件**否则每次呼出都重试；
      站点 key 要带**非默认端口**（`127.0.0.1:5173` 与 `:4000` 是两个服务）。
      开关是 `[gui] web_icons = "favicon" | "globe"`（`globe` 完全无网络请求）。
+- **输入框的 provider chip 是原子的**（2026-11-19）：打 `@pi ` + 空格之后，`input` 的
+  `0..chip_end` 段（`App::chip_end`，**字符**下标）在 GUI 里画成「字形 + 关键字」的胶囊，
+  编辑上不许光标进入。三个坑：
+  - **「激活」的判据是 `Parsed::Command` 且前缀后紧跟空格** —— 光打 `@pi` 也算
+    `Parsed::Command`（`providers::parse` 不要求空格），只看 parse 结果会让 chip
+    在用户还在拼关键字时就冒出来。空格才是「定下来」这个动作。
+  - **原子语义在 `app` 层，不在 GUI**：`snap_cursor` 在 `refresh_with` 末尾统一夹一次
+    （覆盖输入 / 粘贴 / IME / 各条编辑路径），`backspace` 贴着 chip 一次删掉整块含分隔
+    空格，`word_boundary` 反向不许停在 `@pi` 中间。TUI 没画 chip，但**这些行为同样生效**。
+  - **新增 provider 要补 `gui/glyphs.rs::for_keyword`**，漏了只是回落到问号（没有编译错误）。
+    码点用已有常量；新增码点先用 GDI+ 画一张 PNG 确认不是豆腐块。
 - **`[[apps]] icon = "..."` 给的图要用 `image` 解，别过 SHELL**（2026-11-18）：
   `SIIGBF_ICONONLY` 对 png / jpg 返回的是「图片文件」通用图标（白纸），不是图本身。
   用 `appicon::load_image`（`image::open` + RGBA→BGRA），给自动解析推不出图的条目用
