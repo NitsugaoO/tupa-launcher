@@ -263,6 +263,9 @@ cargo clippy --release --features gui    # 零警告；必须带 feature，否�
   键只作用于列表：`↑↓` 移动、`Home` / `End` 到首尾、`Space` / `→` 开当前行菜单、`←` 关菜单、
   `Enter` 执行、`Esc` 回到输入框、**打字自动回输入框并插入**（`Panel::leave_list_mode`，
   在 IME 的两个 handler 里调）。
+  - **开屏紧凑态回车只展开列表，不执行**：`input.is_empty() && !hint_open` 时按 Enter 设
+    `hint_open = true` + 进列表模式。空输入直接回车打开第一条收藏/历史太容易误触
+    （2026-11-19 反馈）。展开之后再按 Enter 才是执行。
   - **↑ 不是「进列表」而是「翻输入历史」**（终端语义）：输入模式下 `↑` 调 `App::history_prev`，
     `Esc` 用 `App::in_history()` 判断先退出历史。`Ctrl+↑/↓` 已删除，别再四处加回来。
   - **空格能当菜单键的前提就是这条**：输入模式下空格必须能打出来（`:blog:new 我的 文章`）。
