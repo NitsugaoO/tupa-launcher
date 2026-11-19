@@ -285,8 +285,6 @@ impl App {
             None
         };
         self.merge_clip();
-        // chip 之间不许有光标：所有编辑路径最后都会走到 refresh，在这里统一兜一次
-        self.cursor = self.snap_cursor(self.cursor);
         self.pending_selection = if keep_selection {
             self.list_state.selected()
         } else {
@@ -806,12 +804,21 @@ impl App {
         if state.candidates.is_empty() {
             return;
         }
-
         let next = match state.index {
             None => 0,
             Some(i) => (i + 1) % state.candidates.len(),
         };
-        let candidate = state.candidates[next].clone();
+        self.complete_to(next);
+    }
+
+    /// 应用第 `index` 个候选项（Tab 循环、浮层里点选 / 回车都走这里）
+    pub fn complete_to(&mut self, index: usize) {
+        let Some(state) = self.completion.clone() else {
+            return;
+        };
+        let Some(candidate) = state.candidates.get(index).cloned() else {
+            return;
+        };
         self.replace_chars(state.start, state.end, &candidate);
 
         let end = state.start + candidate.chars().count();
@@ -822,8 +829,24 @@ impl App {
             end,
             candidates: state.candidates,
             descriptions: state.descriptions,
-            index: Some(next),
+            index: Some(index),
         });
+    }
+
+    /// 只移动候选高亮、**不改输入**（GUI 补全浮层里的 ↑↓）。
+    ///
+    /// 和 [`Self::complete_to`] 分开：IDE 习惯是箭头看候选、回车才落字。
+    pub fn cycle_completion(&mut self, delta: isize) {
+        let Some(mut state) = self.completion.clone() else {
+            return;
+        };
+        if state.candidates.is_empty() {
+            return;
+        }
+        let len = state.candidates.len() as isize;
+        let current = state.index.unwrap_or(0) as isize;
+        state.index = Some((current + delta).rem_euclid(len) as usize);
+        self.completion = Some(state);
     }
 
     // -----------------------------------------------------------------
@@ -1121,18 +1144,6 @@ impl App {
         self.update_completion();
     }
 
-    /// 光标落在命令 chip 内部时夹到 chip 末尾 —— chip 是**原子**的，不能从中间插字。
-    ///
-    /// 只夹 `cursor`，不夹 `anchor`：`Ctrl+A` 的选区起点就是 0（整行含 chip），
-    /// 强行夹锚点会让全选变成「选不中 chip」。
-    fn snap_cursor(&self, pos: usize) -> usize {
-        let pos = pos.min(self.char_len());
-        match self.chip_end {
-            Some(end) if pos < end => end,
-            _ => pos,
-        }
-    }
-
     /// chip 覆盖的文本（不含尾随空格），`None` = 还没成块
     pub fn chip_text(&self) -> Option<String> {
         let end = self.chip_end?;
@@ -1155,7 +1166,7 @@ impl App {
         } else {
             self.anchor = None;
         }
-        self.cursor = self.snap_cursor(to);
+        self.cursor = to.min(self.char_len());
         self.update_completion();
     }
 
@@ -1200,8 +1211,7 @@ impl App {
                     i -= 1;
                 }
             }
-            // chip 是原子块：反向跳词要么整个跳过（落到 0），不许停在 `@z` 中间
-            if self.chip_end.is_some_and(|end| i < end) { 0 } else { i }
+            i
         }
     }
 
@@ -1292,18 +1302,6 @@ impl App {
             return;
         }
         if self.cursor == 0 {
-            return;
-        }
-        // chip 原子化：贴着 chip 按退格（光标在关键字上或紧跟其后的空格后）一次删掉整块，
-        // 包括那个分隔空格。再往里退一格就只剩 `@z`，chip 自然消失、退回普通文字。
-        if let Some(end) = self.chip_end
-            && self.cursor <= end + 1
-        {
-            let to = self.byte_index((end + 1).min(self.char_len()));
-            self.input.replace_range(0..to, "");
-            self.cursor = 0;
-            self.leave_history();
-            self.refresh();
             return;
         }
         let from = self.byte_index(self.cursor - 1);
@@ -2038,52 +2036,48 @@ mod tests {
         assert_eq!(app.chip_end, None);
     }
 
-    /// chip 是原子的：光标进不去，\u{9000}格一次吃掉整块（连那个空格）
+    /// chip **只是渲染**（GUI 画胶囊）：光标能进块内、退格逐字删。
+    /// 2026-11-19 用户反馈：「原子化还是就只要有一个胶囊的渲染，不用作为一个整体」。
     #[test]
-    fn chip_is_atomic_for_editing() {
+    fn chip_is_only_visual_for_editing() {
         let mut app = app_with_prefix("@");
         app.set_input("@z abc".to_string());
 
+        // 光标能一直退到行首（以前会被夹在 2）
         for _ in 0..10 {
             app.on_key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE));
         }
-        assert_eq!(app.cursor, 2, "光标停在 chip 末尾，不进 `@z` 内部");
+        assert_eq!(app.cursor, 0, "光标能进 `@z` 内部");
 
-        app.on_key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE));
-        assert_eq!(app.input, "abc", "整块 `@z ` 一起走，只留下后面那个词");
-        assert_eq!(app.chip_end, None);
-        assert_eq!(app.cursor, 0);
-
-        // 真实顺序：删完查询词（光标回到 chip 后的空格）再一次退格 → 整块走
+        // 退格逐字删：`@z abc` → `@z ab`，关键字还在，胶囊照旧
         let mut app = app_with_prefix("@");
         app.set_input("@z abc".to_string());
-        for _ in 0..3 {
+        app.on_key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE));
+        assert_eq!(app.input, "@z ab");
+        assert_eq!(app.chip_end, Some(2), "关键字完整时胶囊照旧");
+
+        // 把关键字也删掉之后胶囊自然消失（`parse` 不再命中 provider）
+        for _ in 0..6 {
             app.on_key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE));
         }
-        assert_eq!(app.input, "@z ", "逐字删 abc，chip 原样留着");
-        app.on_key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE));
         assert_eq!(app.input, "");
         assert_eq!(app.chip_end, None);
     }
 
-    /// Home 跳到 chip 之后（chip 就是这个输入行的开头）；Ctrl+Backspace 也不许剩个 `@`
+    /// 反向跳词（Ctrl+Backspace / Ctrl+←）不再被 chip 拦住
     #[test]
-    fn chip_respects_word_jumps() {
+    fn chip_does_not_block_word_jumps() {
         let mut app = app_with_prefix("@");
         app.set_input("@z abc".to_string());
 
         app.on_key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE));
-        assert_eq!(app.cursor, 2);
+        assert_eq!(app.cursor, 0, "Home 到行首");
 
         app.set_input("@z abc".to_string());
         app.on_key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::CONTROL));
-        assert_eq!(app.input, "@z ", "第一次只删 abc");
+        assert_eq!(app.input, "@z ", "第一次删 abc");
+        // 再按一次：按词边界删掉 `z ` 两格（不再整块跳到空）
         app.on_key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::CONTROL));
-        assert_eq!(app.input, "", "第二次整个 chip 一起走，不留 `@`");
-
-        // `@z`（还没空格）时也是原子块：一次退格整块清空
-        app.set_input("@z".to_string());
-        app.on_key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE));
-        assert_eq!(app.input, "", "chip 一旦成块就整体删，不逐字退");
+        assert_eq!(app.input, "@");
     }
 }

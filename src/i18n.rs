@@ -484,6 +484,18 @@ pub fn menu_remove_history() -> &'static str {
     t("从最近记录移除", "Remove from recent")
 }
 
+pub fn menu_empty() -> &'static str {
+    t("这一行没有可用的操作", "No actions for this row")
+}
+
+/// 列表模式（输入框失焦）时状态栏的提示
+pub fn hint_list_mode() -> &'static str {
+    t(
+        "列表模式：↑↓ 选择 · 空格 菜单 · Enter 打开 · Esc 回到输入",
+        "List mode: ↑↓ move · Space menu · Enter open · Esc to input",
+    )
+}
+
 pub fn menu_removed_history(title: &str) -> String {
     s(
         || format!("已从最近记录移除 {title}"),

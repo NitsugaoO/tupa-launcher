@@ -1,6 +1,6 @@
 # tupa-launcher 状态
 
-updated: 2026-11-19 · code: `4669ca3`（右键菜单 · 删 @pi / @run · @go → @z · 隐藏后清空输入 · 紧凑态收回 · clip 同步出 · clean 迁到 HTML）
+updated: 2026-11-19 · code: `PENDING`（列表模式 + 补全浮层 · chip 只留渲染 · @hist 隐藏 · 右键菜单 · 删 @pi / @run · @go → @z · clip 同步出 · clean 迁到 HTML）
 
 > 判断本文件是否过期：比较 `code` 与 `git log -1 --format=%h -- src Cargo.toml`。
 > 只改文档的提交不算过期。
@@ -12,6 +12,22 @@ updated: 2026-11-19 · code: `4669ca3`（右键菜单 · 删 @pi / @run · @go �
 > **每次会话收尾只需要改这一个文件的两节**（阶段 / 未完成），并更新首行。
 
 ## 阶段
+
+- **四项交互调整（2026-11-19 晚）**：
+  - **`@hist` 从 `@` 命令列表里隐藏**：`Provider::listed()`（默认 true）返回 false 只影响
+    命令列表的 `metas`，不影响解析 —— `@hist` 照样能用。它跟开屏的「最近」重复，列出来是噪声。
+  - **chip 不再原子**：只保留胶囊渲染（`chip_end` 仍由 `Parsed::Command` 决定），
+    编辑上光标能进块内、退格逐字、`Home` 到行首、`Ctrl+Backspace` 按词边界走。
+    删掉的四处：`snap_cursor`（+ 两处调用）、`word_boundary` 的反向特判、`backspace` 整块删、
+    `gui/input.rs` 的 IME 插入点夹取。
+  - **输入区 / 列表区分开**（用户定的交互模型）：`↓`（或 `↑`，顺手向上移）进 `Panel::list_mode`，
+    输入框失焦（提示符变暗、光标隐藏、IME 与字符输入都被忽略）；列表模式下
+    `↑↓` 移动、**`空格` 开当前行菜单**、`Enter` 执行、`Esc` 回输入框。
+    `Esc` 现在逐层退：列表模式 → 输入框 → 紧凑 → 隐藏。
+  - **补全候选浮层（GUI 之前一直缺着）**：右键菜单和补全共用 `Panel::popup_list`
+    （`PopupPick` 区分点击行为）。补全竖排在输入框下方，`Tab` 立即套用（老行为）、
+    `↑↓` 只移高亮（`App::cycle_completion`）、**`Enter` 套用高亮候选**（`App::complete_to`）、
+    鼠标点击也能套用。菜单本身也支持键盘：`↑↓` + `Enter`。
 
 - **右键菜单（2026-11-19 晚，PLAN #4）**：列表任意行右键 → 绝对定位浮层，菜单项按该行
   **实际能做的事**现取（`App::menu_for`，不缓存）：应用给「以管理员身份运行 / 打开所在位置 /

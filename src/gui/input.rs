@@ -112,7 +112,8 @@ impl EntityInputHandler for Panel {
         cx: &mut Context<Self>,
     ) {
         // 帮助浮层开着（或刚关）：`?` 那一下的 `WM_CHAR` 不能落进来
-        if self.text_blocked() {
+        // 列表模式下输入框是「失焦」的：字符一律不接（用户 2026-11-19 定的）
+        if self.text_blocked() || self.list_mode {
             return;
         }
 
@@ -137,12 +138,6 @@ impl EntityInputHandler for Panel {
                 .selection()
                 .unwrap_or((self.app.cursor, self.app.cursor)),
         };
-        // chip 是原子的：系统报的插入点若落在 `@pi` 中间，就夹到 chip 之后
-        let (start, end) = match self.app.chip_end {
-            Some(chip_end) => (start.max(chip_end), end.max(chip_end)),
-            None => (start, end),
-        };
-
         let from = byte_index(&self.app.input, start);
         let to = byte_index(&self.app.input, end);
         self.app.input.replace_range(from..to, text);
@@ -162,7 +157,7 @@ impl EntityInputHandler for Panel {
         cx: &mut Context<Self>,
     ) {
         // 预编辑：只是「显示在光标处」，先不动输入框本身，等 commit 再落进去
-        if self.text_blocked() {
+        if self.text_blocked() || self.list_mode {
             return;
         }
         let start = match range {

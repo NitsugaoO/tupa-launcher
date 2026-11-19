@@ -73,6 +73,8 @@ cargo clippy --release --features gui    # 零警告；必须带 feature，否�
   （徽标）、`columns()`（漏了掉回默认两列，开屏混排里排版会歪）、`from_badge()`
   （漏了 `fav:<徽标>` 解析不到）。
 - **加 provider**：`src/providers/xxx.rs` + `providers/mod.rs::build()` 里 push（顺序 = 命令列表顺序）。
+  不想让它出现在 `@` 命令列表里（但仍要能用）就覆盖 `Provider::listed()` 返回 `false`
+  （`hist` 就是这样，2026-11-19）。
 - **`@pi` / `@run` 已移除（2026-11-19）**：`@pi` 每次查询要开 175 个 jsonl、读前 80 行
   （实测 0.68s / 88MB），`@run` 的提权终端交给 GlazeWM 的 `alt+shift+enter`。
   pi 会话清理改为 `my-pi-plugins` 的 `/clean`：规则 + HTTP 契约在
@@ -239,20 +241,30 @@ cargo clippy --release --features gui    # 零警告；必须带 feature，否�
      少了第二步一个图标都拿不到）。缓存存原始字节、**失败写空文件**否则每次呼出都重试；
      站点 key 要带**非默认端口**（`127.0.0.1:5173` 与 `:4000` 是两个服务）。
      开关是 `[gui] web_icons = "favicon" | "globe"`（`globe` 完全无网络请求）。
-- **输入框的 provider chip 是原子的**（2026-11-19）：关键字一命中 provider（`@z`，不必敲空格），
-  `input` 的 `0..chip_end` 段（`App::chip_end`，**字符**下标）在 GUI 里画成
-  「字形 + 关键字」的胶囊，编辑上不许光标进入。三个坑：
-  - **chip 的判据就是 `Parsed::Command`，不要再加空格条件** —— `providers::parse` 本来就
-    不要求空格，列表在 `@z` 就已经切到目录跳转了；chip 要是等空格，就会出现「列表已经
-    换了、输入框还是纯文字」的错位（2026-11-19 用户反馈，别改回去）。
-  - **也试过反过来：改 `parse` 让列表也等空格 —— 否决**（2026-11-19）。那会让 `@z` + 回车
-    变成「补成 `@z `、要按两次回车才列目录」，还把 `--query "@z"` 从列目录改成列命令。
-    代价不对等：错位靠 chip 提前就能解决，不用动解析层。
-  - **原子语义在 `app` 层，不在 GUI**：`snap_cursor` 在 `refresh_with` 末尾统一夹一次
-    （覆盖输入 / 粘贴 / IME / 各条编辑路径），`backspace` 贴着 chip 一次删掉整块含分隔
-    空格，`word_boundary` 反向不许停在 `@z` 中间。TUI 没画 chip，但**这些行为同样生效**。
-  - **新增 provider 要补 `gui/glyphs.rs::for_keyword`**，漏了只是回落到问号（没有编译错误）。
-    码点用已有常量；新增码点先用 GDI+ 画一张 PNG 确认不是豆腐块。
+- **输入框的 provider chip 只是「渲染」，不是原子块**（2026-11-19 改）：
+  关键字一命中 provider（`@z`，不必敲空格）就把 `input[..chip_end]` 画成胶囊，但**编辑上不再
+  特殊对待** —— 光标能进块内、退格逐字删、`Home` 到行首、`Ctrl+Backspace` 按词边界走。
+  用户原话：「原子化还是就只要有一个胶囊的渲染，不用作为一个整体」。
+  - `App::chip_end` 仍然只由 `Parsed::Command` 决定（`refresh_with` 里算），**不要加空格条件**：
+    `parse` 不要求空格，列表在 `@z` 就已切换，chip 要是等空格就会错位（2026-11-19 反馈）。
+  - 曾经有 `snap_cursor` / 整块退格 / `word_boundary` 特殊分支 / IME 插入点夹取四处原子逻辑，
+    **已全部删除**。加回来之前先想清楚是不是又要"整体"语义。
+  - **新增 provider 要补 `gui/glyphs.rs::for_keyword`**，漏了只是回落问号（没有编译错误）。
+- **输入区 / 列表区分开（列表模式，2026-11-19）**：输入框有焦点时所有键都是输入（空格是分隔符）；
+  按 `↓`（或 `↑`）进入 `Panel::list_mode`，此时输入框「失焦」：提示符变暗、光标隐藏、
+  **IME 与字符输入都被忽略**（`gui/input.rs` 三个 handler 里判 `list_mode`），
+  键只作用于列表：`↑↓` 移动、`Space` 开当前行菜单、`Enter` 执行、`Esc` 回到输入框。
+  - **空格能当菜单键的前提就是这条**：输入模式下空格必须能打出来（`:blog:new 我的 文章`）。
+  - `Esc` 是逐层退：列表模式 → 输入框；展开着的列表 → 紧凑；开屏 → 隐藏面板。
+  - **不能**每帧检查「输入变空就退回紧凑」—— 紧凑态按 ↓ 展开时输入本来就是空的；
+    只在「非空 → 空」的跳变上复位（`Panel::was_empty`）。
+- **浮层只有一套绘制**（2026-11-19）：右键菜单和补全候选共用 `Panel::popup_list`
+  （`PopupPick` 区分点一下干什么）。两处都画在 `render` 的 root 最后（`absolute()` 定位），
+  菜单优先于补全；超出窗口往内夹。
+  - 菜单状态是 `MenuState { row, x, y, selected }`：**键盘和鼠标都能开**
+    （右键 → 鼠标坐标；列表模式空格 → `open_menu_for_row` 按行号算坐标）。
+  - 有补全候选时：`Tab` 立即套用（老行为）、`↑↓` 只移高亮（`App::cycle_completion`）、
+    `Enter` 套用高亮项（`App::complete_to`）——**不要再让回车去执行列表项**。
 - **`[[apps]] icon = "..."` 给的图要用 `image` 解，别过 SHELL**（2026-11-18）：
   `SIIGBF_ICONONLY` 对 png / jpg 返回的是「图片文件」通用图标（白纸），不是图本身。
   用 `appicon::load_image`（`image::open` + RGBA→BGRA），给自动解析推不出图的条目用

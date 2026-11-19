@@ -228,9 +228,15 @@ struct Panel {
     preedit: Option<(usize, String)>,
     /// 紧凑态下按 ↓ 手动展开的开屏列表（收藏 + 最近命令）
     hint_open: bool,
-    /// 右键菜单：`(行号, 窗口内 x, y)`。菜单项每次从 `app.menu_for(row)` 现取（不缓存），
-    /// 这样收藏状态、历史变化都能实时反映到菜单上。
-    menu: Option<(usize, f32, f32)>,
+    /// 列表模式：输入框失焦，键全部作用于列表（↑↓ / Enter / 空格开菜单）。
+    ///
+    /// 用户 2026-11-19 的要求：「列表区和输入框分开，操作列表时输入框失焦，Esc 回输入框」。
+    /// 这样空格才能当菜单键（输入模式下空格还是分隔符）。
+    /// 进入：输入模式下按 `↓`（沿用「展开列表」的手感）；`↑` 只负责进模式 + 向上移动。
+    list_mode: bool,
+    /// 右键菜单（鼠标右键或列表模式空格打开）。菜单项每次从 `app.menu_for(row)` 现取
+    /// （不缓存），这样收藏状态、历史变化都能实时反映到菜单上。
+    menu: Option<MenuState>,
     /// 上一次看到的「输入是否为空」（紧凑态自动收回的判断基准）。
     ///
     /// 不能每帧「空了就收回」—— 按 ↓ 展开时输入本来就是空的；只能在
@@ -347,7 +353,14 @@ impl Panel {
                 match this.update(cx, |panel, cx| {
                     // 光标闪烁：到点就翻一次（移动光标后 `blink_at` 会被推后）
                     let now = std::time::Instant::now();
-                    if !active {
+                    if panel.list_mode {
+                        // 列表模式 = 输入框失焦：光标隐藏，也不重绘闪烁
+                        if panel.cursor_on {
+                            panel.cursor_on = false;
+                            cx.notify();
+                        }
+                        panel.blink_at = now + Duration::from_millis(500);
+                    } else if !active {
                         // 失焦直接藏光标（编辑器惯例），也不推帧
                         if panel.cursor_on {
                             panel.cursor_on = false;
@@ -481,6 +494,7 @@ impl Panel {
             blink_at: std::time::Instant::now() + Duration::from_millis(500),
             preedit: None,
             hint_open: false,
+            list_mode: false,
             menu: None,
             was_empty: true,
             row_metrics: RowMetrics {
@@ -516,16 +530,53 @@ impl Panel {
     fn handle_key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         let key = keys::to_key(&event.keystroke);
 
-        // 右键菜单开着时：Esc 只关菜单；其它键关掉菜单后继续正常处理
-        // （不能连输入一起吞掉 —— 用户可能只是想接着打字）
-        if self.menu.is_some() {
-            self.menu = None;
-            let escape = matches!(&key, Some(k) if k.code == crossterm::event::KeyCode::Esc);
-            cx.notify();
-            if escape {
-                window.focus(&self.focus);
-                return;
+        // 菜单开着时键盘归菜单：↑↓ 移高亮、Enter 执行、Esc 关闭；
+        // 其它键关掉菜单后继续正常处理（不能连输入一起吞掉 —— 用户可能只是想接着打字）
+        if let Some(menu) = self.menu {
+            use crossterm::event::KeyCode as Kc;
+            let count = self.app.menu_for(menu.row).len().max(1);
+            if let Some(k) = key.as_ref() {
+                match k.code {
+                    Kc::Esc => {
+                        self.menu = None;
+                        window.focus(&self.focus);
+                        cx.notify();
+                        return;
+                    }
+                    Kc::Up => {
+                        self.menu = Some(MenuState {
+                            selected: (menu.selected + count - 1) % count,
+                            ..menu
+                        });
+                        cx.notify();
+                        return;
+                    }
+                    Kc::Down => {
+                        self.menu = Some(MenuState {
+                            selected: (menu.selected + 1) % count,
+                            ..menu
+                        });
+                        cx.notify();
+                        return;
+                    }
+                    Kc::Enter => {
+                        let entries = self.app.menu_for(menu.row);
+                        self.menu = None;
+                        if let Some((_, action)) = entries.get(menu.selected).cloned() {
+                            let hide = self.app.run_menu(menu.row, action);
+                            if hide {
+                                self.app.should_hide = false;
+                                self.hide();
+                            }
+                        }
+                        cx.notify();
+                        return;
+                    }
+                    _ => {}
+                }
             }
+            self.menu = None;
+            cx.notify();
         }
 
         let question = matches!(
@@ -554,16 +605,104 @@ impl Panel {
             return;
         }
 
-        // 紧凑态（刚呼出）：按 ↓ 才把开屏列表（收藏 + 最近命令）拉下来
+        // 补全浮层：有候选时 ↑↓ 只移动高亮（不进列表模式），**回车落字**
+        // （用户 2026-11-19：「刚打完 provider 要什么执行」）
+        if !self.list_mode && self.app.completion.is_some() {
+            use crossterm::event::KeyCode as Kc;
+            if let Some(k) = key.as_ref() {
+                let plain = k.modifiers.is_empty();
+                match k.code {
+                    Kc::Up if plain => {
+                        self.app.cycle_completion(-1);
+                        window.focus(&self.focus);
+                        cx.notify();
+                        return;
+                    }
+                    Kc::Down if plain => {
+                        self.app.cycle_completion(1);
+                        window.focus(&self.focus);
+                        cx.notify();
+                        return;
+                    }
+                    Kc::Enter if plain => {
+                        let index = self
+                            .app
+                            .completion
+                            .as_ref()
+                            .and_then(|completion| completion.index)
+                            .unwrap_or(0);
+                        self.app.complete_to(index);
+                        window.focus(&self.focus);
+                        cx.notify();
+                        return;
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        // 紧凑态（或任意输入模式）按 ↓：**进列表模式**，并把开屏列表拉下来。
+        // 不移动选择 —— 进模式后 ↓ 才管移动（用户 2026-11-19：列表与输入区要分开）。
         let plain_down = matches!(
             &key,
             Some(k) if k.code == crossterm::event::KeyCode::Down && k.modifiers.is_empty()
         );
-        if self.compact() && plain_down {
+        if plain_down {
+            self.list_mode = true;
             self.hint_open = true;
             window.focus(&self.focus);
             cx.notify();
             return;
+        }
+
+        // 列表模式：输入框失焦，键只作用于列表。空格才能当菜单键（输入模式下空格是分隔符）
+        if self.list_mode {
+            let Some(k) = key.clone() else {
+                return;
+            };
+            use crossterm::event::KeyCode as Kc;
+            if k.code == Kc::Esc {
+                self.list_mode = false;
+                self.menu = None;
+                // 回到输入框：光标重新亮起并开始闪
+                self.cursor_on = true;
+                self.blink_at = std::time::Instant::now() + Duration::from_millis(500);
+                window.focus(&self.focus);
+                cx.notify();
+                return;
+            }
+            if k.code == Kc::Char(' ') && k.modifiers.is_empty() {
+                let index = self.app.list_state.selected().unwrap_or(0);
+                if !self.open_menu_for_row(index) {
+                    self.app.status = Some((i18n::menu_empty().to_string(), true));
+                }
+                window.focus(&self.focus);
+                cx.notify();
+                return;
+            }
+            // 只放行导航 / 执行类键；字符键一律忽略（先 Esc 回输入框，用户定的）
+            if !matches!(
+                k.code,
+                Kc::Up
+                    | Kc::Down
+                    | Kc::Home
+                    | Kc::End
+                    | Kc::PageUp
+                    | Kc::PageDown
+                    | Kc::Tab
+                    | Kc::BackTab
+                    | Kc::Enter
+                    | Kc::Char('1'..='9')
+            ) {
+                return;
+            }
+        }
+
+        // 输入模式下按 ↑：也进列表模式，并**顺手向上移动**（不然得按两次才动）
+        if matches!(&key, Some(k) if k.code == crossterm::event::KeyCode::Up && k.modifiers.is_empty())
+        {
+            self.list_mode = true;
+            self.hint_open = true;
         }
 
         // 展开着的时候，Esc 先收回紧凑形态，而不是直接隐藏面板
@@ -692,6 +831,7 @@ impl Panel {
     fn hide(&mut self) {
         self.app.reset();
         self.hint_open = false;
+        self.list_mode = false;
         self.menu = None;
         self.was_empty = self.app.input.is_empty();
         self.help = false;
@@ -815,11 +955,11 @@ impl Panel {
                 .h(px(1.)),
             );
 
-        // 提示符
+        // 提示符（列表模式下变暗：输入框已失焦）
         row = row.child(
             div()
                 .text_size(px(style::INPUT_SIZE))
-                .text_color(p.accent)
+                .text_color(if self.list_mode { p.faint } else { p.accent })
                 .child(style::PROMPT),
         );
 
@@ -981,6 +1121,34 @@ impl Panel {
             return div().flex_1().into_any_element();
         }
         self.list_area(window, cx, p)
+    }
+
+    /// 键盘打开菜单（空格）：位置对齍那一行，不用鼠标坐标。
+    ///
+    /// 返回 `false` = 这行没有可做的菜单项（调用方给提示，别静默没反应）。
+    fn open_menu_for_row(&mut self, index: usize) -> bool {
+        if self.app.menu_for(index).is_empty() {
+            return false;
+        }
+        let row_h = self.row_height();
+        let first = if row_h > 0.0 {
+            (self.scroll_y / row_h).round().max(0.0) as usize
+        } else {
+            0
+        };
+        let y = style::PADDING
+            + style::INPUT_HEIGHT
+            + 1.0
+            + style::LIST_TOP
+            + index.saturating_sub(first) as f32 * row_h;
+        let x = style::PADDING + style::BADGE_WIDTH + 24.0;
+        self.menu = Some(MenuState {
+            row: index,
+            x,
+            y,
+            selected: 0,
+        });
+        true
     }
 
     /// 鼠标滚轮 = 上下移动选中项（和 ↑↓ 等价）
@@ -1772,67 +1940,142 @@ impl Panel {
     /// 菜单项每次从 `app.menu_for(row)` 现取（不复存一份），所以收藏状态、
     /// 「历史里还有没有这条」都是实时的。
     fn menu_panel(&self, p: Palette, window: &Window, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let (row, x, y) = self.menu?;
-        let entries = self.app.menu_for(row);
+        let menu = self.menu?;
+        let entries = self.app.menu_for(menu.row);
         if entries.is_empty() {
             return None;
         }
+        let selected = menu.selected;
+        let items: Vec<(String, PopupPick)> = entries
+            .into_iter()
+            .map(|(label, action)| {
+                (
+                    label,
+                    PopupPick::Menu {
+                        row: menu.row,
+                        action,
+                    },
+                )
+            })
+            .collect();
+        Some(self.popup_list(
+            window,
+            p,
+            cx,
+            items,
+            Some(selected),
+            menu.x,
+            menu.y,
+            style::MENU_WIDTH,
+        ))
+    }
 
-        let height = entries.len() as f32 * style::MENU_ROW + style::MENU_PAD * 2.0;
+    /// 补全候选浮层：贴在输入行下方，竖排。高亮跟随 `completion.index`。
+    ///
+    /// 只在输入模式显示（列表模式下输入框失焦，没在打字），回车落字见 `handle_key`。
+    fn completion_panel(
+        &self,
+        p: Palette,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        if self.list_mode || self.help {
+            return None;
+        }
+        let completion = self.app.completion.as_ref()?;
+        if completion.candidates.is_empty() {
+            return None;
+        }
+        let items: Vec<(String, PopupPick)> = completion
+            .candidates
+            .iter()
+            .map(|candidate| (candidate.clone(), PopupPick::Completion))
+            .collect();
+        let left = style::PADDING;
+        let top = style::PADDING + style::INPUT_HEIGHT + 1.0;
+        Some(self.popup_list(
+            window,
+            p,
+            cx,
+            items,
+            Some(completion.index.unwrap_or(0)),
+            left,
+            top,
+            style::MENU_WIDTH,
+        ))
+    }
+
+    /// 浮层的统一绘制（右键菜单与补全候选共用，别各写一套）。
+    fn popup_list(
+        &self,
+        window: &Window,
+        p: Palette,
+        cx: &mut Context<Self>,
+        items: Vec<(String, PopupPick)>,
+        selected: Option<usize>,
+        left: f32,
+        top: f32,
+        width: f32,
+    ) -> AnyElement {
+        let height = items.len() as f32 * style::MENU_ROW + style::MENU_PAD * 2.0;
         let size = window.bounds().size;
-        let left = x
-            .min(f32::from(size.width) - style::MENU_WIDTH - 8.0)
-            .max(4.0);
-        let top = y.min(f32::from(size.height) - height - 8.0).max(4.0);
+        let left = left.min(f32::from(size.width) - width - 8.0).max(4.0);
+        let top = top.min(f32::from(size.height) - height - 8.0).max(4.0);
 
         let mut list = div()
             .flex()
             .flex_col()
-            .w(px(style::MENU_WIDTH))
+            .w(px(width))
             .p(px(style::MENU_PAD))
             .rounded(px(6.0))
             .border(px(1.0))
             .border_color(p.accent)
-            // 比面板实一点：菜单下面还压着列表文字，太透会看不清
+            // 比面板实一点：浮层下面还压着列表文字，太透会看不清
             .bg(style::with_alpha(p.background, 0.97));
 
-        for (index, (label, action)) in entries.into_iter().enumerate() {
+        for (index, (label, pick)) in items.into_iter().enumerate() {
+            let highlighted = selected == Some(index);
             let click = cx.listener(
                 move |panel: &mut Panel, _: &gpui::ClickEvent, _window, cx| {
                     panel.menu = None;
-                    let hide = panel.app.run_menu(row, action);
-                    if hide {
-                        panel.app.should_hide = false;
-                        panel.hide();
+                    match pick {
+                        PopupPick::Menu { row, action } => {
+                            let hide = panel.app.run_menu(row, action);
+                            if hide {
+                                panel.app.should_hide = false;
+                                panel.hide();
+                            }
+                        }
+                        PopupPick::Completion => panel.app.complete_to(index),
                     }
                     cx.notify();
                 },
             );
-            list = list.child(
-                div()
-                    .id(("menu-item", index))
-                    .w_full()
-                    .h(px(style::MENU_ROW))
-                    .px(px(10.0))
-                    .flex()
-                    .items_center()
-                    .rounded(px(4.0))
-                    .text_size(px(style::MENU_SIZE))
-                    .text_color(p.fg)
-                    .hover(|style| style.bg(p.row_hover))
-                    .on_click(click)
-                    .child(label),
-            );
+            let mut item = div()
+                .id(("popup-item", index))
+                .w_full()
+                .h(px(style::MENU_ROW))
+                .px(px(10.0))
+                .flex()
+                .items_center()
+                .rounded(px(4.0))
+                .text_size(px(style::MENU_SIZE))
+                .text_color(if highlighted { p.accent } else { p.fg })
+                .hover(|style| style.bg(p.row_hover))
+                .on_click(click)
+                .child(label);
+            if highlighted {
+                item = item.bg(p.row_hover);
+            }
+            list = list.child(item);
         }
 
-        Some(
-            div()
-                .absolute()
-                .left(px(left))
-                .top(px(top))
-                .child(list)
-                .into_any_element(),
-        )
+        div()
+            .absolute()
+            .left(px(left))
+            .top(px(top))
+            .child(list)
+            .into_any_element()
     }
 
     /// 状态栏：左 = 状态消息 / provider 说明，右 = 选中位置
@@ -1840,6 +2083,8 @@ impl Panel {
         let (left, color) = match &self.app.status {
             Some((message, true)) => (message.clone(), p.bad),
             Some((message, false)) => (message.clone(), p.good),
+            // 列表模式：状态栏换成键位提示（不然看不出「现在在操作列表」）
+            None if self.list_mode => (i18n::hint_list_mode().to_string(), p.muted),
             None => (self.app.active_description().to_owned(), p.muted),
         };
         let position = match self.app.list_state.selected() {
@@ -1935,6 +2180,28 @@ struct RowMetrics {
 ///
 /// 宽度必须显式给（`w(px(n))`）——GPUI 的 `truncate()` 只对确定宽度的元素生效，
 /// `flex_1` 的容器会被内容撑开、文字画到窗口外。
+/// 右键菜单的状态：作用在哪一行、画在哪、键盘高亮第几项。
+#[derive(Debug, Clone, Copy)]
+struct MenuState {
+    row: usize,
+    x: f32,
+    y: f32,
+    /// 键盘高亮项（鼠标打开时先落在 0，↑↓ 移动、Enter 执行）
+    selected: usize,
+}
+
+/// 浮层里点一下要做什么：右键菜单项 / 补全候选。两者共用 `popup_list` 的绘制。
+#[derive(Clone, Copy)]
+enum PopupPick {
+    /// 右键菜单：第 `row` 行的某个动作
+    Menu {
+        row: usize,
+        action: crate::app::MenuAction,
+    },
+    /// 补全候选：直接应用第 `index` 个
+    Completion,
+}
+
 /// 一行的左键交互（卡片行 / 密度行共用，别两边各写一份 —— 容易漏改一边）。
 ///
 /// 单击 = 选中，双击 = 回车；右键走 [`row_right_click_handler`]。
@@ -1976,7 +2243,12 @@ fn row_right_click_handler(
             panel.menu = if panel.app.menu_for(index).is_empty() {
                 None
             } else {
-                Some((index, x, y))
+                Some(MenuState {
+                    row: index,
+                    x,
+                    y,
+                    selected: 0,
+                })
             };
             cx.notify();
         });
@@ -2593,9 +2865,11 @@ impl Render for Panel {
                 .child(self.status_bar(p));
         }
 
-        // 右键菜单画在最上层（root 的最后一个 child）
+        // 浮层画在最上层（root 的最后一个 child）：右键菜单优先，其次补全候选
         if let Some(menu) = self.menu_panel(p, window, cx) {
             root = root.child(menu);
+        } else if let Some(completion) = self.completion_panel(p, window, cx) {
+            root = root.child(completion);
         }
 
         // 动画由 vsync 驱动：还有东西在动就注册「下一帧」回调，回调里推进动画并重绘。

@@ -42,6 +42,12 @@ impl Provider for Hist {
         crate::i18n::desc_hist()
     }
 
+    /// 不占 `@` 命令列表的一行：`@hist` 照样能用，只是不摆在列表上
+    /// （它跟开屏的历史那一段重叠，列出来只是噪声）。
+    fn listed(&self) -> bool {
+        false
+    }
+
     fn query(&self, args: &str, _flags: &[String]) -> Vec<Item> {
         self.ranked(args)
             .into_iter()

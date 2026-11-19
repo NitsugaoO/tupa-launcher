@@ -478,6 +478,14 @@ pub trait Provider: Send {
     fn flags(&self) -> &'static [&'static str] {
         &[]
     }
+
+    /// 要不要出现在 `@` 的命令列表里（默认要）。
+    ///
+    /// 不影响解析：返回 `false` 只是不占命令列表的一行，`@hist` 照样能用。
+    /// 用在「有用但不需要摆到命令列表上」的 provider（目前只有 `hist`，2026-11-19）。
+    fn listed(&self) -> bool {
+        true
+    }
 }
 
 /// 主线程只需要知道 provider 的元信息（真正的 provider 在 worker 线程里）
@@ -519,7 +527,7 @@ pub fn build(cfg: &Config) -> Vec<Box<dyn Provider>> {
     // 命令列表放在最后：它要把前面所有 provider 的关键字列出来
     let metas = list
         .iter()
-        .filter(|p| p.keyword() != home::KEYWORD)
+        .filter(|p| p.keyword() != home::KEYWORD && p.listed())
         .map(|p| commands::Meta {
             keyword: p.keyword().to_string(),
             description: p.description().to_string(),
