@@ -246,6 +246,9 @@ cargo clippy --release --features gui    # 零警告；必须带 feature，否�
   - **chip 的判据就是 `Parsed::Command`，不要再加空格条件** —— `providers::parse` 本来就
     不要求空格，列表在 `@pi` 就已经切到 pi 会话了；chip 要是等空格，就会出现「列表已经
     换了、输入框还是纯文字」的错位（2026-11-19 用户反馈，别改回去）。
+  - **也试过反过来：改 `parse` 让列表也等空格 —— 否决**（2026-11-19）。那会让 `@pi` + 回车
+    变成「补成 `@pi `、要按两次回车才列会话」，还把 `--query "@pi"` 从列会话改成列命令。
+    代价不对等：错位靠 chip 提前就能解决，不用动解析层。
   - **原子语义在 `app` 层，不在 GUI**：`snap_cursor` 在 `refresh_with` 末尾统一夹一次
     （覆盖输入 / 粘贴 / IME / 各条编辑路径），`backspace` 贴着 chip 一次删掉整块含分隔
     空格，`word_boundary` 反向不许停在 `@pi` 中间。TUI 没画 chip，但**这些行为同样生效**。

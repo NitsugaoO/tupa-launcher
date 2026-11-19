@@ -20,6 +20,8 @@ updated: 2026-11-19 · code: `27c5494`（输入框 provider chip · @pi 标题�
   **只看 `Parsed::Command`**。曾经加过「必须跟空格」的条件，结果列表已经换了、chip 还
   没出现，看着错位（2026-11-19 用户反馈，已改掉）。代价：关键字打错（`@pix`）chip
   会消失回普通文字，只能整块删重打 —— 原子语义本意。
+  **`providers::parse` 一行没动**：`--query "@pi"`、TUI 列表行为与改动前完全一致，
+  变的只是 chip 跟着 parse 的结论走。
   编辑上真原子：`snap_cursor` 在 `refresh_with` 末尾统一夹光标（覆盖输入 / 粘贴 / IME），
   `Backspace` 贴着 chip 一次删掉整块（含分隔空格；`@pi` 无空格时直接清空），
   `Ctrl+Backspace` 反向跳词落到 0 而不是停在 `@pi` 中间，`Home` 落在 chip 之后。
