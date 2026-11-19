@@ -1,6 +1,6 @@
 # tupa-launcher 状态
 
-updated: 2026-11-19 · code: `968b945`（删 @pi / @run · @go → @z · 隐藏后清空输入 · 紧凑态收回 · clip 同步出 · clean 迁到 HTML）
+updated: 2026-11-19 · code: `b6270e2`（删 @pi / @run · @go → @z · 隐藏后清空输入 · 紧凑态收回 · clip 同步出 · clean 迁到 HTML）
 
 > 判断本文件是否过期：比较 `code` 与 `git log -1 --format=%h -- src Cargo.toml`。
 > 只改文档的提交不算过期。
