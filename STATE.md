@@ -1,6 +1,6 @@
 # tupa-launcher 状态
 
-updated: 2026-11-19 · code: `PENDING`（↑↓ 终端化 + 补全默认关 · 列表模式补键 · chip 只留渲染 · @hist 隐藏 · 右键菜单 · 删 @pi / @run · @go → @z · clip 同步出 · clean 迁到 HTML）
+updated: 2026-11-19 · code: `fd4b570`（↑↓ 终端化 + 补全默认关 · 列表模式补键 · chip 只留渲染 · @hist 隐藏 · 右键菜单 · 删 @pi / @run · @go → @z · clip 同步出 · clean 迁到 HTML）
 
 > 判断本文件是否过期：比较 `code` 与 `git log -1 --format=%h -- src Cargo.toml`。
 > 只改文档的提交不算过期。
