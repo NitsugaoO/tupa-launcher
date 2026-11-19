@@ -1,6 +1,6 @@
 # tupa-launcher 状态
 
-updated: 2026-11-18 · code: `f67ed8a`（@pi 标题改读 pi-sessions 索引 · 亚克力 + 圆角 + 失焦光标 · 两行卡片 · 窗口高 0.68 + 提前两行滚动 · 应用图标 + mini chip + 文件/网页/Steam 图标 + 全类型图标 + 历史死链回填）
+updated: 2026-11-19 · code: `cdac206`（输入框 provider chip · @pi 标题改读 pi-sessions 索引 · 亚克力 + 圆角 + 失焦光标 · 两行卡片 · 窗口高 0.68 + 提前两行滚动 · 应用图标 + mini chip + 文件/网页/Steam 图标 + 全类型图标 + 历史死链回填）
 
 > 判断本文件是否过期：比较 `code` 与 `git log -1 --format=%h -- src Cargo.toml`。
 > 只改文档的提交不算过期。
@@ -13,6 +13,20 @@ updated: 2026-11-18 · code: `f67ed8a`（@pi 标题改读 pi-sessions 索引 · 
 
 ## 阶段
 
+- **输入框 provider chip（2026-11-19）**：打完 `@pi ` **按空格激活**后，输入框最前面那段
+  从纯文本变成原子胶囊（字形 + 关键字，本机 `@` 前缀下是 `(π pi)`），后面继续打的才是
+  查询词。状态是 `App::chip_end`（**字符**下标，`0..chip_end`），在 `refresh_with` 里算：
+  `Parsed::Command` **且** 关键字后紧跟空格 —— 只打 `@pi` 不算（`providers::parse`
+  不要求空格，不额外判空格的话 chip 会在拼关键字时提前冒出来）。
+  编辑上真原子：`snap_cursor` 在 `refresh_with` 末尾统一夹光标（覆盖输入 / 粘贴 / IME），
+  `Backspace` 贴着 chip 一次删掉整块（含分隔空格），`Ctrl+Backspace` 反向跳词落到 0
+  而不是停在 `@pi` 中间，`Home` 落在 chip 之后。`@pi:clean` 这类带修饰符的整体成一块。
+  GUI 在 `gui/mod.rs::input_row` 画胶囊（`style::CHIP_INPUT_*` 常量），光标位置用
+  `text_width` 实量 chip 宽度 + 后续文本，`bounds_for_range`（IME 候选窗）也补了偏移；
+  选中覆盖 chip 时底色亮一档，chip 不被当普通文字重画。TUI **仍只有黄色高亮**，
+  但原子语义在 app 层，TUI 一样生效。
+  实测：`@p ` / `@pi`（无空格）不成块、`@pi abc` chip + 光标贴字、删完 abc 再退格
+  整块消失回开屏、Shift+Home 选中 chip 亮一档。
 - **`@pi` 显示会话名（2026-11-18 深夜）**：标题不再取「第一条用户消息」。pi 的自动标题
   （auto-title，每 4 轮重评）写在 jsonl 的 `{"type":"session_info","name":…}` 里，
   **位置不固定**（改标题就追加一条；本机 448 个会话里最后一条距末尾中位 8KB、p90 648KB、
@@ -407,7 +421,8 @@ updated: 2026-11-18 · code: `f67ed8a`（@pi 标题改读 pi-sessions 索引 · 
 
 - **窗口宽度记忆**：面板宽度固定按主屏 62%（高度随内容），拖边改过的宽度还没写回
   `gui.json`（`config.toml` 手写带注释，不能程序回写）。
-- **TUI 侧没跟进的新交互**：紧凑形态、双击执行、chip 配色只在 GUI 有；
+- **TUI 侧没跟进的新交互**：紧凑形态、双击执行、chip 配色只在 GUI 有（输入框的
+  provider chip 也不例外，TUI 只把前缀画成黄色加粗）；
   `Ctrl+Tab` 在 GUI 是「两行卡片 / 单行密度」切换，TUI 仍是竖排详情（`ui.rs`），
   而文案 `detail_mode_on/off` 按 GUI 语义写，TUI 会显示同样的字。
 
