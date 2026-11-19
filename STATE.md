@@ -1,6 +1,6 @@
 # tupa-launcher 状态
 
-updated: 2026-11-19 · code: `27c5494`（输入框 provider chip · @pi 标题改读 pi-sessions 索引 · 亚克力 + 圆角 + 失焦光标 · 两行卡片 · 窗口高 0.68 + 提前两行滚动 · 应用图标 + mini chip + 文件/网页/Steam 图标 + 全类型图标 + 历史死链回填）
+updated: 2026-11-19 · code: `968b945`（删 @pi / @run · @go → @z · 隐藏后清空输入 · 紧凑态收回 · clip 同步出 · clean 迁到 HTML）
 
 > 判断本文件是否过期：比较 `code` 与 `git log -1 --format=%h -- src Cargo.toml`。
 > 只改文档的提交不算过期。
@@ -12,6 +12,33 @@ updated: 2026-11-19 · code: `27c5494`（输入框 provider chip · @pi 标题�
 > **每次会话收尾只需要改这一个文件的两节**（阶段 / 未完成），并更新首行。
 
 ## 阶段
+
+- **五项改造（2026-11-19 晚）**：一次会话做完 [`PLAN.md`](PLAN.md) 的 1 / 2 / 3 / 5 / 6 项。
+  - **`@pi` 与 `@run` 已移除**（`pi.rs` / `pi_index.rs` / `clean.rs` / `run.rs` 删除）：
+    `@pi` 每次查询要开 175 个 jsonl、读前 80 行（实测 **0.68s / 88MB**），而索引里
+    `session_name` / `first_user_prompt` / `cwd` / `message_count` 全都有 —— 旧实现只用它
+    覆盖标题、**没省掉 I/O**。既然不再需要就直接删。`Action::RunCommand` + `exec` 分支
+    **保留**（老历史里的 `@run` 行还能执行，只是不再是输入入口）；`history::line_for`
+    不再产出 `@run` 行，`LaunchInTerminal` 改成按目录回放成 `@z <dir>`。
+  - **pi 会话清理迁出**：新交付 `web/clean/index.html`（单文件页面、无构建）+
+    [`docs/09-clean-api.md`](docs/09-clean-api.md)（判定规则 + HTTP 契约）。
+    `my-pi-plugins` 的 `/clean` 起本地服务托管页面即可，**tupa 侧零代码**。
+  - **`@go` → `@z`**：关键字改 `z`，**空输入列出 zoxide 完整历史**
+    （`zoxide query --list --score`，解析 `score path`、按 rank 降序，spawn 一次 ~50ms），
+    剪贴板里是存在的路径时插第一行；有查询词时链路不变（存在路径 → zoxide → Everything → 重排）。
+    **不做 `go` 别名**（老 `@go` 历史会变成命令列表提示，可用右键菜单删）。
+  - **隐藏面板后清空输入**（bug）：TUI 的 `main.rs` 一直是 `app.reset()` + hide，
+    GUI **漏了 `reset()`** → 执行完再唤起输入框还是上次那行字。现在 `Panel::hide()` 统一收尾
+    （`reset()` + `hint_open` / `help` / 动画位置归零），两处 `should_hide` 都走它。
+  - **紧凑态收回**：除 `handle_key` 那条即时复位外，轮询里再按「**非空 → 空**」的跳变复位
+    一次（`Panel::was_empty`，覆盖 IME 提交 / 粘贴清空等不走 `handle_key` 的路径）。
+    **不能**写成「空了就收回」—— 紧凑态按 ↓ 展开时输入本来就是空的。
+  - **clip 行同步出**（以前要等 worker 整批结果）：`App::clip` 在 `refresh_with` 里同步算好、
+    `merge_clip` 直插 `items[0]`，`home::query` 不再读剪贴板。实测 `home::query` 本身只要
+    **0.4–5ms**（`history::load` 首次 4ms / 热 0.16ms、收藏 0.2ms、剪贴板 29–809µs）——
+    慢的是「等整批 + 120ms 轮询」，不是查询本身。顺手把轮询初始值改成 `pending = true`。
+  - 单测：`App` 在 `cfg!(test)` 下关闭剪贴板（`clipboard_on`），否则测试会读真实剪贴板，
+    并行时还会被 `STATUS_HEAP_CORRUPTION` 崩（实测碰到过一次）。
 
 - **输入框 provider chip（2026-11-19）**：关键字一命中 provider（`@pi`，**不必敲空格** ——
   列表就是那一刻切到 pi 会话的），输入框最前面那段就从纯文本变成原子胶囊
@@ -33,7 +60,8 @@ updated: 2026-11-19 · code: `27c5494`（输入框 provider chip · @pi 标题�
   实测：`@p` / `@pix`（未命中）不成块且回普通文字、`@pi`（无空格）chip 与列表同时出现、
   `@pi abc` chip + 光标贴字、删完 abc 再退格整块消失回开屏、`@pi` 时一次退格直接清空、
   Shift+Home 选中 chip 亮一档。
-- **`@pi` 显示会话名（2026-11-18 深夜）**：标题不再取「第一条用户消息」。pi 的自动标题
+- **`@pi` 显示会话名（2026-11-18 深夜）** ← **已作废**（2026-11-19 删掉整个 `@pi`，
+  相关源码 `pi.rs` / `pi_index.rs` 已删除，只留这段历史备查）：标题不再取「第一条用户消息」。pi 的自动标题
   （auto-title，每 4 轮重评）写在 jsonl 的 `{"type":"session_info","name":…}` 里，
   **位置不固定**（改标题就追加一条；本机 448 个会话里最后一条距末尾中位 8KB、p90 648KB、
   最大 33MB），读前 N 行 / 倒读都拿不全，全文件扫一次又是 652MB。
@@ -242,7 +270,8 @@ updated: 2026-11-19 · code: `27c5494`（输入框 provider chip · @pi 标题�
 - **但默认仍是 `tui`**：`daemon::launch_panel` 按 `[daemon] panel` 分流；
   **自绘 GUI 已冷冻（2026-11-06）**：圆角 / 无边框 / 居中这些由现成终端 + Win11 DWM + GlazeWM 覆盖，
   `src/gui/` 保留当资产，不再投时间（`docs/07-shell-handover.md` 文首已标停）
-- **`:pi:clean` 已加入（2026-10-25）**：清理视图挂在 `:pi` 上（`clean` 修饰符，
+- **`:pi:clean` 已加入（2026-10-25）** ← **已作废**（2026-11-19 清理功能迁出到
+  `my-pi-plugins` 的 `/clean`，见 `docs/09-clean-api.md`；`clean.rs` 已删）：清理视图挂在 `:pi` 上（`clean` 修饰符，
   实现在 `src/providers/clean.rs`）。时间窗口是前置条件（默认两周，
   `:pi:clean:week` / `:pi:clean:month`），窗口内与收藏的**不列出**；已总结或消息数 ≥ 8 →
   归档到 `session-archive/`，其余瘦会话 → 系统回收站；`:pi:clean:restore` 列出归档，
@@ -425,6 +454,13 @@ updated: 2026-11-19 · code: `27c5494`（输入框 provider chip · @pi 标题�
 
 ## 未完成
 
+- **右键菜单（[`PLAN.md`](PLAN.md) #4，未开工）**：行上 `on_mouse_down` 右键 → 绝对定位浮层；
+  应用条目给「管理员运行 / 打开位置 / 收藏」，收藏项给「取消收藏 / 打开位置」，
+  `@hist` 与开屏历史给「从最近记录移除」（只删 tupa 的 `history.json`；`@web` 的源数据在
+  Edge 的 History 库里删不掉，文案要写清）。可直接复用 `Action::Launch { elevated }` /
+  `Action::reveal_target()` / `favorites::toggle()`；缺的是「按 action 删一条历史」+ 菜单绘制/命中。
+- **`/clean` 服务端（my-pi-plugins 侧）**：页面 `web/clean/index.html` 与契约
+  `docs/09-clean-api.md` 已交付，插件里要实现三个接口并托管页面。
 - **窗口宽度记忆**：面板宽度固定按主屏 62%（高度随内容），拖边改过的宽度还没写回
   `gui.json`（`config.toml` 手写带注释，不能程序回写）。
 - **TUI 侧没跟进的新交互**：紧凑形态、双击执行、chip 配色只在 GUI 有（输入框的

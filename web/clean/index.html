@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>pi 会话清理</title>
+<style>
+  :root {
+    --bg: #1e2326;
+    --panel: #272e33;
+    --line: #3a4449;
+    --fg: #d3c6aa;
+    --dim: #859289;
+    --green: #a7c080;
+    --blue: #7fbbb3;
+    --red: #e67e80;
+    --orange: #e69875;
+    --yellow: #dbbc7f;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font: 13px/1.5 "JetBrains Maple Mono", Consolas, monospace;
+  }
+  header {
+    position: sticky; top: 0; z-index: 5;
+    display: flex; align-items: center; gap: 12px;
+    padding: 10px 16px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--line);
+  }
+  h1 { font-size: 14px; margin: 0 8px 0 0; font-weight: 600; }
+  .seg { display: flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+  .seg button {
+    background: transparent; color: var(--dim); border: 0; padding: 4px 10px;
+    font: inherit; cursor: pointer;
+  }
+  .seg button.on { background: var(--green); color: var(--bg); }
+  input[type="search"] {
+    flex: 1; min-width: 120px;
+    background: var(--bg); color: var(--fg);
+    border: 1px solid var(--line); border-radius: 6px; padding: 5px 9px;
+    font: inherit;
+  }
+  input[type="search"]:focus { outline: 1px solid var(--green); }
+  .btn {
+    background: var(--panel); color: var(--fg);
+    border: 1px solid var(--line); border-radius: 6px; padding: 5px 11px;
+    font: inherit; cursor: pointer;
+  }
+  .btn:hover:not(:disabled) { border-color: var(--fg); }
+  .btn:disabled { opacity: .4; cursor: default; }
+  .btn.primary { background: var(--green); color: var(--bg); border-color: var(--green); font-weight: 600; }
+  .btn.danger { color: var(--red); border-color: #5c4345; }
+  .btn.danger:hover:not(:disabled) { border-color: var(--red); }
+
+  main { padding: 12px 16px 90px; }
+  .stats { display: flex; gap: 18px; color: var(--dim); margin-bottom: 10px; }
+  .stats b { color: var(--fg); font-weight: 600; }
+
+  table { width: 100%; border-collapse: collapse; }
+  thead th {
+    position: sticky; top: 52px; z-index: 4;
+    background: var(--bg);
+    text-align: left; font-weight: 500; color: var(--dim);
+    padding: 7px 8px; border-bottom: 1px solid var(--line);
+    cursor: pointer; user-select: none;
+  }
+  thead th:hover { color: var(--fg); }
+  thead th.num, tbody td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  tbody tr { border-bottom: 1px solid #2c3336; }
+  tbody tr:hover { background: var(--panel); }
+  tbody tr.protect { opacity: .5; }
+  tbody td { padding: 7px 8px; vertical-align: top; }
+  td .title { display: block; }
+  td .sub { display: block; color: var(--dim); font-size: 12px; }
+  .tag {
+    display: inline-block; padding: 0 6px; border-radius: 4px;
+    font-size: 11px; line-height: 17px; white-space: nowrap;
+  }
+  .tag.archive { background: #33432f; color: var(--green); }
+  .tag.trash { background: #4a3234; color: var(--red); }
+  .tag.protect { background: #3a4449; color: var(--dim); }
+
+  footer {
+    position: fixed; bottom: 0; left: 0; right: 0;
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 16px;
+    background: var(--panel); border-top: 1px solid var(--line);
+  }
+  footer .spacer { flex: 1; }
+  footer .count { color: var(--dim); }
+
+  #toast {
+    position: fixed; right: 16px; bottom: 62px; z-index: 20;
+    display: flex; flex-direction: column; gap: 6px; align-items: flex-end;
+  }
+  #toast div {
+    background: var(--panel); border: 1px solid var(--line);
+    border-left: 3px solid var(--green);
+    padding: 7px 12px; border-radius: 4px; max-width: 460px;
+  }
+  #toast div.err { border-left-color: var(--red); }
+  .empty { color: var(--dim); padding: 40px 8px; text-align: center; }
+  .loading { color: var(--dim); padding: 30px 8px; text-align: center; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>pi 会话清理</h1>
+  <div class="seg" id="window">
+    <button data-days="7">一周</button>
+    <button data-days="14" class="on">两周</button>
+    <button data-days="30">一个月</button>
+  </div>
+  <div class="seg" id="mode">
+    <button data-mode="clean" class="on">待清理</button>
+    <button data-mode="restore">已归档</button>
+  </div>
+  <input type="search" id="q" placeholder="按标题 / 项目 / 关键词过滤">
+  <button class="btn" id="refresh">刷新</button>
+</header>
+
+<main>
+  <div class="stats" id="stats"></div>
+  <div id="list"><div class="loading">加载中…</div></div>
+</main>
+
+<footer>
+  <label><input type="checkbox" id="all"> 全选</label>
+  <span class="count" id="picked">未选择</span>
+  <span class="spacer"></span>
+  <button class="btn primary" id="archive" disabled>归档选中</button>
+  <button class="btn danger" id="trash" disabled>删除选中</button>
+  <button class="btn primary" id="restore" hidden disabled>恢复选中</button>
+</footer>
+
+<div id="toast"></div>
+
+<script>
+"use strict";
+
+/// 页面由 `/clean` 起的本地服务托管时走同源；单独打开时用这个默认端口。
+const BASE = location.protocol.startsWith("http") ? "" : "http://127.0.0.1:4517";
+
+const state = {
+  mode: "clean",      // clean | restore
+  days: 14,
+  sessions: [],
+  picked: new Set(),  // 存 path，不存下标（列表会重排）
+  filter: "",
+  loading: false,
+};
+
+const $ = (id) => document.getElementById(id);
+
+function fmtSize(bytes) {
+  if (bytes < 1024) return bytes + " B";
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(0) + " KB";
+  if (bytes < 1024 ** 3) return (bytes / 1024 / 1024).toFixed(1) + " MB";
+  return (bytes / 1024 ** 3).toFixed(2) + " GB";
+}
+
+function fmtAge(days) {
+  if (days < 1) return Math.round(days * 24) + " 小时前";
+  if (days < 30) return Math.round(days) + " 天前";
+  if (days < 365) return (days / 30).toFixed(1) + " 个月前";
+  return (days / 365).toFixed(1) + " 年前";
+}
+
+function toast(message, isError) {
+  const box = document.createElement("div");
+  if (isError) box.className = "err";
+  box.textContent = message;
+  $("toast").appendChild(box);
+  setTimeout(() => box.remove(), 4200);
+}
+
+async function api(path, options) {
+  const response = await fetch(BASE + path, options);
+  if (!response.ok) throw new Error(`${path} → HTTP ${response.status}`);
+  return response.json();
+}
+
+function visible() {
+  const q = state.filter.trim().toLowerCase();
+  if (!q) return state.sessions;
+  return state.sessions.filter((s) =>
+    (s.title || "").toLowerCase().includes(q) ||
+    (s.project || "").toLowerCase().includes(q) ||
+    (s.summary || "").toLowerCase().includes(q) ||
+    (s.keywords || []).some((k) => k.toLowerCase().includes(q))
+  );
+}
+
+function dispositionTag(s) {
+  if (state.mode === "restore") return { cls: "protect", text: "已归档" };
+  switch (s.disposition) {
+    case "archive": return { cls: "archive", text: "归档" };
+    case "trash": return { cls: "trash", text: "删除" };
+    case "favorite": return { cls: "protect", text: "收藏" };
+    default: return { cls: "protect", text: "保留" };
+  }
+}
+
+function render() {
+  const rows = visible();
+  const live = rows.filter((s) => state.mode === "restore" || s.disposition !== "protect");
+
+  $("stats").innerHTML = state.mode === "restore"
+    ? `<span>归档 <b>${rows.length}</b> 个</span><span>占用 <b>${fmtSize(rows.reduce((n, s) => n + s.sizeBytes, 0))}</b></span>`
+    : `<span>候选 <b>${live.length}</b> 个</span>` +
+      `<span>归档 <b>${live.filter((s) => s.disposition === "archive").length}</b></span>` +
+      `<span>删除 <b>${live.filter((s) => s.disposition === "trash").length}</b></span>` +
+      `<span>可回收 <b>${fmtSize(live.reduce((n, s) => n + s.sizeBytes, 0))}</b></span>`;
+
+  if (state.loading) {
+    $("list").innerHTML = `<div class="loading">加载中…</div>`;
+    return;
+  }
+  if (!rows.length) {
+    $("list").innerHTML = `<div class="empty">${state.mode === "restore" ? "归档里没有会话" : "这个时间窗口里没有要清理的会话"}</div>`;
+    return;
+  }
+
+  const head = state.mode === "restore"
+    ? `<tr><th style="width:34px"></th><th>标题</th><th>项目</th><th class="num">大小</th><th class="num">归档于</th><th>状态</th></tr>`
+    : `<tr><th style="width:34px"></th><th>标题</th><th>项目</th><th class="num">消息</th><th class="num">大小</th><th class="num">最后活动</th><th>判定</th></tr>`;
+
+  const body = rows.map((s, index) => {
+    const tag = dispositionTag(s);
+    const disabled = state.mode === "clean" && s.disposition === "protect";
+    const checked = state.picked.has(s.path) ? "checked" : "";
+    const cells = state.mode === "restore"
+      ? `<td class="num">${fmtSize(s.sizeBytes)}</td><td class="num">${fmtAge(s.ageDays)}</td>`
+      : `<td class="num">${s.messages}</td><td class="num">${fmtSize(s.sizeBytes)}</td><td class="num">${fmtAge(s.ageDays)}</td>`;
+    return `<tr class="${disabled ? "protect" : ""}">
+      <td><input type="checkbox" data-i="${index}" ${checked} ${disabled ? "disabled" : ""}></td>
+      <td><span class="title">${escapeHtml(s.title)}</span>${s.summary ? `<span class="sub">${escapeHtml(s.summary)}</span>` : ""}</td>
+      <td>${escapeHtml(s.project || "~")}</td>
+      ${cells}
+      <td><span class="tag ${tag.cls}">${tag.text}</span></td>
+    </tr>`;
+  }).join("");
+
+  $("list").innerHTML = `<table><thead>${head}</thead><tbody>${body}</tbody></table>`;
+  $("list").querySelectorAll("input[data-i]").forEach((box) => {
+    box.addEventListener("change", () => {
+      const session = visible()[Number(box.dataset.i)];
+      if (box.checked) state.picked.add(session.path);
+      else state.picked.delete(session.path);
+      updateFooter();
+    });
+  });
+  updateFooter();
+}
+
+function escapeHtml(text) {
+  return String(text ?? "").replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+function selectable() {
+  return visible().filter((s) => state.mode === "restore" || s.disposition !== "protect");
+}
+
+function updateFooter() {
+  const n = state.picked.size;
+  $("picked").textContent = n ? `已选 ${n} 个` : "未选择";
+  const clean = state.mode === "clean";
+  $("archive").hidden = !clean;
+  $("trash").hidden = !clean;
+  $("restore").hidden = clean;
+  $("archive").disabled = n === 0;
+  $("trash").disabled = n === 0;
+  $("restore").disabled = n === 0;
+  const all = selectable();
+  $("all").checked = n > 0 && n === all.length;
+  $("all").indeterminate = n > 0 && n < all.length;
+}
+
+async function load() {
+  state.loading = true;
+  render();
+  try {
+    const query = state.mode === "restore"
+      ? "/api/archive"
+      : `/api/sessions?days=${state.days}`;
+    const data = await api(query);
+    state.sessions = data.sessions || [];
+    // 已经不在列表里的选择要丢掉，否则会拿旧 path 去执行
+    const alive = new Set(state.sessions.map((s) => s.path));
+    for (const path of [...state.picked]) if (!alive.has(path)) state.picked.delete(path);
+  } catch (error) {
+    state.sessions = [];
+    toast(`读取失败：${error.message}`, true);
+  } finally {
+    state.loading = false;
+    render();
+  }
+}
+
+async function apply(mode) {
+  const ops = [...state.picked].map((path) => ({ path, mode }));
+  if (!ops.length) return;
+  const label = { archive: "归档", trash: "删除到回收站", restore: "恢复" }[mode];
+  if (mode === "trash" && !confirm(`把选中的 ${ops.length} 个会话删除到回收站？`)) return;
+  if (mode === "archive" && !confirm(`把选中的 ${ops.length} 个会话归档？`)) return;
+
+  try {
+    const data = await api("/api/apply", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ops }),
+    });
+    const results = data.results || [];
+    const ok = results.filter((r) => r.ok).length;
+    const failed = results.filter((r) => !r.ok);
+    toast(`${label} ${ok} 个${failed.length ? `，失败 ${failed.length} 个` : ""}`, failed.length > 0);
+    failed.slice(0, 3).forEach((r) => toast(r.message || r.path, true));
+    state.picked.clear();
+    await load();
+  } catch (error) {
+    toast(`${label}失败：${error.message}`, true);
+  }
+}
+
+// --- 事件 ---
+$("window").addEventListener("click", (event) => {
+  const button = event.target.closest("button");
+  if (!button) return;
+  state.days = Number(button.dataset.days);
+  [...$("window").children].forEach((b) => b.classList.toggle("on", b === button));
+  load();
+});
+
+$("mode").addEventListener("click", (event) => {
+  const button = event.target.closest("button");
+  if (!button) return;
+  state.mode = button.dataset.mode;
+  state.picked.clear();
+  [...$("mode").children].forEach((b) => b.classList.toggle("on", b === button));
+  load();
+});
+
+$("q").addEventListener("input", (event) => {
+  state.filter = event.target.value;
+  render();
+});
+
+$("refresh").addEventListener("click", load);
+
+$("all").addEventListener("change", (event) => {
+  state.picked.clear();
+  if (event.target.checked) selectable().forEach((s) => state.picked.add(s.path));
+  render();
+});
+
+$("archive").addEventListener("click", () => apply("archive"));
+$("trash").addEventListener("click", () => apply("trash"));
+$("restore").addEventListener("click", () => apply("restore"));
+
+load();
+</script>
+</body>
+</html>

@@ -54,11 +54,11 @@ pub struct App {
     pub active: usize,
     /// 命令前缀的结束位置（字节下标），用于高亮
     pub prefix_end: Option<usize>,
-    /// 已激活的命令前缀占 `input` 的前几个**字符**（`@pi` → `Some(3)`）。
+    /// 已激活的命令前缀占 `input` 的前几个**字符**（`@z` → `Some(3)`）。
     ///
     /// 判据就一条：关键字命中**真实 provider**（命令列表 / 默认搜索不算）。
-    /// **不要求空格** —— `parse` 本身不要求，列表在 `@pi` 就已经切到 pi 会话了，
-    /// chip 必须同一时刻出现，否则看着错位。带修饰符的 `@pi:clean` 也整体成块。
+    /// **不要求空格** —— `parse` 本身不要求，列表在 `@z` 就已经切到目录跳转了，
+    /// chip 必须同一时刻出现，否则看着错位。带修饰符的 `@z:yazi` 也整体成块。
     /// GUI 把它画成原子 chip（字形 + 关键字）；编辑上也不许光标进入其中。
     pub chip_end: Option<usize>,
     /// 当前结果的列宽规格
@@ -67,7 +67,7 @@ pub struct App {
     pub layout: RowLayout,
     /// 传给当前 provider 的参数
     args: String,
-    /// 关键字上的修饰符（`:run:admin` → `["admin"]`）
+    /// 关键字上的修饰符（`:app:admin` → `["admin"]`）
     flags: Vec<String>,
     pub theme: Theme,
     /// 状态栏消息：`(文本, 是否错误)`
@@ -95,6 +95,14 @@ pub struct App {
     pub animate: bool,
     /// 开屏（以及 Esc 清空后）的输入内容：命令前缀或空串，由配置决定
     home: String,
+    /// `[general] clipboard`：开屏要不要给一条「剪贴板里的路径 / 网址」
+    clipboard_on: bool,
+    /// 开屏那条剪贴板条目。
+    ///
+    /// 在 `refresh_with` 里**同步**算好并插到列表前面 —— 不要把这件事留给后台
+    /// provider：那样 clip 行要排在整批结果里、等 worker 回来才出现（体感就是
+    /// 「呼出后 clip 行迟一步」）。剪贴板读取是微秒级，放 UI 线程不卡。
+    clip: Option<Item>,
     /// 命令前缀（`:` / `@` …），修饰符分隔符也用它
     prefix: char,
     /// 请求序号：只接受最新一次请求的结果，丢弃过期结果
@@ -175,6 +183,8 @@ impl App {
             show_hints: cfg.general.show_hints,
             animate: false,
             home,
+            clipboard_on: cfg.general.clipboard && !cfg!(test),
+            clip: None,
             prefix,
             generation: 0,
             // 测试时不要读用户真实的收藏 / 历史，避免互相影响
@@ -243,13 +253,23 @@ impl App {
         self.prefix_end = prefix_end;
         // 原子前缀：关键字**一命中 provider 就成块**，不等空格 —— 列表切到该 provider 是
         // 同一时刻发生的（`parse` 就不要求空格），只让 chip 等空格会出现「列表已经换了、
-        // 输入框还是纯文字」的错位（2026-11-19 用户反馈）。带修饰符的 `@pi:clean` 同理。
-        // 代价：被打错时（`@pix`）chip 消失回普通文字，只能整块删重打 —— 原子语义本意。
+        // 输入框还是纯文字」的错位（2026-11-19 用户反馈）。带修饰符的 `@z:yazi` 同理。
+        // 代价：被打错时（`@zx`）chip 消失回普通文字，只能整块删重打 —— 原子语义本意。
         self.chip_end = if activated {
             prefix_end.map(|end| line[..end].chars().count())
         } else {
             None
         };
+        // 开屏的剪贴板条目：同步算（微秒级），并立即插到列表前面。
+        // 后台 provider 也会把它算进去， `drain_events` 里会去重。
+        self.clip = if line.is_empty() && self.clipboard_on {
+            crate::clipboard::text()
+                .as_deref()
+                .and_then(providers::home::clipboard_item)
+        } else {
+            None
+        };
+        self.merge_clip();
         // chip 之间不许有光标：所有编辑路径最后都会走到 refresh，在这里统一兜一次
         self.cursor = self.snap_cursor(self.cursor);
         self.pending_selection = if keep_selection {
@@ -259,6 +279,20 @@ impl App {
         };
         self.queue_query();
         self.update_completion();
+    }
+
+    /// 把开屏的剪贴板条目合进当前列表（已在列表里就不重复插）。
+    ///
+    /// 两个时机都要调：`refresh_with`（输入变化时立即上屏）、
+    /// `drain_events`（后台结果整批覆盖列表之后）。
+    fn merge_clip(&mut self) {
+        let Some(item) = self.clip.clone() else {
+            return;
+        };
+        if self.items.iter().any(|existing| existing.action == item.action) {
+            return;
+        }
+        self.items.insert(0, item);
     }
 
     fn queue_query(&mut self) {
@@ -291,6 +325,8 @@ impl App {
                     self.layout = layout;
                     self.loaded = true;
                     self.pending = false;
+                    // 后台结果里没有 clip 那一行时，把同步算好的那条补回最前面
+                    self.merge_clip();
 
                     // 切换开关后刷新时留在原位置，不要跳回第一条
                     let keep = self.pending_selection.take();
@@ -360,7 +396,6 @@ impl App {
                 "ev" => i18n::hint_ev().to_string(),
                 "app" => i18n::hint_app().to_string(),
                 "set" => i18n::hint_switch().to_string(),
-                "pi" => i18n::hint_pi().to_string(),
                 _ => info.description.clone(),
             },
             None => String::new(),
@@ -501,18 +536,6 @@ impl App {
         // 控件行不应该走到这里（回车会先走 activate_control），防御一下
         if item.control.is_control() {
             self.activate_control();
-            return;
-        }
-
-        // 会话清理：执行后不隐藏面板，刷新列表（可以连续处理多条）
-        if matches!(item.action, Action::CleanSession { .. } | Action::CleanBatch { .. }) {
-            match exec::run(&item.action) {
-                Ok(msg) => {
-                    self.status = Some((msg, false));
-                    self.refresh_keep_selection();
-                }
-                Err(e) => self.status = Some((format!("{e:#}"), true)),
-            }
             return;
         }
 
@@ -669,7 +692,7 @@ impl App {
     /// 光标前那个词里，若最后一个 `:` 后面还在输入，就给出候选：
     ///
     /// - `:ap` → 补全命令名
-    /// - `:run:ad` → 补全修饰符
+    /// - `:web:we` → 补全修饰符
     /// - 已经有空格（进入参数区）→ 不补全
     fn compute_completion(&self) -> Option<Completion> {
         let chars: Vec<char> = self.input.chars().collect();
@@ -715,8 +738,8 @@ impl App {
             (candidates, descriptions)
         } else {
             // 修饰符补全按 provider 来：`:web:` 只该出现 url/week/month/all，
-            // 不该把 `:run:` 的 admin/bg 也列出来
-            // 只取**第一个**分隔符之前的关键字：`:pi:month:` → `pi`，
+            // 不该把 `:app:` 的 admin 也列出来
+            // 只取**第一个**分隔符之前的关键字：`:web:month:` → `web`，
             // 否则 `head` 会变成 `pi:month`，匹配不到 provider 就退化成 KNOWN_FLAGS，
             // 把别的命令的修饰符全列出来。
             let head: String = token[..colon]
@@ -730,7 +753,7 @@ impl App {
                 .find(|info| info.matches(&head))
                 .map(|info| info.flags)
                 .unwrap_or(providers::KNOWN_FLAGS);
-            // 已经写过的修饰符不再推荐（`:pi:month:` 不该再推 month 自己）
+            // 已经写过的修饰符不再推荐（`:web:month:` 不该再推 month 自己）
             let used: Vec<String> = token[..colon]
                 .split([':', self.prefix])
                 .filter(|part| !part.is_empty())
@@ -1047,7 +1070,7 @@ impl App {
                     i -= 1;
                 }
             }
-            // chip 是原子块：反向跳词要么整个跳过（落到 0），不许停在 `@pi` 中间
+            // chip 是原子块：反向跳词要么整个跳过（落到 0），不许停在 `@z` 中间
             if self.chip_end.is_some_and(|end| i < end) { 0 } else { i }
         }
     }
@@ -1142,7 +1165,7 @@ impl App {
             return;
         }
         // chip 原子化：贴着 chip 按退格（光标在关键字上或紧跟其后的空格后）一次删掉整块，
-        // 包括那个分隔空格。再往里退一格就只剩 `@pi`，chip 自然消失、退回普通文字。
+        // 包括那个分隔空格。再往里退一格就只剩 `@z`，chip 自然消失、退回普通文字。
         if let Some(end) = self.chip_end
             && self.cursor <= end + 1
         {
@@ -1197,8 +1220,8 @@ impl App {
 
 /// 执行成功后写进历史的那一行。
 ///
-/// 正常输入直接用它自己（`@go D:\Archive` 就是 `@go D:\Archive`）。
-/// **空参数执行**（`@go` 读剪贴板、`@pi` 列会话、`@web` 空输入…）时输入行
+/// 正常输入直接用它自己（`@z D:\Archive` 就是 `@z D:\Archive`）。
+/// **空参数执行**（`@z` 读剪贴板、`@web` 空输入…）时输入行
 /// 只有关键字，拿它当去重键会把每一次执行压成同一条记录、快照互相覆盖，
 /// `Ctrl+↑` 回放还会重新读“当前”剪贴板而不是当时那个目录。
 /// 这时改用条目自己的标识（完整路径 / 网址 / 命令行），每次执行都独立。
@@ -1266,6 +1289,24 @@ mod tests {
             },
         ];
         app
+    }
+
+    /// 隐藏面板时要清掉这次会话的输入（GUI 的 `Panel::hide` 与 TUI 主循环都调它）。
+    /// 漏掉这一步的表现：执行完应用再唤起，输入框里还是上次那行字。
+    #[test]
+    fn reset_clears_input_and_cursor() {
+        let mut app = app();
+        app.set_input("@z abc".to_string());
+        app.cursor = 2;
+        app.anchor = Some(1);
+        assert_eq!(app.input, "@z abc");
+
+        app.reset();
+
+        assert_eq!(app.input, app.home, "输入要回到开屏（默认空串）");
+        assert_eq!(app.cursor, app.input.chars().count(), "光标跟着落到末尾");
+        assert_eq!(app.anchor, None, "选区要清掉");
+        assert!(app.items.is_empty(), "列表清空后再由 refresh 重新填");
     }
 
     #[test]
@@ -1401,9 +1442,9 @@ mod tests {
     #[test]
     fn flags_are_completed() {
         let mut app = app();
-        app.set_input(":run:ad".to_string());
+        app.set_input(":web:we".to_string());
         let comp = app.completion.clone().expect("应该补全修饰符");
-        assert_eq!(comp.candidates.first().map(String::as_str), Some("admin"));
+        assert_eq!(comp.candidates.first().map(String::as_str), Some("week"));
     }
 
     /// 补全候选要跟着 provider 走，不能所有命令都列同一套修饰符
@@ -1411,17 +1452,19 @@ mod tests {
     fn flag_candidates_depend_on_provider() {
         let mut app = app();
 
-        app.set_input(":run:".to_string());
-        let run = app.completion.clone().expect(":run: 应该有候选");
-        assert_eq!(run.candidates, vec!["admin", "bg"]);
-
         app.set_input(":web:".to_string());
         let web = app.completion.clone().expect(":web: 应该有候选");
         assert_eq!(web.candidates, vec!["url", "title", "week", "month", "all"]);
+
+        // `admin` 是 app / all 的修饰符，不该出现在 web 里
         assert!(!web.candidates.iter().any(|flag| flag == "admin"));
 
-        app.set_input(":go:".to_string());
-        let go = app.completion.clone().expect(":go: 应该有候选");
+        app.set_input(":app:".to_string());
+        let launch = app.completion.clone().expect(":app: 应该有候选");
+        assert_eq!(launch.candidates, vec!["admin"]);
+
+        app.set_input(":z:".to_string());
+        let go = app.completion.clone().expect(":z: 应该有候选");
         assert_eq!(go.candidates, vec!["yazi", "pi", "code"]);
 
         // `:ev` 不认修饰符：不该冒出别的命令的候选
@@ -1433,15 +1476,15 @@ mod tests {
     #[test]
     fn flag_candidates_stay_with_provider_after_two_flags() {
         let mut app = app();
-        app.set_input(":pi:month:".to_string());
-        let comp = app.completion.clone().expect(":pi:month: 应该有候选");
-        for stray in ["code", "yazi", "admin", "bg", "url"] {
+        app.set_input(":web:month:".to_string());
+        let comp = app.completion.clone().expect(":web:month: 应该有候选");
+        for stray in ["code", "yazi", "admin", "pi", "new"] {
             assert!(
                 !comp.candidates.iter().any(|c| c == stray),
                 "不该出现别的命令的修饰符：{stray}"
             );
         }
-        assert!(comp.candidates.iter().any(|c| c == "clean"));
+        assert!(comp.candidates.iter().any(|c| c == "week"));
         // month 已经写过了，不该再推荐
         assert!(!comp.candidates.iter().any(|c| c == "month"));
     }
@@ -1548,7 +1591,7 @@ mod tests {
 
     #[test]
     fn empty_args_history_line_keeps_the_concrete_target() {
-        // `@go` 读剪贴板跳过去的目录：历史里得带上实际路径，
+        // `@z` 读剪贴板跳过去的目录：历史里得带上实际路径，
         // 否则多次执行会互相覆盖、Ctrl+↑ 回放也没意义
         let dir = Item::new(
             Kind::Dir,
@@ -1556,19 +1599,19 @@ mod tests {
             Action::Open(r"C:\Users\me\Themes".into()),
         );
         assert_eq!(
-            history_line("@go", "", Some(&dir), '@', &[]),
-            r"@go C:\Users\me\Themes"
+            history_line("@z", "", Some(&dir), '@', &[]),
+            r"@z C:\Users\me\Themes"
         );
-        // 修饰符也要带上（`:go:yazi` 回放还得用 yazi 开）
+        // 修饰符也要带上（`:z:yazi` 回放还得用 yazi 开）
         assert_eq!(
-            history_line("@go:yazi", "", Some(&dir), '@', &["yazi".to_string()]),
-            r"@go:yazi C:\Users\me\Themes"
+            history_line("@z:yazi", "", Some(&dir), '@', &["yazi".to_string()]),
+            r"@z:yazi C:\Users\me\Themes"
         );
 
         // 自己打了参数：原样保留用户的输入
         assert_eq!(
-            history_line("@go theme", "theme", Some(&dir), '@', &[]),
-            "@go theme"
+            history_line("@z theme", "theme", Some(&dir), '@', &[]),
+            "@z theme"
         );
 
         // 编不出可重放行的（`:blog` 停服务这类）保持原样，不凭空造历史
@@ -1621,7 +1664,7 @@ mod tests {
         let mut app = app();
         assert!(app.at_home());
         app.history = vec![history::Entry {
-            line: r"@go D:\Archive\a.pdf".to_string(),
+            line: r"@z D:\Archive\a.pdf".to_string(),
             item: Some(item.clone()),
             hits: 1,
             last_used: 0,
@@ -1688,15 +1731,15 @@ mod tests {
     #[test]
     fn ctrl_left_jumps_path_segments() {
         let mut app = app();
-        app.set_input(r":go C:\Users\Agustin".to_string());
-        assert_eq!(app.cursor, 20);
+        app.set_input(r":z C:\Users\Agustin".to_string());
+        assert_eq!(app.cursor, 19);
         let mut stops = Vec::new();
         for _ in 0..3 {
             app.on_key(KeyEvent::new(KeyCode::Left, KeyModifiers::CONTROL));
             stops.push(app.cursor);
         }
-        // 20 -> Agustin 开头(13) -> 反斜杠前(12) -> Users 开头(7)
-        assert_eq!(stops, vec![13, 12, 7]);
+        // 19 -> Agustin 开头(12) -> 反斜杠前(11) -> Users 开头(6)
+        assert_eq!(stops, vec![12, 11, 6]);
     }
 
     /// 有选区时输入字符 = 替换选区（和任何编辑器一致）
@@ -1747,11 +1790,11 @@ mod tests {
     #[test]
     fn ctrl_left_treats_chinese_run_as_one_word() {
         let mut app = app();
-        app.set_input(":go 报告 第一期".to_string());
+        app.set_input(":z 报告 第一期".to_string());
         app.on_key(KeyEvent::new(KeyCode::Left, KeyModifiers::CONTROL));
-        assert_eq!(app.cursor, 7, "「第一期」开头在 7");
+        assert_eq!(app.cursor, 6, "「第一期」开头在 6");
         app.on_key(KeyEvent::new(KeyCode::Left, KeyModifiers::CONTROL));
-        assert_eq!(app.cursor, 4, "「报告」开头在 4");
+        assert_eq!(app.cursor, 3, "「报告」开头在 3");
     }
 
     /// chip 与「列表切 provider」同一时刻出现：关键字一命中就成块，不等空格
@@ -1759,13 +1802,13 @@ mod tests {
     fn chip_appears_as_soon_as_provider_matches() {
         let mut app = app_with_prefix("@");
 
-        app.set_input("@pi".to_string());
-        assert_eq!(app.chip_end, Some(3), "命中 provider 就已经进 pi 会话了，chip 必须同步");
-        assert_eq!(app.chip_text().as_deref(), Some("@pi"));
-        assert_eq!(app.chip_keyword(), Some("pi"));
+        app.set_input("@z".to_string());
+        assert_eq!(app.chip_end, Some(2), "命中 provider 就已经切到 z，chip 必须同步");
+        assert_eq!(app.chip_text().as_deref(), Some("@z"));
+        assert_eq!(app.chip_keyword(), Some("z"));
 
-        app.set_input("@pi ".to_string());
-        assert_eq!(app.chip_end, Some(3), "空格不改变 chip 范围");
+        app.set_input("@z ".to_string());
+        assert_eq!(app.chip_end, Some(2), "空格不改变 chip 范围");
 
         // 关键字没打全 / 只打了前缀：都还是文字（列表也是命令列表）
         app.set_input("@p".to_string());
@@ -1774,14 +1817,14 @@ mod tests {
         assert_eq!(app.chip_end, None);
 
         // 打错关键字：退回普通文字（和列表退回命令列表一致）
-        app.set_input("@pix".to_string());
+        app.set_input("@zx".to_string());
         assert_eq!(app.chip_end, None);
 
-        // 带修饰符时整体成一块（`@pi:clean` 不该拆成两半）
-        app.set_input("@pi:clean".to_string());
-        assert_eq!(app.chip_end, Some(9));
-        app.set_input("@pi:clean:week".to_string());
-        assert_eq!(app.chip_end, Some(14), "chip 跟着修饰符一起变长");
+        // 带修饰符时整体成一块（`@z:yazi` 不该拆成两半）
+        app.set_input("@z:yazi".to_string());
+        assert_eq!(app.chip_end, Some(7));
+        app.set_input("@z:yazi:code".to_string());
+        assert_eq!(app.chip_end, Some(12), "chip 跟着修饰符一起变长");
 
         // 不是命令：一律没有 chip
         app.set_input("随便写点东西 ".to_string());
@@ -1792,25 +1835,25 @@ mod tests {
     #[test]
     fn chip_is_atomic_for_editing() {
         let mut app = app_with_prefix("@");
-        app.set_input("@pi abc".to_string());
+        app.set_input("@z abc".to_string());
 
         for _ in 0..10 {
             app.on_key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE));
         }
-        assert_eq!(app.cursor, 3, "光标停在 chip 末尾，不进 `@pi` 内部");
+        assert_eq!(app.cursor, 2, "光标停在 chip 末尾，不进 `@z` 内部");
 
         app.on_key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE));
-        assert_eq!(app.input, "abc", "整块 `@pi ` 一起走，只留下后面那个词");
+        assert_eq!(app.input, "abc", "整块 `@z ` 一起走，只留下后面那个词");
         assert_eq!(app.chip_end, None);
         assert_eq!(app.cursor, 0);
 
         // 真实顺序：删完查询词（光标回到 chip 后的空格）再一次退格 → 整块走
         let mut app = app_with_prefix("@");
-        app.set_input("@pi abc".to_string());
+        app.set_input("@z abc".to_string());
         for _ in 0..3 {
             app.on_key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE));
         }
-        assert_eq!(app.input, "@pi ", "逐字删 abc，chip 原样留着");
+        assert_eq!(app.input, "@z ", "逐字删 abc，chip 原样留着");
         app.on_key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE));
         assert_eq!(app.input, "");
         assert_eq!(app.chip_end, None);
@@ -1820,19 +1863,19 @@ mod tests {
     #[test]
     fn chip_respects_word_jumps() {
         let mut app = app_with_prefix("@");
-        app.set_input("@pi abc".to_string());
+        app.set_input("@z abc".to_string());
 
         app.on_key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE));
-        assert_eq!(app.cursor, 3);
+        assert_eq!(app.cursor, 2);
 
-        app.set_input("@pi abc".to_string());
+        app.set_input("@z abc".to_string());
         app.on_key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::CONTROL));
-        assert_eq!(app.input, "@pi ", "第一次只删 abc");
+        assert_eq!(app.input, "@z ", "第一次只删 abc");
         app.on_key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::CONTROL));
         assert_eq!(app.input, "", "第二次整个 chip 一起走，不留 `@`");
 
-        // `@pi`（还没空格）时也是原子块：一次退格整块清空
-        app.set_input("@pi".to_string());
+        // `@z`（还没空格）时也是原子块：一次退格整块清空
+        app.set_input("@z".to_string());
         app.on_key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE));
         assert_eq!(app.input, "", "chip 一旦成块就整体删，不逐字退");
     }

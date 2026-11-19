@@ -9,7 +9,6 @@
 pub mod all;
 pub mod apps;
 pub mod blog;
-pub mod clean;
 pub mod commands;
 pub mod config_items;
 pub mod everything;
@@ -17,9 +16,6 @@ pub mod favorites;
 pub mod go;
 pub mod hist;
 pub mod home;
-pub mod pi;
-pub mod pi_index;
-pub mod run;
 pub mod switch;
 pub mod web;
 
@@ -47,10 +43,6 @@ pub enum Kind {
     Help,
     /// 开关 / 选项 / 数值（`:set`）
     Switch,
-    /// pi 会话
-    Pi,
-    /// pi 会话清理（归档 / 删除 / 恢复）
-    Clean,
     /// 最近执行过的命令（开屏列表用）
     History,
     /// 剪贴板里的路径 / 网址（开屏第一行，顺手可用）
@@ -68,8 +60,6 @@ impl Kind {
             Kind::Web => "web",
             Kind::Help => "cmd",
             Kind::Switch => "set",
-            Kind::Pi => "pi",
-            Kind::Clean => "clean",
             Kind::History => "rec",
             Kind::Clip => "clip",
         }
@@ -85,11 +75,10 @@ impl Kind {
             Kind::Web => Some(web::COLUMNS),
             Kind::Setting => Some(config_items::COLUMNS),
             Kind::Switch => Some(switch::COLUMNS),
-            Kind::Pi => Some(pi::COLUMNS),
             Kind::Help | Kind::Command => Some(commands::COLUMNS),
             Kind::History => Some(home::COLUMNS),
-            // app / file / dir / clean / clip：列表级默认（一般就是两列）
-            Kind::App | Kind::File | Kind::Dir | Kind::Clean | Kind::Clip => None,
+            // app / file / dir / clip：列表级默认（一般就是两列）
+            Kind::App | Kind::File | Kind::Dir | Kind::Clip => None,
         }
     }
 
@@ -104,8 +93,6 @@ impl Kind {
             Kind::Web,
             Kind::Help,
             Kind::Switch,
-            Kind::Pi,
-            Kind::Clean,
             Kind::Clip,
         ]
         .into_iter()
@@ -274,10 +261,6 @@ pub enum Action {
     FillInput(String),
     /// 把 `actions.toml` 里的某个开关 / 选项 / 数值设成新值
     SetControl { id: String, value: String },
-    /// 处理一个 pi 会话：归档 / 删除到回收站 / 从归档恢复
-    CleanSession { path: PathBuf, mode: CleanMode },
-    /// 一次处理全部候选（`:pi:cleanall`）：回车才执行
-    CleanBatch { ops: Vec<CleanOp> },
 }
 
 /// [`Action::ServeStopAll`] 的一项
@@ -305,24 +288,6 @@ impl Action {
             _ => Err(crate::i18n::cannot_reveal().to_string()),
         }
     }
-}
-
-/// 批量清理里的一项
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct CleanOp {
-    pub path: PathBuf,
-    pub mode: CleanMode,
-}
-
-/// [`Action::CleanSession`] 的处置方式
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum CleanMode {
-    /// 移到 `session-archive/`
-    Archive,
-    /// 进系统回收站
-    Trash,
-    /// 从 `session-archive/` 移回 `sessions/`
-    Restore,
 }
 
 /// 一条结果：徽标（由 [`Kind`] 决定）+ 若干列文本 + 动作
@@ -454,8 +419,6 @@ impl Item {
                 crate::i18n::serve_stop_detail_all(&ports.join(", "))
             }
             Action::SetControl { id, value } => format!("{id} = {value}"),
-            Action::CleanSession { path, .. } => path.display().to_string(),
-            Action::CleanBatch { .. } => return None,
             Action::FillInput(_) => return None,
         };
 
@@ -542,8 +505,6 @@ pub fn build(cfg: &Config) -> Vec<Box<dyn Provider>> {
     if let Some(ev) = everything::Everything::new(cfg) {
         list.push(Box::new(ev));
     }
-    list.push(Box::new(run::Run));
-    list.push(Box::new(pi::PiSessions));
     list.push(Box::new(go::Go::new(cfg)));
     list.push(Box::new(web::Web::new(cfg)));
     list.push(Box::new(hist::Hist::new(cfg)));
@@ -591,9 +552,25 @@ pub fn commands_index(infos: &[ProviderInfo]) -> Option<usize> {
 ///
 /// 各 provider 只解释自己关心的那几个（`admin` 提权、`bg` 后台、
 /// `week`/`month`/`all` 时间范围、`url` 直接打开网址）。
+/// 相对时间（`刚刚` / `5m` / `3h` / `2d`）—— 列表的「多久以前」那一列。
+///
+/// 原先在 `providers/pi.rs` 里，删除 `@pi` 后 blog 还在用，搬到模块根。
+pub(crate) fn age(mtime: std::time::SystemTime) -> String {
+    let secs = std::time::SystemTime::now()
+        .duration_since(mtime)
+        .unwrap_or_default()
+        .as_secs();
+    match secs {
+        0..=59 => crate::i18n::age_now().to_string(),
+        60..=3599 => format!("{}m", secs / 60),
+        3600..=86399 => format!("{}h", secs / 3600),
+        _ => format!("{}d", secs / 86400),
+    }
+}
+
 pub const KNOWN_FLAGS: &[&str] = &[
-    "admin", "bg", "week", "month", "all", "url", "title", "yazi", "pi", "code", "clean",
-    "cleanall", "restore", "new", "manage", "stop",
+    "admin", "week", "month", "all", "url", "title", "yazi", "pi", "code", "new", "manage",
+    "stop",
 ];
 
 /// 输入行的解析结果

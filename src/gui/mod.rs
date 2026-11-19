@@ -229,6 +229,12 @@ struct Panel {
     preedit: Option<(usize, String)>,
     /// 紧凑态下按 ↓ 手动展开的开屏列表（收藏 + 最近命令）
     hint_open: bool,
+    /// 上一次看到的「输入是否为空」（紧凑态自动收回的判断基准）。
+    ///
+    /// 不能每帧「空了就收回」—— 按 ↓ 展开时输入本来就是空的；只能在
+    /// **非空 → 空**这个跳变上收回。`handle_key` 里那条只能盖住键盘路径，
+    /// IME 提交 / 粘贴清空 / 点列表之类不走它。
+    was_empty: bool,
     /// 上一帧算出来的行宽（左右滚动要用）
     row_metrics: RowMetrics,
     /// 窗口 DPI 缩放（改高度时要把逻辑像素换成物理像素）
@@ -314,7 +320,9 @@ impl Panel {
         // 后台结果走 mpsc（`App::drain_events`），GPUI 没有 channel 唤醒，
         // 只能轻量轮询：查询中 16ms，空闲 120ms。拿到结果就 notify 一次。
         cx.spawn_in(window, async move |this, cx| {
-            let mut pending = false;
+            // 初始就是 pending：上面刚调过 `app.refresh()`，第一轮要尽早取结果，
+            // 别先睡 120ms 才去 drain（呼出时列表白白空一瞬）
+            let mut pending = true;
             let mut styled = false;
             loop {
                 // 只负责后台查询结果的轮询；动画改由 `on_next_frame` 跟着 vsync 跑
@@ -351,6 +359,16 @@ impl Panel {
                     }
 
                     panel.app.tick += 1;
+
+                    // 输入从「有字」变成「没字」就收回紧凑态（不管清空是怎么发生的：
+                    // 退格 / Ctrl+A 删 / IME 提交 / 鼠标）。按 ↓ 展开时输入本来就空，
+                    // 那时 `was_empty` 也是 true，不会把用户的展开又收回去。
+                    let empty = panel.app.input.is_empty();
+                    if empty && !panel.was_empty {
+                        panel.hint_open = false;
+                        cx.notify();
+                    }
+                    panel.was_empty = empty;
 
                     // 节能模式 / 关掉「透明效果」时 DWM 会把亚克力降级成不透明白底，
                     // 这时改由自己铺不透明底色（1.5 秒查一次，代价可忽略）
@@ -461,6 +479,7 @@ impl Panel {
             blink_at: std::time::Instant::now() + Duration::from_millis(500),
             preedit: None,
             hint_open: false,
+            was_empty: true,
             row_metrics: RowMetrics {
                 title: 0.0,
                 note: 0.0,
@@ -563,8 +582,7 @@ impl Panel {
 
         if self.app.should_hide {
             self.app.should_hide = false;
-            #[cfg(windows)]
-            crate::util::hide_panel(PanelKind::Gui);
+            self.hide();
             return;
         }
         if self.app.should_quit {
@@ -643,12 +661,34 @@ impl Panel {
         ));
         if self.app.should_hide {
             self.app.should_hide = false;
-            #[cfg(windows)]
-            crate::util::hide_panel(PanelKind::Gui);
+            self.hide();
         }
         if self.app.should_quit {
             cx.quit();
         }
+    }
+
+    /// 隐藏面板，并把这次会话的输入 / 浮层 / 动画位置清干净。
+    ///
+    /// TUI 的 `main.rs` 一直是 `app.reset()` + `hide_panel`，GUI 少了 `reset()` ——
+    /// 表现就是「执行完再唤起，输入框里还是上次那行字」（2026-11-19 用户反馈）。
+    /// 托盘 / 热键的 `ShowWindow` 不经过 `Panel`，所以只能在隐藏侧清。
+    fn hide(&mut self) {
+        self.app.reset();
+        self.hint_open = false;
+        self.was_empty = self.app.input.is_empty();
+        self.help = false;
+        self.text_block = None;
+        self.cursor_on = true;
+        // 动画位置也归零：下次唤起从列表顶部起步，选框不会残留在上一次的位置
+        self.marker_y = 0.0;
+        self.marker_from = 0.0;
+        self.marker_target = 0.0;
+        self.scroll_y = 0.0;
+        self.scroll_from = 0.0;
+        self.scroll_target = 0.0;
+        #[cfg(windows)]
+        crate::util::hide_panel(PanelKind::Gui);
     }
 
     /// 输入行：`❯ ` + 输入内容 + 光标（Step 3 换成真光标 + 水平滚动）
@@ -1186,11 +1226,9 @@ impl Panel {
     /// **不要按 `Kind::badge()` 再写一份平行表** —— badge 是文字、这里要形状，
     /// 两者口径不一样（`Switch` / `Setting` 的 badge 不同，图标只差 toggle / 齿轮）。
     fn glyph_for(item: &Item) -> Option<char> {
-        match item.kind {
-            Kind::Pi => return Some(glyphs::PI),
-            // 老历史只有 `FillInput`，按 Action 会误判成命令列表的箭头
-            Kind::History => return Some(glyphs::CLOCK),
-            _ => {}
+        // 老历史只有 `FillInput`，按 Action 会误判成命令列表的箭头
+        if item.kind == Kind::History {
+            return Some(glyphs::CLOCK);
         }
         match &item.action {
             // 目录走 `Open`、文件走 `Reveal`（go 的 Opener::Default）；按扩展名细分
@@ -1202,11 +1240,6 @@ impl Panel {
             } else {
                 glyphs::COG
             }),
-            Action::CleanSession { mode, .. } => Some(match mode {
-                crate::providers::CleanMode::Restore => glyphs::BOX_ARCHIVE,
-                _ => glyphs::TRASH,
-            }),
-            Action::CleanBatch { .. } => Some(glyphs::TRASH),
             Action::BlogAdmin { .. } | Action::BlogPreview { .. } => Some(glyphs::SERVER),
             Action::ServeStop { .. } | Action::ServeStopAll { .. } => Some(glyphs::STOP),
             Action::CreateBlogPost { .. } => Some(glyphs::PENCIL),
@@ -2688,16 +2721,10 @@ mod tests {
     /// `glyph_for`：Kind 优先于 Action，其余按 Action 分流
     #[test]
     fn glyphs_by_kind_and_action() {
-        use crate::providers::CleanMode;
-
         let one = |kind: Kind, action: Action| Item::new(kind, Vec::new(), action);
         let glyph = |kind: Kind, action: Action| Panel::glyph_for(&one(kind, action));
 
         // Kind 比 Action 更具体
-        assert_eq!(
-            glyph(Kind::Pi, Action::FillInput("x".into())),
-            Some(glyphs::PI)
-        );
         assert_eq!(
             glyph(Kind::History, Action::FillInput("x".into())),
             Some(glyphs::CLOCK)
@@ -2734,27 +2761,6 @@ mod tests {
                 }
             ),
             Some(glyphs::TERMINAL)
-        );
-        // 清理：归档箱 / 垃圾桶
-        assert_eq!(
-            glyph(
-                Kind::Clean,
-                Action::CleanSession {
-                    path: PathBuf::new(),
-                    mode: CleanMode::Restore,
-                }
-            ),
-            Some(glyphs::BOX_ARCHIVE)
-        );
-        assert_eq!(
-            glyph(
-                Kind::Clean,
-                Action::CleanSession {
-                    path: PathBuf::new(),
-                    mode: CleanMode::Trash,
-                }
-            ),
-            Some(glyphs::TRASH)
         );
         // 博客：服务器 / 停止 / 铅笔
         assert_eq!(

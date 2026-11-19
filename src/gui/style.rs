@@ -249,8 +249,6 @@ pub fn badge_color(kind: crate::providers::Kind) -> Rgba {
         Kind::File | Kind::Dir => rgb(0x83c092),
         Kind::Setting | Kind::Switch => rgb(0xe69875),
         Kind::Command | Kind::Help => rgb(0xd699b6),
-        Kind::Pi => rgb(0xd3c6aa),
-        Kind::Clean => rgb(0xe67e80),
         Kind::History => rgb(0x859289),
         Kind::Clip => rgb(0xdbbc7f),
     }

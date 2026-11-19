@@ -29,7 +29,6 @@ cargo build --release
 ./target/release/tupa-launcher.exe --query ":app vsc"
 ./target/release/tupa-launcher.exe --query ":"        # 命令列表
 ./target/release/tupa-launcher.exe --query ":set"  # 开关 / 选项 / 数值
-./target/release/tupa-launcher.exe --query ":pi:clean"  # 清理候选（只读，不执行动作）
 ./target/release/tupa-launcher.exe --apply brightness 50  # 直接执行一次开关写入
 ```
 
@@ -104,11 +103,7 @@ Copilot 键是个例外（它的原样组合被 shell 占着），但用钩子**
 | `:app <名字>` | 从自定义列表里启动应用（模糊匹配）；`.lnk` 会递归解析到目标 exe 显示 |
 | `:all <关键词>` | 默认搜索的显式写法：**应用 + 命令历史混排**（两边同一套模糊打分，同分时应用优先）；留空只列应用 |
 | `:ev <关键词>` | Everything 搜文件，**支持原生语法**：`:ev ext:pdf 报告`、`:ev folder:Projects` |
-| `:run <命令>` | 开一个新终端窗口执行（默认 PowerShell；`:run:bg` 后台，`:run:admin` 提权） |
-| `:go <路径>` | 跳到目录 / 定位文件；**空参数读剪贴板**；`:go:code` / `:go:yazi` / `:go:pi` 用指定程序打开 |
-| `:pi [关键词]` | 列出所有 pi 会话（标题 / 项目 / 时间），**回车在新终端里 `pi --session` 打开**；标题优先取 pi-sessions 索引里的**会话名**（自动标题 / `/name` 改过的名字），拿不到才回退到首条消息；`:pi:all` 包含 `session-archive` 里的归档 |
-| `:pi:clean [关键词]` | 清理 pi 会话：列出**超过时间窗口**的会话，回车**归档**（长会话）或**删除到回收站**（瘦会话）；`:pi:clean:week` / `:pi:clean:month` 切窗口（默认两周），`:pi:clean:restore` 从归档恢复 |
-| `:pi:cleanall [关键词]` | 同上，但只列**一条汇总项**（归档 N 个 / 删除 M 个 / 总体积），回车**一次处理全部**；可叠窗口：`:pi:cleanall:month` |
+| `:z <路径片段>` | 跳到目录 / 定位文件（zoxide 历史 + Everything 兜底）；**空输入列出 zoxide 的完整历史**（按 rank 降序），剪贴板里是路径时插在最前面；`:z:code` / `:z:yazi` / `:z:pi` 用指定程序打开 |
 | `:web <网址 / 关键词>` | 搜 Edge 历史（默认**一周内**）；搜不到且输入像网址就直接打开（`:web:month` / `:web:all` 扩大范围，`:web:url` 强制打开） |
 | `:hist [关键词]` | 搜**命令历史**（`history.json`，最多 200 条）：模糊匹配当时的输入行 / 条目标题 / 副标题，带关键词时按相关度排序；回车同开屏——有快照直接再打开，老记录只把输入行填回输入框 |
 | `:blog [new|manage|stop]` | 自己的博客：不带参数列**五个入口**——新建文章 / 本地预览 / 管理页 / GitHub Pages / Cloudflare。本地预览与管理页带状态列（「已在运行」/「未启动」）：**服务在跑就只开浏览器，没跑就先在后台起 `pnpm server` / `pnpm admin`，等端口真的监听上再打开**（不再重复起进程）。服务启动后是**静默后台进程（无窗口）**，所以在跑时会多出一条**停止本地预览 / 停止管理页**（只杀 node / pnpm / cmd，`taskkill /T` 连子进程；端口被别的程序占着时只报错不动手）；`:blog:stop` 一次停掉所有在跑的。`:blog:new <标题>` 在 `source/_posts` 新建文章并**用 VSCode 打开**（同名不覆盖，空参数列最近文章）；`:blog:manage` 直接到管理页 |
@@ -117,43 +112,22 @@ Copilot 键是个例外（它的原样组合被 shell 占着），但用钩子**
 | `:set [关键词]` | 应用内开关 / 选项 / 数值（深色模式、亮度、电池养护……），回车应用、`←/→` 调整、**不隐藏面板** |
 | `<名字>`（不带 `:`） | 整行交给默认 provider 当搜索词（默认 `all`：应用 + 历史混排；改成 `app` 就只搜应用） |
 
-命令前缀（`:app` / `:run:admin`）在输入框里会**高亮成黄色**，一眼能看出当前在哪个命令。
+命令前缀（`:app` / `:web:url`）在输入框里会**高亮成黄色**，一眼能看出当前在哪个命令。
 
 前缀本身**可以换**：`config.toml` 里 `general.command_prefix = "@"` 之后就是
-`@app code`、`@run@admin ipconfig`（修饰符分隔符跟着变；`@run:admin` 这种写法也认）。
+`@app code`、`@web@url github.com`（修饰符分隔符跟着变；`@web:url` 这种写法也认）。
 
-### `:pi:clean`：清理 pi 会话
+### pi 会话清理（已移出本程序）
 
-`:pi` 的清理视图（同一个 provider，靠 `clean` 修饰符切换）。把「翻了很久的旧会话」变成一条一条可执行的动作。**时间窗口是前置条件**：只列
-最后活跃时间早于窗口的会话，窗口内和收藏的一律**不列出**（保护，不会误删）。
+`@pi` 与 `@pi:clean` 在 2026-11-19 整体移除。原因：`@pi` 每次查询要开 175 个 jsonl、读前 80 行
+（实测 0.68s / 88MB），而清理本质是「一眼看完一批会话，挑一些归档 / 删掉」——
+浏览器页面比 TUI 面板顺手。
 
-```text
-:pi:clean              → 两周以前的会话
-:pi:clean:week         → 一周以前
-:pi:clean:month        → 一个月以前
-:pi:clean 插件         → 再按关键词过滤（标题 / 项目路径 / 关键词）
-:pi:clean:restore      → 反过来：列出 session-archive/ 里的归档会话，回车恢复
+现在由 `my-pi-plugins` 的 `/clean` 起一个本地服务 + 网页来做：
 
-:pi:cleanall           → 只列 1 条：[全部] 归档 32 个 · 删除 4 个 · 共 18.3M · 两周以前
-:pi:cleanall:month     → 一个月以前的全部（一次清完）
-```
-
-每一条的处置由规则决定（不用你选）：
-
-| 处置 | 条件 | 回车的效果 |
-|---|---|---|
-| `[归档]` | 已总结（有关键词）或消息数 ≥ 8 | 移到 `~/.pi/agent/session-archive/`（可恢复） |
-| `[删除]` | 其余瘦会话 | 进系统回收站（`trash` CLI；不可用时才真删） |
-| `[恢复]` | 仅 `:pi:clean:restore` | 移回 `sessions/` 原目录；重名加 `-restored-<时间>` 后缀，绝不覆盖 |
-
-- 回车执行后**面板不隐藏**，列表就地刷新，可以连着处理十几条
-- 归档/恢复保留目录结构（`sessions/<cwd目录>/` ↔ `session-archive/<cwd目录>/`），所以恢复后
-  pi 的 `/resume` 能按原项目找到它
-- 判定「多轮」用的是文件前 80 行里的消息数，不会把几 MB 的会话全读进来
-- **批量**（`:pi:cleanall`）：仍然先按同样的规则分类，然后压成一条汇总项；**回车才执行**，
-  所以输入到一半不会误触发。批量里每一步的归档/删除逻辑与单项完全一致，失败不中断，最后汇报
-  「已归档 N 个、删除 M 个（回收站），失败 K 个」。恢复（`:restore`）不支持批量——
-  131 个归档一次全恢复会瞬间把 `sessions/` 撑大，应该一条条挑
+- 前端页面：`web/clean/index.html`（单文件、无构建）
+- 规则与 HTTP 契约：`docs/09-clean-api.md`（时间窗口是前置条件；已总结 / 多轮的归档，
+  瘦会话进回收站；归档是移动、可恢复）
 
 ### `:web` 的时间范围与直接打开
 
@@ -182,7 +156,7 @@ Copilot 键是个例外（它的原样组合被 shell 占着），但用钩子**
 ```
 
 - `:` / `:ap` → 补全命令名
-- `:run:ad` → 补全修饰符（`admin` / `bg` / `week` / `month` / `all` / `url` / `clean` / `restore`）
+- `:web:we` → 补全修饰符（`admin` / `week` / `month` / `all` / `url` / `code` / `yazi` / `pi`）
 - 一旦敲了空格（进入参数区）就停止补全 —— 参数补全暂时不做
 - 按 Tab 在候选里循环时，**状态栏会显示当前候选的说明**（比如 `admin · 提权执行，会弹 UAC`）
 
@@ -191,23 +165,20 @@ Copilot 键是个例外（它的原样组合被 shell 占着），但用钩子**
 命令关键字后面可以继续用 `:` 加修饰符：
 
 ```text
-:run:admin ipconfig        → 提权执行（弹 UAC）
 :app:admin cmd             → 以管理员身份启动
-:run:admin:bg foo          → 多个修饰符
+:web:month 关键词          → 搜一个月内的浏览器历史
+:z:yazi ~/Projects         → 在 yazi 里打开（可叠 ：z:code）
 ```
 
 认得的修饰符只有这几个（不同命令各取所需，**没有同义词**）：
 
 | 修饰符 | 作用 |
 |---|---|
-| `admin` | 提权执行（弹 UAC） |
-| `bg` | `:run` 在后台执行（输出丢弃） |
-| `week` / `month` / `all` | `:web` 的搜索时间范围（默认 `week`）；`:pi:clean` 用 `week` / `month` 作时间窗口（默认两周） |
-| `clean` | `:pi:clean` 切换到会话清理视图（归档 / 删到回收站） |
-| `cleanall` | `:pi:cleanall` 一次处理全部候选（列表里只有一条汇总项，回车执行） |
-| `restore` | `:pi:clean:restore` 列出归档里的会话，回车恢复回 `sessions/` |
-| `url` | `:web` 强制直接打开网址 |
-| `code` / `yazi` / `pi` | `:go` 用 VSCode / yazi / pi 打开目标 |
+| `admin` | 提权启动 / 执行（弹 UAC）：`:app:admin` / `:all:admin` |
+| `week` / `month` / `all` | `:web` 的搜索时间范围（默认 `week`）；`:set:all` 显示全部开关 |
+| `url` / `title` | `:web` 强制直接打开网址 / 只按标题匹配 |
+| `code` / `yazi` / `pi` | `:z` 用 VSCode / yazi / pi 打开目标 |
+| `new` / `manage` / `stop` | `:blog` 的子命令 |
 
 不在这个列表里的内容会当作参数。
 
@@ -313,8 +284,8 @@ set = '... -Value {value}'
 动作**执行成功**后自动记录（失败的、只查询没执行的都不记），存在
 `~/.config/tupa-launcher/history.json`，去重、最多 200 条。
 
-**空参数执行**（`:go` 读剪贴板、`:pi` 列会话这类）记的是**实际那个目标**，
-不是光秃秃的 `:go`：历史里是 `:go C:\Users\me\Themes`、`:run pi --session "…"`。
+**空参数执行**（`:z` 这种）记的是**实际那个目标**，不是光秃秃的 `:z`：
+历史里是 `:z C:\Users\me\Themes`。
 所以每次跳转都是独立一条、`Ctrl+↑` 回放能直接跳回那个目录，次数也分开算 ——
 不会把八次跳转压成一条、快照互相覆盖。
 
@@ -329,27 +300,30 @@ set = '... -Value {value}'
 
 任何手动编辑都会退出历史浏览模式。
 
-### `go` 的打开方式
+### `z` 的打开方式
 
 ```text
-:go:code 项目        → 用 VSCode 打开（文件也可以，直接定位到它）
-:go:yazi 项目        → 新终端窗口里用 yazi 打开所在目录
-:go:pi   项目        → 新终端窗口里在目标目录启动 pi
+:z:code 项目        → 用 VSCode 打开（文件也可以，直接定位到它）
+:z:yazi 项目        → 新终端窗口里用 yazi 打开所在目录
+:z:pi   项目        → 新终端窗口里在目标目录启动 pi
 ```
 
-### `go` 的路径写法
+### `z` 的路径写法
 
 ```text
-:go ~/Projects                  → ~ 展开为用户目录
-:go "C:\Users\<你的用户名>\Projects" → 引号（单/双）自动去掉
-:go file:///C:/Users/My%20Docs  → file:// 前缀 + %XX 解码
-:go projects\term              → 半截路径，走 zoxide + Everything 补全
-:go                             → 空参数，读剪贴板
-:go D:\Legacy\report.pdf       → 文件：在资源管理器里定位
+:z                              → 空输入：列出 zoxide 的完整历史（按 rank 降序）
+:z ~/Projects                   → ~ 展开为用户目录
+:z "C:\Users\<你的用户名>\Projects" → 引号（单/双）自动去掉
+:z file:///C:/Users/My%20Docs   → file:// 前缀 + %XX 解码
+:z projects\term               → 半截路径，走 zoxide + Everything 补全
+:z D:\Legacy\report.pdf        → 文件：在资源管理器里定位
 ```
+
+空列表的第一行可能是**剪贴板**里的路径 / 网址（徽标 `clip`），它不抢默认选中 ——
+想用它按一下 `↑`。`[general] clipboard = false` 可以关掉。
 
 匹配顺序：**存在的完整路径 → zoxide 历史 → Everything 路径匹配**。
-这里和终端的 `z` 命令**共用同一份 zoxide 数据库**：终端里跳过的目录这里能搜到，
+和终端的 `z` 命令**共用同一份 zoxide 数据库**：终端里跳过的目录这里能搜到，
 这里打开过的目录也会写回去（`zoxide add`）。
 
 ### 界面

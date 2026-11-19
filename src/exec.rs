@@ -2,7 +2,7 @@
 //!
 //! 只放「进程 / 窗口 / shell」这一层的通用能力，加本地服务编排（serve_and_open /
 //! serve_stop）和开关分发（SetControl）；各动作自己的业务实现在各自的模块里：
-//! 文章创建在 [`crate::providers::blog`]，会话清理在 [`crate::providers::clean`]。
+//! 文章创建在 [`crate::providers::blog`]。
 
 use std::path::Path;
 use std::process::Command;
@@ -102,10 +102,6 @@ pub fn run(action: &Action) -> Result<String> {
         }
         // 开关 / 选项 / 数值：交给 actions.toml 里的命令
         Action::SetControl { id, value } => crate::actions::apply(id, value),
-        // pi 会话清理：归档 / 回收站 / 恢复（实现在 providers/clean.rs）
-        Action::CleanSession { path, mode } => crate::providers::clean::run_session(path, *mode),
-        // 批量：一次跑完（每项仍是同样的归档 / 回收站逻辑）
-        Action::CleanBatch { ops } => crate::providers::clean::run_batch(ops),
     }
 }
 

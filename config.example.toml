@@ -14,7 +14,7 @@ max_results = 30
 # everything_path = 'C:\Users\<你的用户名>\AppData\Local\Everything\es.exe'
 # 开屏时输入框是否预填 `:`（true = 直接进命令模式；false = 空输入，但仍显示命令列表）
 prefill_colon = false
-# 命令前缀（默认 `:`）；修饰符分隔符也用它，例如 @run@admin
+# 命令前缀（默认 `:`）；修饰符分隔符也用它，例如 @web@month
 # 界面语言：zh / en
 # 右下角是否显示快捷键提示
 show_hints = true

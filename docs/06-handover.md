@@ -40,16 +40,12 @@ src/
     ├── apps.rs    app
     ├── all.rs     all（默认搜索：应用 + 历史混排，共用 app 的列表）
     ├── everything.rs  ev
-    ├── run.rs     run
-    ├── go.rs      go（zoxide + Everything + 剪贴板 + yazi/pi/code）
-    ├── pi.rs      pi（pi 会话列表 + 关键词搜索 + -session 打开）
-    ├── pi_index.rs  pi 的标题来源（读 pi-sessions 的 index.sqlite）
+    ├── go.rs      z（zoxide + Everything + 空查询列 zoxide 历史 + yazi/pi/code）
     ├── web.rs     web（Edge 历史，rusqlite）
     ├── hist.rs    hist（搜 history.json：输入行 + 执行快照，可带关键词）
     ├── blog.rs      blog（新建文章 / 管理页 / 站点入口；文章创建的执行也在这）
     ├── favorites.rs   fav
     ├── config_items.rs cfg
-    ├── clean.rs     :pi:clean 的实现（时间窗口 + 归档 / 回收站 / 恢复，含执行）
     ├── switch.rs     set（actions.toml 的开关/选项/数值；命令名 2026-10 从 switch 改成 set）
     ├── home.rs       home（开屏：收藏 + 最近命令；无关键字、不进命令列表）
     └── commands.rs    命令列表（keyword 是 `:`，不参与匹配）
@@ -136,13 +132,11 @@ Control::{Run, Toggle{value}, Choice{options,index}, Number{value,min,max,step,s
 | WezTerm 内联覆盖 | `--config key=value` 只作用于本实例，不动用户的 `wezterm.lua`。面板需要 `enable_tab_bar=false`（单标签也显示 tab 栏）、`window_padding` 全 0、`window_background_opacity=1.0`、`win32_system_backdrop='Disable'`（不透明时 Acrylic 没意义）。`win32_system_backdrop` **没有 `None`**，合法值是 `Disable`/`Acrylic`/`Mica`/`Tabbed`/`Auto` |
 | terminal 兜底 | 配置写了 `wezterm` 但本机没装时，`launch_wezterm` 退回 `launch_wt`；`find_panel` 同时接受两种类名，所以退回后仍能找到窗口，不会每次热键都重启一个 |
 | Edge 历史被独占 | 必须先复制到临时目录再用 SQLite 打开 |
-| `:pi` 的标题不是第一条消息 | pi-sessions 的自动标题写在 jsonl 的 `{"type":"session_info","name":…}` 里，而且**可以出现在文件任何位置**（改了标题就追加一条）：本机 448 个会话里最后一条距文件末尾中位 8KB、p90 648KB、最大 33MB，倒读也拿不全。权威副本是 pi-sessions 的 `~/.pi/agent/pi-sessions/index.sqlite` 的 `sessions.session_name`（每个 `turn_end` 由 hook 同步，标题改了下一轮就是新的），见 `providers/pi_index.rs`。目录可被 `settings.json` 的 `sessions.index.dir` 改掉；库没装 / 重建中 / schema 升级都要静默回退到 jsonl 的头 80 行，**不要把它做成硬依赖** |
-| `:pi` 列了归档会话 | `session-archive/` **不在索引里**（本机 235 条索引 0 条归档），`:pi:all` / `:pi:clean:restore` 只能走 jsonl 回退，这些老会话往往没有 `session_info`，标题退化成首条消息是正常的 |
 | `last_visit_time` 单位 | 是 **Chromium 微秒**（1601 起），`/1_000_000 - 11_644_473_600`；网上的 100ns 是错的 |
 | `Ctrl+Tab` | 被 Windows Terminal 和 WezTerm 都默认占用（切标签），面板收不到；备用键 `Ctrl+O` |
 | 状态栏提示宽度 | 英文比中文宽，必须按 `UnicodeWidthStr::width` 算，写死会截断 |
 | PowerShell 新窗口的起始目录 | 用 `wt -d <目录>`（不经 wt 时用 `Command::current_dir`）；**不要拼 `Set-Location …; 命令`**，见下一行 |
-| `wt` 把 `;` 当命令分隔符 | **连引号里也照切**。`-Command "Set-Location x; pi --session y"` 会被切成两条，第二段带前导空格的 `" pi --session y"` 被当成可执行文件 → `[错误 2147942402 (0x80070002)] 系统找不到指定的文件`（2026-11-03 `:pi` 踩到）。给 PowerShell 传脚本一律用 `-EncodedCommand`（UTF-16LE base64，不含 `;` 和空格） |
+| `wt` 把 `;` 当命令分隔符 | **连引号里也照切**。`-Command "Set-Location x; pi --session y"` 会被切成两条，第二段带前导空格的 `" pi --session y"` 被当成可执行文件 → `[错误 2147942402 (0x80070002)] 系统找不到指定的文件`（2026-11-03 `:z:pi` 踩到）。给 PowerShell 传脚本一律用 `-EncodedCommand`（UTF-16LE base64，不含 `;` 和空格） |
 | 中文字形/光标 | 光标列要按显示宽度算（`ui::cursor_column`），输入超宽时用 `trim_left` 跟随 |
 | `cmd /C` 里的引号 / 管道 | 内置 PowerShell 用 `-EncodedCommand`（UTF-16LE base64）绕开转义；用户脚本自己小心 |
 | `root\wmi` 实例权限 | 普通用户 `Get-CimInstance` → `0x80041003`；管理员下 ThinkBook 的 `LENOVO_GAMEZONE_DATA` 方法又报「无效的对象」（不是 Gaming 系列） |
@@ -162,7 +156,7 @@ Control::{Run, Toggle{value}, Choice{options,index}, Number{value,min,max,step,s
 | 本地服务无条件 spawn | 旧 `blog_admin` 每次回车都起一个 `pnpm admin`：连点两次 = 第二个 node 端口冲突 → 管理页白屏。Hexo 实测 **5.2 秒**（2026-11-05）才监听 4000，固定 `sleep 1.5s` 后开浏览器就是错误页 |
 | 本地服务就绪判断 | 用 `src/serve.rs`：先探端口（**IPv4 与 IPv6 都试**，Node 不指定 host 时可能只绑 `::1`）→ 在跑就只开浏览器；没跑才 spawn 并轮询最多 `READY_TIMEOUT`（20s），超时**报错**而不是开空白页 |
 | 停静默后台 | 进程是 `Stdio::null` 起的（无窗口），只能从面板停：`netstat -ano -p tcp` 找 PID（`0.0.0.0:4000` 与 `[::]:4000` 是同一个进程，要去重；`ends_with(":4000")` 不会误中 `:14000`）+ `tasklist /FO CSV` 拿进程名 + `taskkill /PID x /T /F`。**只杀 node/pnpm/cmd**：端口被别的程序占着时 `is_listening` 也为真，顺手杀就是灾难 |
-| 空参数执行的历史键 | `history::push` 用输入行去重：`:go` / `:pi` 空参数回车时输入行只有关键字，**8 次跳转压成同一条、快照互相覆盖**，`Ctrl+↑` 回放还会重读“当前”剪贴板（2026-11-07 实测本机 `"@go"` hits=8 只留最后一个目录）。正确做法：`app::history_line` 在 `args` 为空时改用 `history::line_for`，按条目自己的标识拼行（`:go C:\…` / `:web https://…` / `:run …`），编不出可重放行的（`:blog` 停服务 / `:set`）保持原样 |
+| 空参数执行的历史键 | `history::push` 用输入行去重：`:z` 空参数回车时输入行只有关键字，**8 次跳转压成同一条、快照互相覆盖**，`Ctrl+↑` 回放还会重读“当前”剪贴板（2026-11-07 实测本机 `"@go"` hits=8 只留最后一个目录）。正确做法：`app::history_line` 在 `args` 为空时改用 `history::line_for`，按条目自己的标识拼行（`:z C:\…` / `:web https://…`），编不出可重放行的（`:blog` 停服务 / `:set`）保持原样 |
 | 开屏剪贴板条目 | 只在剪贴板内容是**存在的路径**或 **http(s) 网址**时出现（否则开屏永远多一条不相干的行）。识别顺序：**先判 URL 再走 `go::normalize`** —— 那个函数会把 `/` 换成 `\`，URL 会被毁掉。`Kind::Clip` 不抢默认选中（`app::default_selection`），否则唤起后随手回车就误跳到很久以前复制的路径 |
 | 跳转列表不即时 | `%APPDATA%\Microsoft\Windows\Recent\AutomaticDestinations\f01b4d95cf55d32a.automaticDestinations-ms` 在 Win11 上是**长时间批量 flush** 的：实测开着窗口等 75 秒不变、关窗口不变、`taskkill explorer` 三次也不变，文件能连着 26 小时不动。不能当「最近打开」用。实时数据只能自己盯：`IShellWindows`（`ShellWindows` CLSID）+ `IWebBrowser2::LocationURL` 能**立刻**拿到当前打开的窗口目录，`src/explorer_watch.rs` 每 5 秒扫一次记到 `~/.config/tupa-launcher/explorer.json`。监听必须在**守护进程**里起，面板进程要等第一次热键才存在 |
 | 跳过打开时的记录 | `explorer.exe` 导航到文件夹**不写** `%APPDATA%\Microsoft\Windows\Recent\`（那里只有文件 / 截图的 `.lnk`），所以别指望 Recent 目录能补上文件夹历史 |

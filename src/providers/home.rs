@@ -11,7 +11,7 @@ use fuzzy_matcher::skim::SkimMatcherV2;
 
 use super::{Action, Column, Item, Kind, Provider, go};
 use crate::config::Config;
-use crate::{clipboard, favorites, history, i18n};
+use crate::{favorites, history, i18n};
 
 /// 这个 provider 的关键字（只用于反查下标，不参与输入解析）
 pub const KEYWORD: &str = "home";
@@ -32,8 +32,6 @@ pub(crate) const COLUMNS: &[Column] = &[
 pub struct Home {
     max: usize,
     frecency: bool,
-    /// 剪贴板里是路径 / 网址时，开屏第一行给一条「跳过去」的条目
-    clipboard: bool,
     /// 当前 `[[apps]]`：历史里的死链要按标题回填到这里
     apps: Vec<crate::config::AppEntry>,
 }
@@ -43,7 +41,6 @@ impl Home {
         Home {
             max: cfg.general.max_results,
             frecency: cfg.general.frecency,
-            clipboard: cfg.general.clipboard,
             apps: cfg.apps.clone(),
         }
     }
@@ -52,9 +49,11 @@ impl Home {
 /// 剪贴板内容 → 一条可以直接执行的条目。
 ///
 /// 只认两种：**存在的路径**（目录 / 文件；`C:\a`、`C:/a`、`file:///…`、带引号、
-/// `~` 都行，和 `:go` 同一套规整）和 **http(s) 网址**。其余内容（代码片段、
+/// `~` 都行，和 `:z` 同一套规整）和 **http(s) 网址**。其余内容（代码片段、
 /// 一段普通文字）一律不显示 —— 否则开屏永远多一条不相干的行。
-fn clipboard_item(text: &str) -> Option<Item> {
+///
+/// 调用方是 `App::refresh_with`（**同步**插入开屏第一行，不等后台查询）。
+pub(crate) fn clipboard_item(text: &str) -> Option<Item> {
     let raw = text.trim();
     if raw.is_empty() || raw.contains('\n') {
         return None;
@@ -184,15 +183,6 @@ impl Provider for Home {
             });
         }
 
-        // 0) 剪贴板里的路径 / 网址：插在收藏前面，但**不抢默认选中**
-        //    （见 `app::default_selection`）—— 唤起后随手回车不会误跳到
-        //    很久以前复制的路径，想用它按一下 ↑ 就行。
-        if keyword.is_empty()
-            && self.clipboard
-            && let Some(item) = clipboard::text().as_deref().and_then(clipboard_item)
-        {
-            items.insert(0, item);
-        }
 
         // 2) 最近执行的条目：有快照的（打开过的文件 / 网页）直接执行，
         //    只有输入行的（老记录）就补回输入框。

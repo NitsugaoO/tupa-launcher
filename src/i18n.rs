@@ -66,71 +66,8 @@ pub fn desc_ev() -> &'static str {
     t("搜索文件", "Search files")
 }
 
-pub fn desc_run() -> &'static str {
-    t("执行命令", "Run a command")
-}
-
 pub fn desc_go() -> &'static str {
     t("跳转目录", "Jump to a folder")
-}
-
-pub fn desc_pi() -> &'static str {
-    t("pi 会话", "pi sessions")
-}
-
-/// 列表首列的动作前缀
-pub fn clean_do_archive() -> &'static str {
-    t("[归档]", "[archive]")
-}
-
-pub fn clean_do_trash() -> &'static str {
-    t("[删除]", "[delete]")
-}
-
-pub fn clean_do_restore() -> &'static str {
-    t("[恢复]", "[restore]")
-}
-
-/// 批量项标题：`[全部] 归档 3 个 · 删除 5 个`
-pub fn clean_all_label(archive: usize, trash: usize) -> String {
-    s(
-        || format!("[全部] 归档 {archive} 个 · 删除 {trash} 个"),
-        || format!("[all] archive {archive} · delete {trash}"),
-    )
-}
-
-/// 批量项副标题：`共 8 个 · 2.3 MB · 两周以前`
-pub fn clean_all_scope(count: usize, size: &str, window: &str) -> String {
-    s(
-        || format!("共 {count} 个 · {size} · {window}以前"),
-        || format!("{count} items · {size} · older than {window}"),
-    )
-}
-
-pub fn clean_window_label(days: u64) -> &'static str {
-    match days {
-        7 => t("一周", "one week"),
-        30 => t("一个月", "one month"),
-        _ => t("两周", "two weeks"),
-    }
-}
-
-/// 批量执行完的汇总
-pub fn clean_batch_done(archived: usize, trashed: usize, failed: usize) -> String {
-    s(
-        || {
-            let tail = if failed > 0 { format!("，失败 {failed} 个") } else { String::new() };
-            format!("已归档 {archived} 个、删除 {trashed} 个（回收站）{tail}")
-        },
-        || {
-            let tail = if failed > 0 { format!(", {failed} failed") } else { String::new() };
-            format!("Archived {archived}, deleted {trashed} (recycle bin){tail}")
-        },
-    )
-}
-
-pub fn hint_pi() -> &'static str {
-    t("输入关键词搜索 pi 会话", "Search pi sessions")
 }
 
 pub fn age_now() -> &'static str {
@@ -370,42 +307,6 @@ pub fn blog_dir_missing(path: &str) -> String {
         || format!("博客目录不存在：{path}"),
         || format!("Blog folder not found: {path}"),
     )
-}
-
-pub fn clean_archived(name: &str) -> String {
-    s(
-        || format!("已归档 {name}"),
-        || format!("Archived {name}"),
-    )
-}
-
-pub fn clean_trashed(name: &str) -> String {
-    s(
-        || format!("已删除 {name}（回收站）"),
-        || format!("Deleted {name} (recycle bin)"),
-    )
-}
-
-pub fn clean_restored(name: &str) -> String {
-    s(
-        || format!("已恢复 {name}"),
-        || format!("Restored {name}"),
-    )
-}
-
-pub fn clean_target_exists(target: &str) -> String {
-    s(
-        || format!("目标已存在，未覆盖：{target}"),
-        || format!("Target exists, not overwritten: {target}"),
-    )
-}
-
-pub fn clean_not_a_session() -> &'static str {
-    t("这不是 pi 的会话文件", "Not a pi session file")
-}
-
-pub fn no_agent_dir() -> &'static str {
-    t("找不到 ~/.pi/agent", "Cannot locate ~/.pi/agent")
 }
 
 pub fn opened_in_editor(name: &str, line: usize) -> String {
@@ -822,17 +723,8 @@ pub fn action_group_display() -> &'static str {
 }
 
 // ---------------------------------------------------------------------------
-// provider 内部文案
+// 其它
 // ---------------------------------------------------------------------------
-
-pub fn run_note(elevated: bool, background: bool) -> &'static str {
-    match (elevated, background) {
-        (true, true) => t("管理员后台执行", "Admin, in background"),
-        (true, false) => t("管理员新窗口执行", "Admin, new window"),
-        (false, true) => t("后台执行", "In background"),
-        (false, false) => t("新窗口执行", "In a new window"),
-    }
-}
 
 pub fn web_direct() -> &'static str {
     t("直接打开", "Open directly")

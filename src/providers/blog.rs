@@ -274,7 +274,7 @@ impl Blog {
                     Kind::File,
                     vec![
                         name,
-                        format!("{} · {}", i18n::blog_posts_dir(), super::pi::age(mtime)),
+                        format!("{} · {}", i18n::blog_posts_dir(), super::age(mtime)),
                     ],
                     Action::OpenInEditor { file: path, line: 1 },
                 )

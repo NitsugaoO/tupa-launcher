@@ -73,12 +73,11 @@ cargo clippy --release --features gui    # 零警告；必须带 feature，否�
   （徽标）、`columns()`（漏了掉回默认两列，开屏混排里排版会歪）、`from_badge()`
   （漏了 `fav:<徽标>` 解析不到）。
 - **加 provider**：`src/providers/xxx.rs` + `providers/mod.rs::build()` 里 push（顺序 = 命令列表顺序）。
-- **`:pi` 的标题来自 pi-sessions 索引，不是首条消息**（2026-11-18）：自动标题写成 jsonl 里的
-  `{"type":"session_info","name":…}`，**位置不固定**（改标题就追加一条，本机最长距末尾 33MB），
-  所以权威源是 `~/.pi/agent/pi-sessions/index.sqlite` 的 `sessions.session_name`
-  （每个 `turn_end` 由 hook 同步）。`src/providers/pi_index.rs` 读它，**任何失败都回退**到
-  jsonl 头 80 行的 `session_info`；`session-archive/` 不在索引里（只能走回退）。
-  改 `read_meta` 的标题优先级时别把「首条用户消息」又提到前面。
+- **`@pi` / `@run` 已移除（2026-11-19）**：`@pi` 每次查询要开 175 个 jsonl、读前 80 行
+  （实测 0.68s / 88MB），`@run` 的提权终端交给 GlazeWM 的 `alt+shift+enter`。
+  pi 会话清理改为 `my-pi-plugins` 的 `/clean`：规则 + HTTP 契约在
+  [`docs/09-clean-api.md`](docs/09-clean-api.md)，前端 `web/clean/index.html`。
+  不要再把 pi 的读取逻辑搬回 provider 层。
 - 命令关键字是 **`set`**（历史上叫 switch，已改名）；文档示例写默认前缀 `:`，
   用户本机 `config.toml` 改成了 `@`，别把两者搞混。
 - **面板渲染只走 `ui::draw`**（TUI 与 GUI 共用），别在 GUI 里另写一套布局。
@@ -240,18 +239,18 @@ cargo clippy --release --features gui    # 零警告；必须带 feature，否�
      少了第二步一个图标都拿不到）。缓存存原始字节、**失败写空文件**否则每次呼出都重试；
      站点 key 要带**非默认端口**（`127.0.0.1:5173` 与 `:4000` 是两个服务）。
      开关是 `[gui] web_icons = "favicon" | "globe"`（`globe` 完全无网络请求）。
-- **输入框的 provider chip 是原子的**（2026-11-19）：关键字一命中 provider（`@pi`，不必敲空格），
+- **输入框的 provider chip 是原子的**（2026-11-19）：关键字一命中 provider（`@z`，不必敲空格），
   `input` 的 `0..chip_end` 段（`App::chip_end`，**字符**下标）在 GUI 里画成
   「字形 + 关键字」的胶囊，编辑上不许光标进入。三个坑：
   - **chip 的判据就是 `Parsed::Command`，不要再加空格条件** —— `providers::parse` 本来就
-    不要求空格，列表在 `@pi` 就已经切到 pi 会话了；chip 要是等空格，就会出现「列表已经
+    不要求空格，列表在 `@z` 就已经切到目录跳转了；chip 要是等空格，就会出现「列表已经
     换了、输入框还是纯文字」的错位（2026-11-19 用户反馈，别改回去）。
-  - **也试过反过来：改 `parse` 让列表也等空格 —— 否决**（2026-11-19）。那会让 `@pi` + 回车
-    变成「补成 `@pi `、要按两次回车才列会话」，还把 `--query "@pi"` 从列会话改成列命令。
+  - **也试过反过来：改 `parse` 让列表也等空格 —— 否决**（2026-11-19）。那会让 `@z` + 回车
+    变成「补成 `@z `、要按两次回车才列目录」，还把 `--query "@z"` 从列目录改成列命令。
     代价不对等：错位靠 chip 提前就能解决，不用动解析层。
   - **原子语义在 `app` 层，不在 GUI**：`snap_cursor` 在 `refresh_with` 末尾统一夹一次
     （覆盖输入 / 粘贴 / IME / 各条编辑路径），`backspace` 贴着 chip 一次删掉整块含分隔
-    空格，`word_boundary` 反向不许停在 `@pi` 中间。TUI 没画 chip，但**这些行为同样生效**。
+    空格，`word_boundary` 反向不许停在 `@z` 中间。TUI 没画 chip，但**这些行为同样生效**。
   - **新增 provider 要补 `gui/glyphs.rs::for_keyword`**，漏了只是回落到问号（没有编译错误）。
     码点用已有常量；新增码点先用 GDI+ 画一张 PNG 确认不是豆腐块。
 - **`[[apps]] icon = "..."` 给的图要用 `image` 解，别过 SHELL**（2026-11-18）：

@@ -1,13 +1,13 @@
-//! `go <路径片段>` —— 跳到目录 / 定位文件。
+//! `z <路径片段>` —— 跳到目录 / 定位文件（基于 zoxide 的目录历史）。
 //!
 //! 输入可以是这些写法（都能识别）：
 //!
 //! ```text
-//! go ~/Projects/tupa-launcher
-//! go "C:\Users\<你的用户名>\Projects"
-//! go file:///C:/Users/<你的用户名>/Projects
-//! go projects\term          ← 不完整的路径片段
-//! go                        ← 空输入时自动读剪贴板
+//! z ~/Projects/tupa-launcher
+//! z "C:\Users\<你的用户名>\Projects"
+//! z file:///C:/Users/<你的用户名>/Projects
+//! z projects\term          ← 不完整的路径片段
+//! z                        ← 空输入时列出 zoxide 的完整历史（剪贴板是路径时插在最前）
 //! ```
 //!
 //! 匹配顺序：
@@ -55,7 +55,7 @@ impl Go {
 
 impl Provider for Go {
     fn keyword(&self) -> &str {
-        "go"
+        "z"
     }
 
     fn description(&self) -> &'static str {
@@ -69,14 +69,28 @@ impl Provider for Go {
     fn query(&self, args: &str, flags: &[String]) -> Vec<Item> {
         let opener = Opener::from_flags(flags);
 
-        // 空输入时尝试用剪贴板里的内容（常用来“粘贴一个路径然后跳过去”）
-        let raw = if args.trim().is_empty() {
-            crate::clipboard::text().unwrap_or_default()
-        } else {
-            args.to_string()
-        };
+        // 空输入：列出 zoxide 的完整历史（按 rank 降序），
+        // 剪贴板里是存在的路径时再插一行在**最前面**（老的「复制路径 → 唤起 → 回车」还在）
+        if args.trim().is_empty() {
+            let mut items: Vec<Item> = Vec::new();
+            if let Some(path) = crate::clipboard::text()
+                .map(|text| normalize(&text))
+                .filter(|text| !text.is_empty())
+                .map(PathBuf::from)
+                .filter(|path| path.exists())
+            {
+                items.push(item_for(path, opener));
+            }
+            for path in zoxide_list(self.max) {
+                if items.iter().any(|item| item.action == opener.action(&path)) {
+                    continue; // 剪贴板里那一个别在下面重复列一次
+                }
+                items.push(item_for(path, opener));
+            }
+            return items;
+        }
 
-        let input = normalize(&raw);
+        let input = normalize(args);
         if input.is_empty() {
             return Vec::new();
         }
@@ -357,6 +371,37 @@ fn percent_decode(input: &str) -> String {
 ///
 /// 和用户在终端里用的 `z` 命令是**同一份数据库**，所以在终端里跳过的目录，
 /// 这里也能直接搜到；反过来这里打开过的目录也会被记进去（见 `exec::run`）。
+/// zoxide 的**完整历史**（rank 降序），用于 `z` 空查询的开屏列表。
+///
+/// 用 `zoxide query --list --score` 而不是自己解 `db.zo`：那是 bincode 私有格式，
+/// zoxide 升级就可能变；CLI 一次 ~50ms，而且和用户的 `z` 命令共用同一份数据。
+/// 输出每行是 `score path`（空白分隔，路径里可以再有空格）。
+fn zoxide_list(max: usize) -> Vec<PathBuf> {
+    let mut cmd = Command::new("zoxide");
+    cmd.args(["query", "--list", "--score"]);
+    hide_window(&mut cmd);
+
+    let Ok(output) = cmd.output() else {
+        return Vec::new();
+    };
+    if !output.status.success() {
+        return Vec::new();
+    }
+
+    let mut rows: Vec<(f64, PathBuf)> = decode_output(&output.stdout)
+        .lines()
+        .filter_map(|line| {
+            let (score, rest) = line.trim().split_once(char::is_whitespace)?;
+            let score: f64 = score.parse().ok()?;
+            let path = PathBuf::from(rest.trim());
+            path.is_dir().then_some((score, path))
+        })
+        .collect();
+    rows.sort_by(|a, b| b.0.total_cmp(&a.0));
+    rows.truncate(max);
+    rows.into_iter().map(|(_, path)| path).collect()
+}
+
 fn zoxide_query(keyword: &str) -> Vec<PathBuf> {
     let mut cmd = Command::new("zoxide");
     cmd.args(["query", "--list", "--", keyword]);

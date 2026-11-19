@@ -202,11 +202,13 @@ pub fn line_for(item: &Item, prefix: char, flags: &[String]) -> Option<String> {
             },
         ),
         // `go` 遇到存在的路径直接跳（不依赖 Everything / zoxide），回放最稳
-        Action::Open(path) | Action::Reveal(path) => ("go", path.display().to_string()),
+        Action::Open(path) | Action::Reveal(path) => ("z", path.display().to_string()),
         Action::OpenInEditor { file, .. } => ("ev", file.display().to_string()),
-        Action::RunCommand { command, .. } | Action::LaunchInTerminal { command, .. } => {
-            ("run", command.clone())
-        }
+        // `@run` 已移除（提权终端交给 GlazeWM）：`RunCommand` 没有可回放的输入行。
+        // `@go:pi` / `:go:yazi` 这类在新终端里打开目录的，按目录回放成 `@z <dir>`。
+        Action::LaunchInTerminal {
+            dir: Some(dir), ..
+        } => ("z", dir.display().to_string()),
         _ => return None,
     };
     if key.trim().is_empty() {
@@ -373,10 +375,10 @@ mod tests {
         );
         assert_eq!(
             line_for(&dir, '@', &[]).as_deref(),
-            Some(r"@go C:\Users\me\Themes")
+            Some(r"@z C:\Users\me\Themes")
         );
 
-        // 文件（Reveal）走同一条：`@go <文件>` 回放得到同样的「在资源管理器里选中」
+        // 文件（Reveal）走同一条：`@z <文件>` 回放得到同样的「在资源管理器里选中」
         let file = Item::new(
             Kind::File,
             vec!["a.pdf".to_string(), r"C:\docs".to_string()],
@@ -384,13 +386,13 @@ mod tests {
         );
         assert_eq!(
             line_for(&file, '@', &[]).as_deref(),
-            Some(r"@go C:\docs\a.pdf")
+            Some(r"@z C:\docs\a.pdf")
         );
 
-        // 修饰符要拼回去，回放行为才一致（`:go:yazi` 用 yazi 开）
+        // 修饰符要拼回去，回放行为才一致（`:z:yazi` 用 yazi 开）
         assert_eq!(
             line_for(&dir, '@', &["yazi".to_string()]).as_deref(),
-            Some(r"@go:yazi C:\Users\me\Themes")
+            Some(r"@z:yazi C:\Users\me\Themes")
         );
 
         // 编不出可重跑行的动作不编（不能让 `@blog` 这种无参执行被乱改）

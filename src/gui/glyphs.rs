@@ -84,10 +84,6 @@ pub const TERMINAL: char = '\u{F120}';
 pub const COG: char = '\u{F013}';
 /// 开关 —— `:set` 里的开关 / 选项（和齿轮区分开）
 pub const TOGGLE: char = '\u{F205}';
-/// 垃圾桶 —— `:pi:clean` 的归档 / 删除
-pub const TRASH: char = '\u{F1F8}';
-/// 归档箱 —— `:pi:clean:restore` 恢复
-pub const BOX_ARCHIVE: char = '\u{F187}';
 /// 服务器 —— `:blog` 的本地预览 / 管理页
 pub const SERVER: char = '\u{F233}';
 /// 停止 —— `:blog:stop` / 停本地服务
@@ -100,9 +96,6 @@ pub const CLOCK: char = '\u{F43A}';
 pub const QUESTION: char = '\u{F059}';
 /// 右箭头 —— 其余 `FillInput` 条目
 pub const ARROW: char = '\u{F054}';
-/// pi 会话。**故意用普通希腊字母**（不是 Nerd Font 码点）：π 一眼就是 pi，
-/// 而且和「终端」区分开 —— `:pi` 那些行除了标题，本来就靠这个形状认。
-pub const PI: char = '\u{03C0}';
 /// 放大镜 —— `:all`（应用 + 历史混排的默认搜索）
 pub const SEARCH: char = '\u{F002}';
 /// 星标 —— `:fav` 收藏
@@ -110,8 +103,7 @@ pub const STAR: char = '\u{F005}';
 
 /// provider 关键字 → 字形。
 ///
-/// 给 GUI 输入框那颗**原子 chip**（`(π pi)`）用：打完 `@pi ` 之后关键字成块，
-/// 块头这个图标和列表里同类条目的图标是同一个语义（`:pi` 的会话行就是 π）。
+/// 给 GUI 输入框那颗**原子 chip** 用：关键字一命中 provider，块头图标就用这里的字形。
 /// 关键字表在 `providers::build()`（顺序即命令列表顺序），新增 provider 记得补一行，
 /// 漏了只是回落到问号（没有编译错误可依赖）。
 pub fn for_keyword(keyword: &str) -> char {
@@ -119,9 +111,7 @@ pub fn for_keyword(keyword: &str) -> char {
         "app" => EXEC,
         "all" => SEARCH,
         "ev" => FILE,
-        "run" => TERMINAL,
-        "pi" => PI,
-        "go" => FOLDER,
+        "z" => FOLDER,
         "web" => GLOBE,
         "blog" => PENCIL,
         "fav" => STAR,
@@ -262,8 +252,8 @@ mod tests {
             AUDIO, VIDEO, LOG, NOTEBOOK, DISK_IMAGE, CONFIG, ENV, LOCK, KEY, LICENSE, GIT, EXEC,
             LIBRARY, BINARY, RUST, PYTHON, GO, JAVASCRIPT, TYPESCRIPT, REACT, C, CPP, CSHARP,
             JAVA, KOTLIN, LUA, PHP, RUBY, HASKELL, ASSEMBLY, SHELL, SHELL_CMD, POWERSHELL, HTML,
-            CSS, SASS, JSON, YAML, TOML, XML, CODE, GLOBE, TERMINAL, COG, TOGGLE, TRASH,
-            BOX_ARCHIVE, SERVER, STOP, PENCIL, CLOCK, QUESTION, ARROW,
+            CSS, SASS, JSON, YAML, TOML, XML, CODE, GLOBE, TERMINAL, COG, TOGGLE,
+            SERVER, STOP, PENCIL, CLOCK, QUESTION, ARROW,
         ] {
             let code = glyph as u32;
             assert!(
