@@ -1,6 +1,6 @@
 # tupa-launcher 状态
 
-updated: 2026-11-19 · code: `b6270e2`（删 @pi / @run · @go → @z · 隐藏后清空输入 · 紧凑态收回 · clip 同步出 · clean 迁到 HTML）
+updated: 2026-11-19 · code: `PENDING`（右键菜单 · 删 @pi / @run · @go → @z · 隐藏后清空输入 · 紧凑态收回 · clip 同步出 · clean 迁到 HTML）
 
 > 判断本文件是否过期：比较 `code` 与 `git log -1 --format=%h -- src Cargo.toml`。
 > 只改文档的提交不算过期。
@@ -12,6 +12,16 @@ updated: 2026-11-19 · code: `b6270e2`（删 @pi / @run · @go → @z · 隐藏�
 > **每次会话收尾只需要改这一个文件的两节**（阶段 / 未完成），并更新首行。
 
 ## 阶段
+
+- **右键菜单（2026-11-19 晚，PLAN #4）**：列表任意行右键 → 绝对定位浮层，菜单项按该行
+  **实际能做的事**现取（`App::menu_for`，不缓存）：应用给「以管理员身份运行 / 打开所在位置 /
+  收藏」，路径与收藏项给「打开所在位置 / 取消收藏」，在 `history.json` 里有记录的给
+  「从最近记录移除」。`Action::Launch { elevated: true }` / `Action::reveal_target()` /
+  `favorites::toggle()` 全部复用。**唯一新增语义**：「从最近记录移除」只改 tupa 的
+  `history.json`（`@web` 的源在 Edge History 库里删不掉，所以文案是「最近记录」不是「删除」）。
+  两条实现约束（已写进 AGENTS 硬约定）：行事件只在 `row_click_handler` /
+  `row_right_click_handler` 一处写（卡片行与密度行共用）；右键也会走 `on_click`，
+  左键处理器必须判 `MouseButton::Left`，否则右键双击会直接执行条目。
 
 - **五项改造（2026-11-19 晚）**：一次会话做完 [`PLAN.md`](PLAN.md) 的 1 / 2 / 3 / 5 / 6 项。
   - **`@pi` 与 `@run` 已移除**（`pi.rs` / `pi_index.rs` / `clean.rs` / `run.rs` 删除）：
@@ -454,11 +464,6 @@ updated: 2026-11-19 · code: `b6270e2`（删 @pi / @run · @go → @z · 隐藏�
 
 ## 未完成
 
-- **右键菜单（[`PLAN.md`](PLAN.md) #4，未开工）**：行上 `on_mouse_down` 右键 → 绝对定位浮层；
-  应用条目给「管理员运行 / 打开位置 / 收藏」，收藏项给「取消收藏 / 打开位置」，
-  `@hist` 与开屏历史给「从最近记录移除」（只删 tupa 的 `history.json`；`@web` 的源数据在
-  Edge 的 History 库里删不掉，文案要写清）。可直接复用 `Action::Launch { elevated }` /
-  `Action::reveal_target()` / `favorites::toggle()`；缺的是「按 action 删一条历史」+ 菜单绘制/命中。
 - **`/clean` 服务端（my-pi-plugins 侧）**：页面 `web/clean/index.html` 与契约
   `docs/09-clean-api.md` 已交付，插件里要实现三个接口并托管页面。
 - **窗口宽度记忆**：面板宽度固定按主屏 62%（高度随内容），拖边改过的宽度还没写回

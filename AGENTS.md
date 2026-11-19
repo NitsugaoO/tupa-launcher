@@ -266,6 +266,16 @@ cargo clippy --release --features gui    # 零警告；必须带 feature，否�
   （和 `energy_saver_get_combined.ps1` 同源；实测关着时是 `2`）。
   不可用时画不透明主题色（`#272e33`），并且**要重新下发 accent policy**
   （`acrylic::disable` / `enable`），只改底色 DWM 那边还挂着旧的、切回来仍是黑底。
+- **行的鼠标交互只在两个地方写**（2026-11-19）：`row_click_handler`（左键：单击选中 /
+  双击 = 回车）与 `row_right_click_handler`（右键：选中该行 + 弹菜单）。卡片行（`render_card_row`）
+  和密度行（`render_row`）**共用这一对**，别在两边各写一份。
+  - 右键也会走 `on_click`，所以左键处理器里必须判 `mouse.down.button == MouseButton::Left`，
+    否则右键双击会直接执行条目。
+  - 菜单项**每次现取**（`App::menu_for(row)`），不缓存：收藏状态、「历史里还有没有这条」
+    都是实时的。做不到的项就不给（能不能定位问 `Action::reveal_target()`）。
+  - 「从最近记录移除」只删 `history.json`（`App::run_menu` 里直接改内存 + `save_history`）；
+    `:web` 的数据在 Edge 的 History 库里，**删不掉**，文案要写「最近记录」。
+  - 菜单是 root 的最后一个 child + `absolute()`，坐标超出窗口就往里夹；`Esc` 只关菜单。
 - **托盘/热键在后台线程，别塞进 GPUI**：`Application::run` 占住主线程，所以 `src/tray.rs`
   自己开线程跑 message-only 窗口 + `Shell_NotifyIconW` + `RegisterHotKey`，面板显隐直接用
   `ShowWindow` 操作 HWND（`util::find_panel`），不碰 GPUI 状态。托盘菜单用

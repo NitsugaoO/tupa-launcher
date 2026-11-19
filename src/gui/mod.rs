@@ -37,7 +37,6 @@ use gpui::{
     WindowBackgroundAppearance, WindowBounds, WindowKind, WindowOptions, div, img, point,
     prelude::*, px, relative, size,
 };
-
 use crate::app::App;
 use crate::config::Config;
 use crate::i18n;
@@ -229,6 +228,9 @@ struct Panel {
     preedit: Option<(usize, String)>,
     /// 紧凑态下按 ↓ 手动展开的开屏列表（收藏 + 最近命令）
     hint_open: bool,
+    /// 右键菜单：`(行号, 窗口内 x, y)`。菜单项每次从 `app.menu_for(row)` 现取（不缓存），
+    /// 这样收藏状态、历史变化都能实时反映到菜单上。
+    menu: Option<(usize, f32, f32)>,
     /// 上一次看到的「输入是否为空」（紧凑态自动收回的判断基准）。
     ///
     /// 不能每帧「空了就收回」—— 按 ↓ 展开时输入本来就是空的；只能在
@@ -479,6 +481,7 @@ impl Panel {
             blink_at: std::time::Instant::now() + Duration::from_millis(500),
             preedit: None,
             hint_open: false,
+            menu: None,
             was_empty: true,
             row_metrics: RowMetrics {
                 title: 0.0,
@@ -512,6 +515,19 @@ impl Panel {
 
     fn handle_key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         let key = keys::to_key(&event.keystroke);
+
+        // 右键菜单开着时：Esc 只关菜单；其它键关掉菜单后继续正常处理
+        // （不能连输入一起吞掉 —— 用户可能只是想接着打字）
+        if self.menu.is_some() {
+            self.menu = None;
+            let escape = matches!(&key, Some(k) if k.code == crossterm::event::KeyCode::Esc);
+            cx.notify();
+            if escape {
+                window.focus(&self.focus);
+                return;
+            }
+        }
+
         let question = matches!(
             key,
             Some(crossterm::event::KeyEvent {
@@ -676,6 +692,7 @@ impl Panel {
     fn hide(&mut self) {
         self.app.reset();
         self.hint_open = false;
+        self.menu = None;
         self.was_empty = self.app.input.is_empty();
         self.help = false;
         self.text_block = None;
@@ -968,6 +985,10 @@ impl Panel {
 
     /// 鼠标滚轮 = 上下移动选中项（和 ↑↓ 等价）
     fn on_scroll(&mut self, event: &ScrollWheelEvent, window: &mut Window, cx: &mut Context<Self>) {
+        // 滚轮 = 走开：菜单留在原地会挡着新滚到的行
+        if self.menu.take().is_some() {
+            cx.notify();
+        }
         let lines = match event.delta {
             // 精确像素（触控板）：按行高折算，刻度小的地方会累积到一整行才动
             ScrollDelta::Pixels(delta) => f32::from(delta.y) / 24.0,
@@ -1746,6 +1767,74 @@ impl Panel {
             .into_any_element()
     }
 
+    /// 右键菜单浮层：绝对定位在鼠标位置，超出窗口就往里夹。
+    ///
+    /// 菜单项每次从 `app.menu_for(row)` 现取（不复存一份），所以收藏状态、
+    /// 「历史里还有没有这条」都是实时的。
+    fn menu_panel(&self, p: Palette, window: &Window, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let (row, x, y) = self.menu?;
+        let entries = self.app.menu_for(row);
+        if entries.is_empty() {
+            return None;
+        }
+
+        let height = entries.len() as f32 * style::MENU_ROW + style::MENU_PAD * 2.0;
+        let size = window.bounds().size;
+        let left = x
+            .min(f32::from(size.width) - style::MENU_WIDTH - 8.0)
+            .max(4.0);
+        let top = y.min(f32::from(size.height) - height - 8.0).max(4.0);
+
+        let mut list = div()
+            .flex()
+            .flex_col()
+            .w(px(style::MENU_WIDTH))
+            .p(px(style::MENU_PAD))
+            .rounded(px(6.0))
+            .border(px(1.0))
+            .border_color(p.accent)
+            // 比面板实一点：菜单下面还压着列表文字，太透会看不清
+            .bg(style::with_alpha(p.background, 0.97));
+
+        for (index, (label, action)) in entries.into_iter().enumerate() {
+            let click = cx.listener(
+                move |panel: &mut Panel, _: &gpui::ClickEvent, _window, cx| {
+                    panel.menu = None;
+                    let hide = panel.app.run_menu(row, action);
+                    if hide {
+                        panel.app.should_hide = false;
+                        panel.hide();
+                    }
+                    cx.notify();
+                },
+            );
+            list = list.child(
+                div()
+                    .id(("menu-item", index))
+                    .w_full()
+                    .h(px(style::MENU_ROW))
+                    .px(px(10.0))
+                    .flex()
+                    .items_center()
+                    .rounded(px(4.0))
+                    .text_size(px(style::MENU_SIZE))
+                    .text_color(p.fg)
+                    .hover(|style| style.bg(p.row_hover))
+                    .on_click(click)
+                    .child(label),
+            );
+        }
+
+        Some(
+            div()
+                .absolute()
+                .left(px(left))
+                .top(px(top))
+                .child(list)
+                .into_any_element(),
+        )
+    }
+
     /// 状态栏：左 = 状态消息 / provider 说明，右 = 选中位置
     fn status_bar(&self, p: Palette) -> AnyElement {
         let (left, color) = match &self.app.status {
@@ -1846,6 +1935,54 @@ struct RowMetrics {
 ///
 /// 宽度必须显式给（`w(px(n))`）——GPUI 的 `truncate()` 只对确定宽度的元素生效，
 /// `flex_1` 的容器会被内容撑开、文字画到窗口外。
+/// 一行的左键交互（卡片行 / 密度行共用，别两边各写一份 —— 容易漏改一边）。
+///
+/// 单击 = 选中，双击 = 回车；右键走 [`row_right_click_handler`]。
+fn row_click_handler(
+    panel: &WeakEntity<Panel>,
+    index: usize,
+) -> impl Fn(&gpui::ClickEvent, &mut Window, &mut gpui::App) + 'static {
+    let panel = panel.clone();
+    move |event, _window, cx| {
+        // 右键也会走 click 事件：这里只认左键（否则右键单击会被当成「选中 + 关菜单」
+        // 之外的意外行为，双击右键更会直接执行）
+        let double = matches!(
+            event,
+            gpui::ClickEvent::Mouse(mouse)
+                if mouse.down.button == gpui::MouseButton::Left && mouse.down.click_count >= 2
+        );
+        let _ = panel.update(cx, |panel, cx| {
+            panel.menu = None;
+            panel.app.list_state.select(Some(index));
+            if double {
+                panel.run_selected(cx);
+            }
+            cx.notify();
+        });
+    }
+}
+
+/// 一行的右键：选中该行并在鼠标位置弹菜单。没有可选项就不弹。
+fn row_right_click_handler(
+    panel: &WeakEntity<Panel>,
+    index: usize,
+) -> impl Fn(&gpui::MouseDownEvent, &mut Window, &mut gpui::App) + 'static {
+    let panel = panel.clone();
+    move |event, _window, cx| {
+        let x = f32::from(event.position.x);
+        let y = f32::from(event.position.y);
+        let _ = panel.update(cx, |panel, cx| {
+            panel.app.list_state.select(Some(index));
+            panel.menu = if panel.app.menu_for(index).is_empty() {
+                None
+            } else {
+                Some((index, x, y))
+            };
+            cx.notify();
+        });
+    }
+}
+
 fn render_row(
     row: &RowSnapshot,
     p: Palette,
@@ -1951,24 +2088,11 @@ fn render_row(
                         .unwrap_or_default(),
                 ),
         )
-        .on_click({
-            let panel = panel.clone();
-            let index = row.index;
-            move |event, _window, cx| {
-                // 双击 = 回车：`MouseDownEvent.click_count` 由平台给，不用自己计时
-                let double_click = matches!(
-                    event,
-                    gpui::ClickEvent::Mouse(mouse) if mouse.down.click_count >= 2
-                );
-                let _ = panel.update(cx, |panel, cx| {
-                    panel.app.list_state.select(Some(index));
-                    if double_click {
-                        panel.run_selected(cx);
-                    }
-                    cx.notify();
-                });
-            }
-        });
+        .on_click(row_click_handler(panel, row.index))
+        .on_mouse_down(
+            gpui::MouseButton::Right,
+            row_right_click_handler(panel, row.index),
+        );
 
     // `uniform_list` 的行高 = 第一项高度，间距只能塞进行高里
     div()
@@ -2304,23 +2428,11 @@ fn render_card_row(
         .flex()
         .items_center()
         .child(card.child(head).child(sub))
-        .on_click({
-            let panel = panel.clone();
-            let index = row.index;
-            move |event, _window, cx| {
-                let double_click = matches!(
-                    event,
-                    gpui::ClickEvent::Mouse(mouse) if mouse.down.click_count >= 2
-                );
-                let _ = panel.update(cx, |panel, cx| {
-                    panel.app.list_state.select(Some(index));
-                    if double_click {
-                        panel.run_selected(cx);
-                    }
-                    cx.notify();
-                });
-            }
-        })
+        .on_click(row_click_handler(panel, row.index))
+        .on_mouse_down(
+            gpui::MouseButton::Right,
+            row_right_click_handler(panel, row.index),
+        )
         .into_any_element()
 }
 
@@ -2479,6 +2591,11 @@ impl Render for Panel {
                 .child(self.separator(p))
                 .child(body)
                 .child(self.status_bar(p));
+        }
+
+        // 右键菜单画在最上层（root 的最后一个 child）
+        if let Some(menu) = self.menu_panel(p, window, cx) {
+            root = root.child(menu);
         }
 
         // 动画由 vsync 驱动：还有东西在动就注册「下一帧」回调，回调里推进动画并重绘。

@@ -127,7 +127,7 @@
 
 ---
 
-## 4. 右键菜单（未开工）
+## 4. 右键菜单 ✅ 已完成
 
 ### 现状
 
@@ -144,11 +144,11 @@
 
 | # | 内容 |
 |---|---|
-| 4.1 | **菜单状态**：`Panel` 加 `menu: Option<MenuState { row: usize, anchor: Point<Px>, items: Vec<MenuEntry> }>`；按 `Esc` / 点空白 / 滚轮关闭 |
-| 4.2 | **命中**：行容器加 `on_mouse_down`（`MouseButton::Right` → 选中该行 + 按 item 类型生成菜单项），必须在 `on_click` 之前消费掉右键（否则右键会触发单击） |
-| 4.3 | **绘制**：绝对定位浮层（复用 marker 的做法：`absolute()` + `left/top`），`w(180px)`、行高 26、hover 高亮、分隔线；层级在 marker 之上、状态栏之下 |
-| 4.4 | **动作执行**：`App` 加 `apply_menu(entry)`，内部走 `exec::run` 或 `favorites::toggle`，执行后隐藏面板（`finish_open` 的语义） |
-| 4.5 | **删除这一项**：新增 `history::remove_by_action(&Action)`；`@hist` / 开屏历史条目用它。`@web` 的源数据在 **Edge 的 History sqlite**，不能删 → 菜单文案写「从最近记录移除」，只删 tupa 的 `history.json` |
+| 4.1 ✅ | **菜单状态**：`Panel` 加 `menu: Option<MenuState { row: usize, anchor: Point<Px>, items: Vec<MenuEntry> }>`；按 `Esc` / 点空白 / 滚轮关闭 |
+| 4.2 ✅ | **命中**：行容器加 `on_mouse_down`（`MouseButton::Right` → 选中该行 + 按 item 类型生成菜单项），必须在 `on_click` 之前消费掉右键（否则右键会触发单击） |
+| 4.3 ✅ | **绘制**：绝对定位浮层（复用 marker 的做法：`absolute()` + `left/top`），`w(180px)`、行高 26、hover 高亮、分隔线；层级在 marker 之上、状态栏之下 |
+| 4.4 ✅ | **动作执行**：`App` 加 `apply_menu(entry)`，内部走 `exec::run` 或 `favorites::toggle`，执行后隐藏面板（`finish_open` 的语义） |
+| 4.5 ✅ | **删除这一项**：新增 `history::remove_by_action(&Action)`；`@hist` / 开屏历史条目用它。`@web` 的源数据在 **Edge 的 History sqlite**，不能删 → 菜单文案写「从最近记录移除」，只删 tupa 的 `history.json` |
 
 ### 菜单内容（按 item 类型）
 
@@ -168,8 +168,8 @@
 
 ### 待定
 
-> ⚠️ `@web`（Edge 历史）的「删除」只能是「从 tupa 的最近记录里移除」，**动不了 Edge 的库**。
-> 确认这个语义能接受。
+> `@web`（Edge 历史）的「删除」实现了「从 tupa 的最近记录里移除」，动不了 Edge 的库 ——
+> 菜单文案就叫「从最近记录移除」。
 
 ---
 
@@ -237,7 +237,7 @@
 
 ---
 
-## 7. 顺序（已完成 1/2/3/5/6；剩 4 与插件侧接线）
+## 7. 顺序（1/2/3/4/5/6 全部完成；剩插件侧 `/clean` 接线）
 
 ```
 #2 输入框清空        ← 10 行级，立刻能给一个可用版本

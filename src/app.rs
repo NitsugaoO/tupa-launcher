@@ -123,6 +123,21 @@ pub struct App {
     evt_rx: Receiver<Evt>,
 }
 
+/// 右键菜单里一项能做什么。
+///
+/// 只放「对某一行」的操作：菜单本身的开 / 关、位置、绘制都在 GUI 层。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MenuAction {
+    /// 以管理员身份启动（`Action::Launch` 的 `elevated = true`，会弹 UAC）
+    RunAsAdmin,
+    /// 在文件资源管理器里定位
+    Reveal,
+    /// 收藏 / 取消收藏
+    ToggleFavorite,
+    /// 从 `history.json` 里删掉这一条
+    RemoveHistory,
+}
+
 impl App {
     pub fn new(cfg: Config, theme: Theme) -> Self {
         let default_keyword = cfg.general.default_provider.clone();
@@ -937,6 +952,121 @@ impl App {
         self.items.get(idx).cloned()
     }
 
+    // -----------------------------------------------------------------
+    // 右键菜单
+    // -----------------------------------------------------------------
+
+    /// 这一行能给的菜单项（顺序即显示顺序）。空向量 = 不弹菜单。
+    ///
+    /// 只给真正做得到的项：能不能定位问 `Action::reveal_target`，能不能提权问
+    /// `Action::Launch { elevated }`，能不能删看 `history` 里有没有这条。
+    pub fn menu_for(&self, index: usize) -> Vec<(String, MenuAction)> {
+        let Some(item) = self.items.get(index) else {
+            return Vec::new();
+        };
+        let mut menu = Vec::new();
+
+        // 管理员运行：只有普通启动有这个概念（已经是提权态的不重复给）
+        if matches!(&item.action, Action::Launch { elevated: false, .. }) {
+            menu.push((
+                i18n::menu_run_as_admin().to_string(),
+                MenuAction::RunAsAdmin,
+            ));
+        }
+        if item.action.reveal_target().is_ok() {
+            menu.push((i18n::menu_reveal().to_string(), MenuAction::Reveal));
+        }
+        // 命令列表（FillInput）没有可收藏的目标
+        if !matches!(item.action, Action::FillInput(_)) {
+            let label = if favorites::contains(&self.favorites, item) {
+                i18n::menu_unfavorite()
+            } else {
+                i18n::menu_favorite()
+            };
+            menu.push((label.to_string(), MenuAction::ToggleFavorite));
+        }
+        if self.in_history(item) {
+            menu.push((
+                i18n::menu_remove_history().to_string(),
+                MenuAction::RemoveHistory,
+            ));
+        }
+        menu
+    }
+
+    /// 历史里是否有这个条目（删菜单项只对真在 `history.json` 里的行显示）。
+    ///
+    /// 只比 `item.action`：老记录只有输入行（`item: None`），那些行是 `FillInput`，
+    /// 对不上任何具体目标，也就不给「删除」选项。
+    fn in_history(&self, item: &Item) -> bool {
+        self.history
+            .iter()
+            .any(|entry| entry.item.as_ref().is_some_and(|snapshot| snapshot.action == item.action))
+    }
+
+    /// 执行右键菜单项。返回 `true` = 调用方要隐藏面板。
+    pub fn run_menu(&mut self, index: usize, action: MenuAction) -> bool {
+        if index >= self.items.len() {
+            return false;
+        }
+        // 菜单操作全作用于「刚右键的那一行」：先选中它，后面复用的方法就看这个
+        self.list_state.select(Some(index));
+
+        match action {
+            MenuAction::RunAsAdmin => {
+                let Some(item) = self.items.get(index).cloned() else {
+                    return false;
+                };
+                let Action::Launch { command, args, .. } = item.action.clone() else {
+                    return false;
+                };
+                let elevated = Action::Launch {
+                    command,
+                    args,
+                    elevated: true,
+                };
+                match exec::run(&elevated) {
+                    Ok(_) => {
+                        self.finish_open(item);
+                        self.should_hide
+                    }
+                    Err(e) => {
+                        self.status = Some((format!("{e:#}"), true));
+                        false
+                    }
+                }
+            }
+            MenuAction::Reveal => {
+                self.reveal_selected();
+                self.should_hide
+            }
+            MenuAction::ToggleFavorite => {
+                self.toggle_favorite();
+                false
+            }
+            MenuAction::RemoveHistory => {
+                let Some(item) = self.items.get(index).cloned() else {
+                    return false;
+                };
+                let before = self.history.len();
+                self.history.retain(|entry| {
+                    !entry
+                        .item
+                        .as_ref()
+                        .is_some_and(|snapshot| snapshot.action == item.action)
+                });
+                if self.history.len() == before {
+                    return false;
+                }
+                self.save_history();
+                // 列表里那条也得消失（开屏 / `@hist` 都是直接从 history 读的）
+                self.refresh_keep_selection();
+                self.status = Some((i18n::menu_removed_history(item.title()), false));
+                false
+            }
+        }
+    }
+
     /// 隐藏前把状态清干净，下次唤起时是初始界面
     pub fn reset(&mut self) {
         self.items.clear();
@@ -1270,6 +1400,7 @@ fn is_select_mode_key(code: KeyCode) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
 
     /// 测试用的 App：不动真实配置文件（历史在内存里替换掉）
     fn app() -> App {
@@ -1307,6 +1438,82 @@ mod tests {
         assert_eq!(app.cursor, app.input.chars().count(), "光标跟着落到末尾");
         assert_eq!(app.anchor, None, "选区要清掉");
         assert!(app.items.is_empty(), "列表清空后再由 refresh 重新填");
+    }
+
+    /// 右键菜单：能做什么按条目类型来，做得到才算进去。
+    #[test]
+    fn menu_offers_only_可行的项() {
+        let mut app = app();
+        app.items = vec![
+            // 普通启动：能提权、能收藏（exe 解析不到就不给「打开位置」）
+            Item::new(
+                Kind::App,
+                vec!["App".to_string()],
+                Action::Launch {
+                    command: "definitely-not-a-real-exe-xyz".to_string(),
+                    args: Vec::new(),
+                    elevated: false,
+                },
+            ),
+            // 路径：能定位、能收藏，不能提权
+            Item::new(
+                Kind::Dir,
+                vec!["tmp".to_string()],
+                Action::Open(PathBuf::from(r"C:\tmp")),
+            ),
+            // 命令列表：没有可执行目标，全不给
+            Item::new(
+                Kind::Help,
+                vec!["app".to_string()],
+                Action::FillInput("app ".to_string()),
+            ),
+        ];
+
+        let launch = app.menu_for(0);
+        assert!(launch.iter().any(|(_, a)| *a == MenuAction::RunAsAdmin));
+        assert!(launch.iter().any(|(_, a)| *a == MenuAction::ToggleFavorite));
+        assert!(
+            !launch.iter().any(|(_, a)| *a == MenuAction::Reveal),
+            "解析不到 exe 就不该给「打开位置」"
+        );
+        assert!(
+            !launch.iter().any(|(_, a)| *a == MenuAction::RemoveHistory),
+            "不在历史里不给删除项"
+        );
+
+        let path = app.menu_for(1);
+        assert!(path.iter().any(|(_, a)| *a == MenuAction::Reveal));
+        assert!(!path.iter().any(|(_, a)| *a == MenuAction::RunAsAdmin));
+
+        let help = app.menu_for(2);
+        assert!(help.is_empty(), "命令列表没有可做的菜单项：{help:?}");
+    }
+
+    /// 「从最近记录移除」：只删 `history.json`，不关面板，列表跟着刷新
+    #[test]
+    fn menu_remove_history_drops_the_entry() {
+        let mut app = app();
+        let target = Item::new(
+            Kind::Dir,
+            vec!["tmp".to_string()],
+            Action::Open(PathBuf::from(r"C:\tmp")),
+        );
+        app.items = vec![target.clone()];
+        app.history = vec![history::Entry {
+            line: "z C:\\tmp".to_string(),
+            item: Some(target),
+            hits: 3,
+            last_used: 1,
+        }];
+        assert!(
+            app.menu_for(0)
+                .iter()
+                .any(|(_, a)| *a == MenuAction::RemoveHistory)
+        );
+
+        let hide = app.run_menu(0, MenuAction::RemoveHistory);
+        assert!(!hide, "删历史不该关面板");
+        assert!(app.history.is_empty());
     }
 
     #[test]

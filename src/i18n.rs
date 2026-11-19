@@ -460,6 +460,37 @@ pub fn cannot_favorite_command() -> &'static str {
     t("命令列表不能收藏", "Command entries can't be favorited")
 }
 
+// ---------------------------------------------------------------------------
+// 右键菜单
+// ---------------------------------------------------------------------------
+
+pub fn menu_run_as_admin() -> &'static str {
+    t("以管理员身份运行", "Run as administrator")
+}
+
+pub fn menu_reveal() -> &'static str {
+    t("打开所在位置", "Show in Explorer")
+}
+
+pub fn menu_favorite() -> &'static str {
+    t("收藏", "Add to favorites")
+}
+
+pub fn menu_unfavorite() -> &'static str {
+    t("取消收藏", "Remove from favorites")
+}
+
+pub fn menu_remove_history() -> &'static str {
+    t("从最近记录移除", "Remove from recent")
+}
+
+pub fn menu_removed_history(title: &str) -> String {
+    s(
+        || format!("已从最近记录移除 {title}"),
+        || format!("Removed {title} from recent"),
+    )
+}
+
 pub fn detail_mode_on() -> &'static str {
     t("单行密度模式", "Dense single-line mode")
 }

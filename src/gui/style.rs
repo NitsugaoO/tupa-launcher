@@ -126,6 +126,12 @@ pub const NOTE_SIZE: f32 = 11.0;
 pub const STATUS_HEIGHT: f32 = 24.0;
 pub const STATUS_SIZE: f32 = 11.0;
 
+/// 右键菜单：宽度 / 行高 / 内边距 / 字号
+pub const MENU_WIDTH: f32 = 172.0;
+pub const MENU_ROW: f32 = 26.0;
+pub const MENU_PAD: f32 = 4.0;
+pub const MENU_SIZE: f32 = 12.0;
+
 /// 状态栏临时提示的停留时间（秒）。
 ///
 /// 「单行密度模式」「已复制」这类一次性提示只停这么久，之后自动回落成 provider 描述 ——
