@@ -445,6 +445,49 @@ pub fn hide_panel(kind: PanelKind) {
     }
 }
 
+/// 窗口停在别的**虚拟桌面**上时把它搬回当前桌面。
+///
+/// `ShowWindow` 不会带走跨虚拟桌面的窗口：`IsWindowVisible` 仍是 true，但 DWM 把窗口
+/// cloaked 掉（`DwmGetWindowAttribute(DWMWA_CLOAKED)` = `DWM_CLOAKED_SHELL`），
+/// 表现就是「按热键没反应，面板调不出来」（2026-11-20 用户遇到）。
+///
+/// 公开的 `IVirtualDesktopManager` 没有「拿当前桌面 id」的方法，所以拿**前台窗口**
+/// 所在的桌面当目标（前台窗口必然在当前桌面；拿不到就算了，失败静默）。
+#[cfg(windows)]
+fn ensure_current_desktop(hwnd: windows_sys::Win32::Foundation::HWND) {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::System::Com::{
+        CLSCTX_ALL, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx,
+    };
+    use windows::Win32::UI::Shell::{IVirtualDesktopManager, VirtualDesktopManager};
+
+    unsafe {
+        // 幂等：托盘线程有消息泵，STA 没问题
+        let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+        let Ok(manager) = CoCreateInstance::<_, IVirtualDesktopManager>(
+            &VirtualDesktopManager,
+            None,
+            CLSCTX_ALL,
+        ) else {
+            return;
+        };
+        let panel = HWND(hwnd);
+        let Ok(on_current) = manager.IsWindowOnCurrentVirtualDesktop(panel) else {
+            return;
+        };
+        if on_current.as_bool() {
+            return;
+        }
+        let foreground = HWND(windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow());
+        if foreground == panel || foreground.is_invalid() {
+            return;
+        }
+        if let Ok(desktop) = manager.GetWindowDesktopId(foreground) {
+            let _ = manager.MoveWindowToDesktop(panel, &desktop);
+        }
+    }
+}
+
 /// 显示面板窗口（隐藏太久时 WM 会把它标记成 minimized，用 SW_RESTORE 处理）
 #[cfg(windows)]
 pub fn show_panel(kind: PanelKind) {
@@ -454,6 +497,8 @@ pub fn show_panel(kind: PanelKind) {
     if hwnd.is_null() {
         return;
     }
+    // 先搬回当前虚拟桌面，否则 ShowWindow 在用户眼前等于什么都没发生
+    ensure_current_desktop(hwnd);
     unsafe {
         if IsIconic(hwnd) != 0 {
             ShowWindow(hwnd, SW_RESTORE);
