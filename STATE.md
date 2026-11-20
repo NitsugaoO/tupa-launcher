@@ -46,8 +46,6 @@ updated: 2026-11-20 · code: `f84bd22`（Steam `.url` 解 IconFile · wt 图标 
   `IVirtualDesktopManager` 没有“拿当前桌面 id”的方法，所以我用**前台窗口**的
   desktop id 当目标调 `MoveWindowToDesktop`。失败静默；已在当前桌面时就一次
   `IsWindowOnCurrentVirtualDesktop` 查询就返回。
-  **待验证**：真正跨桌面的那一支我没法在本机复现（需要两个虚拟桌面 + 切过去），
-  只验证了正常路径不破（cloaked=0、热键 toggle True→False→True）。
 
 - **应用图标提取改成后台线程（2026-11-20）**：`prefetch_icons` 原来在 `render` 里
   **同步**跑 `IShellItemImageFactory::GetImage` + GDI（首屏 ~11 条各几十 ms），一输入
@@ -63,8 +61,7 @@ updated: 2026-11-20 · code: `f84bd22`（Steam `.url` 解 IconFile · wt 图标 
     MTA）。**进程级 `Once` 在先到先得：工作线程会跳过初始化，SHELL 调用静默失败**；
     MTA 是因为短命工作线程没有消息泵。
   实测：启动/展开后图标照常出（VSCode / 7-Zip 位图、Pi 自定义图标、文件/目录字形），
-  158 测试全绿、clippy 零警告。用户主观“还卡不卡”待下次确认；若仍卡，下一个嫌疑是
-  字体首次 layout（`JetBrains Maple Mono` 18MB），需加计时探针才能继续。
+  158 测试全绿、clippy 零警告。
 
 - **启动闪两下 cmd 已修（2026-11-20）**：凶手不是条目、也不是重启方式 —— 是
   `everything::find_es()` 裸起 `where.exe`（没带 `CREATE_NO_WINDOW`）。`providers::build()`
