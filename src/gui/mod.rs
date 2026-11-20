@@ -841,8 +841,13 @@ impl Panel {
                 cx.notify();
                 return;
             }
-            // 只放行导航 / 执行类键；字符键一律忽略（先 Esc 回输入框，用户定的）
-            if !matches!(
+            // 退格 / Delete 是**编辑键**：不产生字符，`replace_text_in_range` 收不到，
+            // 只能在这里放行。语义和字符键一致 —— 列表模式按退格 = 回输入框再删一个字
+            // （用户 2026-11-20：在列表里按几下 backspace 完全没反应，看着像面板卡住）。
+            if matches!(k.code, Kc::Backspace | Kc::Delete) {
+                self.leave_list_mode();
+            } else if !matches!(
+                // 其余只放行导航 / 执行类键；字符键由 IME handler 自动回输入框
                 k.code,
                 Kc::Up
                     | Kc::Down
