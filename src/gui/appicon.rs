@@ -254,8 +254,54 @@ fn scoop_target(path: &Path) -> Option<PathBuf> {
         .find_map(|dir| find_named(&dir, &stem, "exe"))
 }
 
-fn is_exe(path: &Path) -> bool {
-    path.extension()
+/// `.url`（Internet 快捷方式）→ INI 里 `IconFile=` 指向的 `.ico`。
+///
+/// SHELL 对 `.url` 只会给「Internet 快捷方式」的白纸图标，不会读 INI 里的 IconFile，
+/// 所以得自己解（Steam 给每个游戏生成的 `.url` 都带一个游戏 ico）。
+/// **只认 `.ico`**：`%SystemRoot%\system32\url.dll,0` 这种要靠 `IconIndex` 选图，
+/// 我们拿不到 index，索性回落 `.url` 本身（与旧行为一致）。
+fn url_icon_file(path: &Path) -> Option<PathBuf> {
+    let text = String::from_utf8_lossy(&std::fs::read(path).ok()?).into_owned();
+    let value = text
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("IconFile="))?
+        .trim();
+    // 去掉可选的 `,<IconIndex>` 尾巴，再展开 `%SystemRoot%` 这类环境变量
+    let raw = value.split(',').next()?.trim();
+    let candidate = PathBuf::from(expand_env(raw));
+    let is_ico = candidate
+        .extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("ico"));
+    (is_ico && candidate.is_file()).then_some(candidate)
+}
+
+/// 展开 `%VAR%`（不认识的变量原样保留）。
+fn expand_env(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(start) = rest.find('%') {
+        out.push_str(&rest[..start]);
+        let after = &rest[start + 1..];
+        let Some(end) = after.find('%') else {
+            out.push_str(&rest[start..]);
+            return out;
+        };
+        let name = &after[..end];
+        match std::env::var(name) {
+            Ok(value) => out.push_str(&value),
+            Err(_) => {
+                out.push('%');
+                out.push_str(name);
+                out.push('%');
+            }
+        }
+        rest = &after[end + 1..];
+    }
+    out.push_str(rest);
+    out
+}
+
+fn is_exe(path: &Path) -> bool {    path.extension()
         .is_some_and(|ext| ext.eq_ignore_ascii_case("exe"))
 }
 
@@ -314,12 +360,14 @@ fn start_menu_exe(name: &str) -> Option<PathBuf> {
                 })
                 .map(|(_, path)| path)
         })?;
-    // `.url` 没有可解析的目标（它是 INI + IconFile），直接拿它本身去取图标
+    // `.url` 没有可解析的目标（它是 INI + IconFile），但**不能**直接拿 `.url` 去取图标：
+    // SHELL 对 `.url` 只给「Internet 快捷方式」白纸（`SIIGBF_ICONONLY` 不读 INI 里的
+    // IconFile），Steam 的六个游戏就是这么变白纸的（2026-11-20）。先解出 `IconFile=.ico`。
     if lnk
         .extension()
         .is_some_and(|ext| ext.eq_ignore_ascii_case("url"))
     {
-        return Some(lnk.to_path_buf());
+        return Some(url_icon_file(lnk).unwrap_or_else(|| lnk.to_path_buf()));
     }
     let target = crate::util::resolve_shortcut(lnk);
     target.is_file().then_some(target)
