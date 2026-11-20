@@ -714,7 +714,7 @@ impl Panel {
 
         // 列表模式：输入框失焦，键只作用于列表。空格才能当菜单键（输入模式下空格是分隔符）
         if self.list_mode {
-            let Some(k) = key.clone() else {
+            let Some(k) = key else {
                 return;
             };
             use crossterm::event::KeyCode as Kc;
@@ -971,7 +971,7 @@ impl Panel {
             .app
             .chip_end
             .filter(|end| {
-                self.app.cursor >= *end && self.app.anchor.map_or(true, |anchor| anchor >= *end)
+                self.app.cursor >= *end && self.app.anchor.is_none_or(|anchor| anchor >= *end)
             })
             .map(|end| {
                 let label: String = self.app.input.chars().skip(1).take(end - 1).collect();
@@ -2158,6 +2158,7 @@ impl Panel {
     }
 
     /// 浮层的统一绘制（右键菜单与补全候选共用，别各写一套）。
+    #[allow(clippy::too_many_arguments)]
     fn popup_list(
         &self,
         window: &Window,

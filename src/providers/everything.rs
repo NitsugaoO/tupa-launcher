@@ -44,14 +44,12 @@ impl Everything {
 
 /// 依次尝试：PATH → `%LOCALAPPDATA%\Everything` → Program Files
 pub(crate) fn find_es() -> Option<PathBuf> {
-    if let Ok(out) = Command::new("where.exe").arg("es.exe").output()
-        && out.status.success()
-        && let Some(line) = String::from_utf8_lossy(&out.stdout).lines().next()
-    {
-        let p = PathBuf::from(line.trim());
-        if p.is_file() {
-            return Some(p);
-        }
+    // 走 `util::which` 而不是裸 `Command::new("where.exe")`：后者没带
+    // `CREATE_NO_WINDOW`，在 GUI 子系统里会建一个**可见**控制台 —— 本机 `providers::build()`
+    // 会探两次（`Everything::new` + `Go::new`），表现就是「每次启动闪两下 cmd 窗口」
+    // （2026-11-19 定位）。
+    if let Some(found) = crate::util::which("es.exe") {
+        return Some(found);
     }
 
     let mut candidates: Vec<PathBuf> = Vec::new();
