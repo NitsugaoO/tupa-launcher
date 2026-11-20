@@ -87,6 +87,17 @@ cargo clippy --release --features gui    # 零警告；必须带 feature，否�
   开机自启 `Startup\tupa-gui.lnk`。守护进程 + TUI 已停用（旧的 `tupa-launcher-daemon.lnk`
   **已移出启动文件夹、删到回收站**，见下面那条坑），
   TUI 只能手动跑。改 GUI 之前先确认守护进程没在跑，否则它会占着热键让 GUI 注册失败。
+- **图标提取只能在 icon worker 线程里做**（2026-11-20）：`prefetch_icons` 在 `render`
+  里被调，但它只负责往 `Panel::icon_task_tx` 排队；`appicon::load` / `launch_icon`
+  一律跑在 `Panel::new` 起的那个常驻 worker 线程上。在渲染线程里直接取图会把首帧
+  和**每一次按键**顶住（首屏 ~11 条 × 几十 ms）。
+  - worker 进门先调 `appicon::ensure_thread_com()`（**thread_local + MTA**）。
+    **不能**用进程级 `Once`：先到先得，主线程（STA）先调过之后工作线程就直接跳过，
+    SHELL 接口在那个线程上没初始化 → `GetImage` 静默失败、图标全变 chip。
+    MTA 是因为短命工作线程没有消息泵，STA 的跨 apartment 调用会等不到派发。
+  - 图标没到时行上回落 chip / Nerd 字形（`row_icon` 已处理），回来后再重绘；
+    **提取失败也要回一个 `None` 并记进 `icons`**，否则每次渲染都重新排队。
+  - Steam 游戏的 CDN 兜底在结果回收处判断（本地没图且 `steamicon::appid` 有值）。
 - **GUI 进程里起子进程必须走 `detached_command` 或至少 `hide_window`**（2026-11-20 实测）：
   `tupa-gui.exe` 是 GUI 子系统（`windows_subsystem = "windows"` + `FreeConsole()`），
   **没有可继承的控制台** —— 裸 `Command::new("x").output()` 会给它新建一个

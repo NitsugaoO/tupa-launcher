@@ -1,6 +1,6 @@
 # tupa-launcher 状态
 
-updated: 2026-11-20 · code: `2c32644`（启动闪窗修好 · `@set` / `:blog` 的同类裸调用未修 · 列表模式 + 鼠标切焦点 + 绿条跟随焦点 · ↑↓ 终端化 + 补全默认关 · chip 只留渲染（光标进块时降级） · @hist 隐藏 · 右键菜单 · 删 @pi / @run · @go → @z · clip 同步出 · clean 迁到 HTML）
+updated: 2026-11-20 · code: `68522d5`（图标提取移到 worker 线程 · 启动闪窗修好 · `@set` / `:blog` 的同类裸调用未修 · 列表模式 + 鼠标切焦点 + 绿条跟随焦点 · ↑↓ 终端化 + 补全默认关 · chip 只留渲染（光标进块时降级） · @hist 隐藏 · 右键菜单 · 删 @pi / @run · @go → @z · clip 同步出 · clean 迁到 HTML）
 
 > 判断本文件是否过期：比较 `code` 与 `git log -1 --format=%h -- src Cargo.toml`。
 > 只改文档的提交不算过期。
@@ -12,6 +12,23 @@ updated: 2026-11-20 · code: `2c32644`（启动闪窗修好 · `@set` / `:blog` 
 > **每次会话收尾只需要改这一个文件的两节**（阶段 / 未完成），并更新首行。
 
 ## 阶段
+
+- **应用图标提取改成后台线程（2026-11-20）**：`prefetch_icons` 原来在 `render` 里
+  **同步**跑 `IShellItemImageFactory::GetImage` + GDI（首屏 ~11 条各几十 ms），一输入
+  列表从 `home` 切到 `all` 又来一批没缓存的行 → 渲染线程被顶住、按键排队（用户体感的
+  「刚打开时输入卡」）。现在：
+  - `Panel::new` 起一个**常驻 icon worker 线程**，`prefetch_icons` 只往队列里塞
+    `(command, 自定义图标路径, title)`，每行一次（`icon_pending`）。
+  - 行上先用 chip / Nerd 字形占位，worker 送回图标后 `cx.notify()` 重绘（`icons` 只在
+    drain 里写）。**不要在渲染线程里调 `appicon::load` / `launch_icon`**。
+  - Steam 的 CDN 兜底从「提取时判断」挪到 worker 结果回收处：本地没图且是 Steam 游戏
+    才发请求（复用原有 steam 通道）。
+  - `appicon::ensure_com`（进程级 `Once` + STA）→ `ensure_thread_com`（thread_local +
+    MTA）。**进程级 `Once` 在先到先得：工作线程会跳过初始化，SHELL 调用静默失败**；
+    MTA 是因为短命工作线程没有消息泵。
+  实测：启动/展开后图标照常出（VSCode / 7-Zip 位图、Pi 自定义图标、文件/目录字形），
+  158 测试全绿、clippy 零警告。用户主观“还卡不卡”待下次确认；若仍卡，下一个嫌疑是
+  字体首次 layout（`JetBrains Maple Mono` 18MB），需加计时探针才能继续。
 
 - **启动闪两下 cmd 已修（2026-11-20）**：凶手不是条目、也不是重启方式 —— 是
   `everything::find_es()` 裸起 `where.exe`（没带 `CREATE_NO_WINDOW`）。`providers::build()`
