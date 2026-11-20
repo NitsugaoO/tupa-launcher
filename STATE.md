@@ -1,6 +1,6 @@
 # tupa-launcher 状态
 
-updated: 2026-11-20 · code: `f09f85a`（wt 图标 73/74 · 面板可跨虚拟桌面显示 · 图标提取移到 worker 线程 · 启动闪窗修好 · `@set` / `:blog` 的同类裸调用未修 · 列表模式 + 鼠标切焦点 + 绿条跟随焦点 · ↑↓ 终端化 + 补全默认关 · chip 只留渲染（光标进块时降级） · @hist 隐藏 · 右键菜单 · 删 @pi / @run · @go → @z）
+updated: 2026-11-20 · code: `f84bd22`（Steam `.url` 解 IconFile · wt 图标 73/74 · 面板可跨虚拟桌面显示 · 图标提取移到 worker 线程 · 启动闪窗修好 · `@set` / `:blog` 的同类裸调用未修 · 列表模式 + 鼠标切焦点 + 绿条跟随焦点 · ↑↓ 终端化 + 补全默认关 · chip 只留渲染（光标进块时降级） · @hist 隐藏 · 右键菜单 · 删 @pi / @run · @go → @z）
 
 > 判断本文件是否过期：比较 `code` 与 `git log -1 --format=%h -- src Cargo.toml`。
 > 只改文档的提交不算过期。
@@ -12,6 +12,18 @@ updated: 2026-11-20 · code: `f09f85a`（wt 图标 73/74 · 面板可跨虚拟�
 > **每次会话收尾只需要改这一个文件的两节**（阶段 / 未完成），并更新首行。
 
 ## 阶段
+
+- **Steam 游戏的 `.url` 不再白纸（2026-11-20）**：Big Walk / Stardew / Celeste / Ori /
+  Overcooked! 2 全部白纸。`--icons` 报「✓ .url」，但 SHELL 对 `.url`（Internet 快捷方式）
+  只给通用白纸 —— `SIIGBF_ICONONLY` **不读 INI 里的 `IconFile=`**；而 `load()` 返回
+  `Some(白纸)` 也算成功，所以 `launch_icon` 里更后面的 `steamicon::load`（本地封面）
+  永远轮不到。
+  修法：新增 `url_icon_file` —— 读 `.url` 的 INI，取 `IconFile=`、去掉 `,<IconIndex>`、
+  展开 `%VAR%`，**只认 `.ico`**（`%SystemRoot%\system32\url.dll,0` 这种要靠 IconIndex
+  选图，拿不到就回落 `.url` 本身）。Steam 给每个游戏生成的 ico 就是真图标（~119KB、
+  多尺寸），比 CDN 封面更准。
+  **教训**：`--icons` 的 ✓ 只代表 `appicon::load` 返回了 `Some`，**SHELL 的白纸也算成功**；
+  报 ✓ 却没图时先怀疑「取到了通用图标」（典型：`.url` / `png` / `jpg`），要看截图。
 
 - **wt 图标补回来了（2026-11-20）**：`command = "wt"` 一直 `✗ 解析不到 exe`。
   `%LOCALAPPDATA%\Microsoft\WindowsApps\wt.exe` 是 **App Execution Alias**

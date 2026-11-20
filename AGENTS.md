@@ -263,6 +263,13 @@ cargo clippy --release --features gui    # 零警告；必须带 feature，否�
        只有 MSYS 的 `ls` 会画成 `->`）—— 别靠 read_link 推包名，用
        `alias_family_item`（在 `WindowsApps` 下枚举一层子目录找同名 exe，目录名就是
        PackageFamilyName）。同理，`--icons` 报「解析不到 exe」时先看是不是这一类。
+     - **`.url` 必须解 `IconFile=`，不能交给 SHELL**（2026-11-20）：SHELL 对 `.url`
+       （Internet 快捷方式）只给「Internet 快捷方式」的白纸，`SIIGBF_ICONONLY`
+       **不读 INI 里的 IconFile**。Steam 给每个游戏生成的 `.url` 都带 
+       `IconFile=…\steam\games\<hash>.ico`，用 `url_icon_file` 解出来再取图。
+     - **`--icons` 的 ✓ 不代表“有图”**：它只表示 `appicon::load` 返回了 `Some`，
+       SHELL 的**白纸也返回 Some**。报 ✓ 但界面没图时，先怀疑「取到了通用图标」
+       （`.url` / `png` / `jpg` 这类非 exe 文件），必须看截图确认。
      - **Scoop shim 的图标是假的**：`<scoop>\shims\x.exe` 是通用代理程序，要回
        `<scoop>\apps\x\current\`（或版本目录）找真 exe，否则 `windhawk` 这类没图标
      - **Steam 游戏只有 `.url` 没有 `.lnk`**：开始菜单索引要收 `.url`
