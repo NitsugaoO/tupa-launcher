@@ -117,12 +117,41 @@ pub fn exe_for(command: &str, title: &str) -> Option<PathBuf> {
             if let Some(exe) = sibling_exe(&path) {
                 return Some(exe);
             }
-        } else if let Some(item) = msix_shell_item(&path) {
+        } else if let Some(item) =
+            msix_shell_item(&path).or_else(|| alias_family_item(&path))
+        {
             return Some(PathBuf::from(item));
         }
     }
 
     start_menu_exe(title).or_else(|| start_menu_exe(command))
+}
+
+/// App Execution Alias（`WindowsApps\wt.exe`）→ 同名 exe 所在包目录的 AUMID。
+///
+/// `WindowsApps\wt.exe` 是 **AppExecLink reparse point**，不是 symlink：`std::fs::read_link`
+/// 直接失败（PowerShell 的 `LinkType` 也是空的，只有 MSYS 的 `ls` 会把它显示成 `->`），
+/// 所以 [`resolve_alias`] 拿不到包目录，图标就断在这一步（2026-11-20 的 wt）。
+/// 不过 alias 的**目录形态**也同时存在（`WindowsApps\<PackageFamilyName>\wt.exe`），
+/// 在那里能拿到包名 —— 枚举一层子目录找同名 exe 即可，比解 reparse 二进制可靠。
+fn alias_family_item(path: &Path) -> Option<String> {
+    let dir = path.parent()?;
+    // 只处理 `…\WindowsApps\<name>.exe` 这一层；包目录里的 exe 已由 `msix_shell_item` 处理
+    if !dir
+        .file_name()?
+        .to_string_lossy()
+        .eq_ignore_ascii_case("WindowsApps")
+    {
+        return None;
+    }
+    let file = path.file_name()?;
+    for entry in std::fs::read_dir(dir).ok()?.flatten() {
+        let candidate = entry.path();
+        if candidate.is_dir() && candidate.join(file).is_file() {
+            return msix_shell_item(&candidate.join(file));
+        }
+    }
+    None
 }
 
 /// symlink 解析（`WindowsApps\wt.exe` → 包里的真 exe）。失败就当作普通文件。
