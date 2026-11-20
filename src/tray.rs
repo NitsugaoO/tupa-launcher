@@ -21,6 +21,7 @@ const TRAY_ID: u32 = 1;
 const HOTKEY_ID: i32 = 1;
 const MENU_SHOW: usize = 1;
 const MENU_QUIT: usize = 2;
+const MENU_RESTART: usize = 3;
 
 /// 启动托盘（后台线程，立即返回）。热键注册失败只写日志，不影响面板本身。
 ///
@@ -172,6 +173,7 @@ unsafe extern "system" fn wndproc(
         WM_COMMAND => {
             match wparam & 0xFFFF {
                 MENU_SHOW => toggle_panel(),
+                MENU_RESTART => restart(),
                 MENU_QUIT => quit(),
                 _ => {}
             }
@@ -219,10 +221,12 @@ fn show_menu(hwnd: windows_sys::Win32::Foundation::HWND) {
         return;
     }
     let show = wide(i18n::t("显示面板", "Show panel"));
+    let restart_item = wide(i18n::t("重启 Tupa", "Restart Tupa"));
     let quit_item = wide(i18n::t("退出", "Quit"));
     unsafe {
         AppendMenuW(menu, MF_STRING, MENU_SHOW, show.as_ptr());
         AppendMenuW(menu, MF_SEPARATOR, 0, std::ptr::null());
+        AppendMenuW(menu, MF_STRING, MENU_RESTART, restart_item.as_ptr());
         AppendMenuW(menu, MF_STRING, MENU_QUIT, quit_item.as_ptr());
     }
 
@@ -247,11 +251,35 @@ fn show_menu(hwnd: windows_sys::Win32::Foundation::HWND) {
         if chosen != 0 {
             match chosen as usize {
                 MENU_SHOW => toggle_panel(),
+                MENU_RESTART => restart(),
                 MENU_QUIT => quit(),
                 _ => {}
             }
         }
     }
+}
+
+/// 重启面板进程：配置 / 主题 / 图标缓存全部重新加载。
+///
+/// 必须**先退出再拉起** —— `gui::run` 开头有单实例检测（找到已有面板就
+/// `show_panel` 然后返回），同时起的新进程只会把旧窗口叫到前面就退掉。
+/// 所以交给一个 detached 的 PowerShell 延迟 1.2s 再 `Start-Process` 自己。
+fn restart() {
+    let Ok(exe) = std::env::current_exe() else {
+        log("重启失败：拿不到自身路径");
+        return;
+    };
+    remove_icon();
+    log(&format!("托盘菜单重启：{}", exe.display()));
+
+    // 单引号是 PowerShell 的字符串定界符，路径里的单引号要翻倍转义
+    let quoted = exe.display().to_string().replace('\'', "''");
+    let script = format!("Start-Sleep -Milliseconds 1200; Start-Process -FilePath '{quoted}'");
+    let mut cmd = util::detached_command("powershell");
+    cmd.args(["-NoProfile", "-WindowStyle", "Hidden", "-Command", &script]);
+    let _ = cmd.spawn();
+
+    std::process::exit(0);
 }
 
 fn quit() {

@@ -201,7 +201,7 @@ Clash 订阅更新就是后者，下载 + 重启应用固定开销就 ~3s，5 �
 
 ```bash
 cargo build --release --features gui     # 产出 tupa-gui.exe + tupa-launcher.exe
-./target/release/tupa-gui.exe            # 托盘图标 + 面板；Alt+0 显隐，右键菜单退出
+./target/release/tupa-gui.exe            # 托盘图标 + 面板；Alt+0 显隐，右键菜单（重启 / 退出）
 ```
 
 默认构建不含它（`i18n::gui_disabled`），TUI 照常。剩下的是键位补全、虚拟列表、

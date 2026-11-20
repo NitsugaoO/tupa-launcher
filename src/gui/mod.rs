@@ -16,7 +16,7 @@
 
 pub mod icon;
 mod acrylic;
-mod appicon;
+pub mod appicon;
 mod favicon;
 mod frame;
 mod glyphs;
@@ -27,7 +27,7 @@ mod style;
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use anyhow::Result;
@@ -48,6 +48,10 @@ use style::Palette;
 
 /// 窗口标题：`find_panel` / `is_panel_title` 都认它，别随便改。
 const WINDOW_TITLE: &str = "tupa-launcher";
+
+/// 图标提取线程数。3 条是实测取衡：首批 8–13 行的总耗时从约 1s 降到 ~0.3s，
+/// 再多也只是抢 SHELL 内部锁（`GetImage` 本身不是 CPU 密集）。
+const ICON_WORKERS: usize = 3;
 
 pub fn run(cfg: Config, theme: Theme) -> Result<()> {
     // 已经开着就叫到前面，别开第二个
@@ -335,17 +339,32 @@ impl Panel {
         let (icon_task_tx, icon_task_rx) =
             std::sync::mpsc::channel::<(String, Option<PathBuf>, String)>();
         let (icon_tx, icon_rx) = std::sync::mpsc::channel();
-        std::thread::spawn(move || {
-            appicon::ensure_thread_com();
-            while let Ok((command, custom, title)) = icon_task_rx.recv() {
-                let icon = custom
-                    .and_then(|path| appicon::load_image(&path))
-                    .or_else(|| launch_icon(&command, &title));
-                if icon_tx.send((command, icon)).is_err() {
-                    break; // 面板没了
+        // 三条线程共享一个任务队列：单条 `GetImage` 实测 6ms–450ms（wt / MSIX / `.lnk`
+        // 首帧最慢），串行时首批十来行要 1s 以上，那段时间行上只有 chip。
+        // 锁**只包 `recv`**：取到任务就松手，别的线程才能拿下一个 —— 包住处理就退化成串行。
+        let icon_task_rx = Arc::new(Mutex::new(icon_task_rx));
+        for _ in 0..ICON_WORKERS {
+            let rx = icon_task_rx.clone();
+            let tx = icon_tx.clone();
+            std::thread::spawn(move || {
+                appicon::ensure_thread_com();
+                loop {
+                    let task = {
+                        let queue = rx.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+                        queue.recv()
+                    };
+                    let Ok((command, custom, title)) = task else {
+                        break; // 发送端没了（面板关闭）
+                    };
+                    let icon = custom
+                        .and_then(|path| appicon::load_image(&path))
+                        .or_else(|| launch_icon(&command, &title));
+                    if tx.send((command, icon)).is_err() {
+                        break; // 面板没了
+                    }
                 }
-            }
-        });
+            });
+        }
         // 开屏（收藏 + 最近命令）要一次查询，provider 在工作线程里跑
         app.refresh();
 
@@ -460,7 +479,15 @@ impl Panel {
                     let mut got_icon = false;
                     while let Ok((command, icon)) = panel.icon_rx.try_recv() {
                         panel.icon_pending.remove(&command);
-                        if icon.is_none()
+                        // 先落缓存（**失败也存 `None`**）：否则下一帧 `prefetch_icons` 会重新
+                        // 排队。Steam 项（本地无 exe）每次都会走 CDN 兜底，失败后再排队就是
+                        // 无限 spawn 线程 —— 2026-11-20 日志里同一条 `How to Fish` 反复 BEGIN/NONE。
+                        let failed = icon.is_none();
+                        panel.icons.insert(command.clone(), icon);
+                        got_icon = true;
+                        // 本地没图且是 Steam 游戏 → 交给已有的 CDN 通道再试一次
+                        // （回来会覆盖这里的 `None`；失败就永久留 `None`）
+                        if failed
                             && steamicon::appid(&command).is_some()
                             && !panel.steam_pending.contains(&command)
                         {
@@ -470,10 +497,7 @@ impl Panel {
                                 let icon = steamicon::fetch(&command);
                                 let _ = tx.send((command, icon));
                             });
-                            continue;
                         }
-                        panel.icons.insert(command, icon);
-                        got_icon = true;
                     }
                     if got_icon {
                         cx.notify();

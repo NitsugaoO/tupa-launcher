@@ -47,7 +47,8 @@ cargo build --release --features gui     # 默认 cargo build 不产出它
 ./target/release/tupa-gui.exe
 ```
 
-热键 `Alt+`` `（`config.toml` 的 `[gui] hotkey` 可改），托盘图标左键显隐、右键菜单。
+热键 `Alt+`` `（`config.toml` 的 `[gui] hotkey` 可改），托盘图标左键显隐、右键菜单
+（显示面板 / 重启 Tupa / 退出）。
 
 按一下唤起、再按一下隐藏；`Esc` 在输入框空的时候是隐藏（进程留着，下次唤起瞬时），
 有内容时先清空输入；

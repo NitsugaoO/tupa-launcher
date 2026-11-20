@@ -99,15 +99,23 @@ cargo clippy --release --features gui    # 零警告；必须带 feature，否�
     （看是不是被 WM 收进了别的 workspace）。
 - **图标提取只能在 icon worker 线程里做**（2026-11-20）：`prefetch_icons` 在 `render`
   里被调，但它只负责往 `Panel::icon_task_tx` 排队；`appicon::load` / `launch_icon`
-  一律跑在 `Panel::new` 起的那个常驻 worker 线程上。在渲染线程里直接取图会把首帧
+  一律跑在 `Panel::new` 起的那组 worker 线程上。在渲染线程里直接取图会把首帧
   和**每一次按键**顶住（首屏 ~11 条 × 几十 ms）。
-  - worker 进门先调 `appicon::ensure_thread_com()`（**thread_local + MTA**）。
+  - **3 条线程共享一个 `Mutex<Receiver>` 队列**（2026-11-20 晚，`ICON_WORKERS`）：单条
+    `GetImage` 实测 6–450ms（wt / MSIX / `.lnk` 首帧最慢），串行时首批 13 行要 **2.0s**，
+    那段时间行上只有 chip（用户体感「图标不加载 / 卡住」）。3 条并发后同一批 **439ms**。
+    **锁只能包 `recv`**：包住「取任务 + 提取」就退化成串行。
+    量化方式：`cargo run --release --features gui --example icon_thread_probe [-- --parallel]`。
+  - 每条 worker 进门自己调 `appicon::ensure_thread_com()`（**thread_local + MTA**）。
     **不能**用进程级 `Once`：先到先得，主线程（STA）先调过之后工作线程就直接跳过，
     SHELL 接口在那个线程上没初始化 → `GetImage` 静默失败、图标全变 chip。
     MTA 是因为短命工作线程没有消息泵，STA 的跨 apartment 调用会等不到派发。
   - 图标没到时行上回落 chip / Nerd 字形（`row_icon` 已处理），回来后再重绘；
     **提取失败也要回一个 `None` 并记进 `icons`**，否则每次渲染都重新排队。
-  - Steam 游戏的 CDN 兜底在结果回收处判断（本地没图且 `steamicon::appid` 有值）。
+  - Steam 游戏的 CDN 兜底在结果回收处判断（本地没图且 `steamicon::appid` 有值）：
+    **先落 `icons[command] = None` 再去排队 CDN**，回来成功再覆盖。否则失败后既不在
+    `icons` 也不在 `icon_pending` → 每帧重新排队 + 每帧 spawn 一次下载线程
+    （2026-11-20 日志里同一条 `How to Fish` 反复 BEGIN/NONE）。
 - **GUI 进程里起子进程必须走 `detached_command` 或至少 `hide_window`**（2026-11-20 实测）：
   `tupa-gui.exe` 是 GUI 子系统（`windows_subsystem = "windows"` + `FreeConsole()`），
   **没有可继承的控制台** —— 裸 `Command::new("x").output()` 会给它新建一个
@@ -351,6 +359,14 @@ cargo clippy --release --features gui    # 零警告；必须带 feature，否�
   `ShowWindow` 操作 HWND（`util::find_panel`），不碰 GPUI 状态。托盘菜单用
   `TPM_RETURNCMD` 直接拿返回值，`quit()` 先 `NIM_DELETE` 再 `process::exit`。
   `WNDCLASSW` / `RegisterClassW` 需要 windows-sys 的 `Win32_Graphics_Gdi` feature。
+  - 托盘菜单：显示面板 / 分隔线 / **重启 Tupa** / 退出（2026-11-20）。`restart()` 走的是
+    「**先退出、再延迟拉起**」—— 直接 spawn 自己会被 `gui::run` 开头的单实例检测接住
+    （找到旧面板就 `show_panel` + 返回，等于白重启）。所以交一个 detached PowerShell：
+    `Start-Sleep -Milliseconds 1200; Start-Process -FilePath '<exe>'`，然后自己 exit。
+    验证：`PostMessage(hwnd, WM_COMMAND, 3)` 到类名 `TupaGuiTray` 的 message-only 窗口
+    （它是 `HWND_MESSAGE` 子窗口，`FindWindowW` 找不到 —— 要用
+    `FindWindowExW(HWND_MESSAGE=-3, 前一个, NULL, NULL)` 逐个遍历，再拼 PID）；
+    日志里应出现「托盘菜单重启：…」并且 PID 变了。
 - **`config.example.toml` 保持精简示例（2026-11-03 决定）**：只教语法，不同步本机 55 项应用。
 - **不要用「方向键 + `Space`」操作 Windows 系统 UI**（快速设置 / 通知中心）：`Space` 切的
   是**当前焦点项**，而系统 UI 的按钮布局会因用户增删固定项而变——必然存在「焦点落错行
