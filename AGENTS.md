@@ -87,6 +87,15 @@ cargo clippy --release --features gui    # 零警告；必须带 feature，否�
   开机自启 `Startup\tupa-gui.lnk`。守护进程 + TUI 已停用（旧的 `tupa-launcher-daemon.lnk`
   **已移出启动文件夹、删到回收站**，见下面那条坑），
   TUI 只能手动跑。改 GUI 之前先确认守护进程没在跑，否则它会占着热键让 GUI 注册失败。
+- **GUI 进程里起子进程必须走 `detached_command` 或至少 `hide_window`**（2026-11-20 实测）：
+  `tupa-gui.exe` 是 GUI 子系统（`windows_subsystem = "windows"` + `FreeConsole()`），
+  **没有可继承的控制台** —— 裸 `Command::new("x").output()` 会给它新建一个
+  **可见** conhost 窗口再销毁，用户看到的就是「闪一下 cmd」。`.output()` 只重定向管道，
+  **不抑制窗口**。已修 `everything::find_es`（没带 hide 的 `where.exe` 被 build() 探两次
+  → 闪两下）；**仍待修**：`actions.rs` 两处（`@set` 脚本）、`serve.rs` 三处
+  （`netstat` / `tasklist` / `taskkill`）。排查手段：12ms 采样 `EnumWindows` 里
+  `ConsoleWindowClass` / `PseudoConsoleWindow` / `CASCADIA_HOSTING_WINDOW_CLASS` 的
+  `IsWindowVisible` 窗口，改前/改后对比个数。
 - **停用启动项要把它移出启动文件夹，别改扩展名**（2026-11-18 坑）：Explorer 枚举
   `Startup\` 时对目录里**每个文件**都 ShellExecute，`.lnk.disabled` 不是快捷方式 → 走文件关联
   （本机 `.disabled` 只登记过 NanaZip → 每次登录弹「无法作为压缩包打开」）。

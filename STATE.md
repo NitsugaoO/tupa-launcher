@@ -1,6 +1,6 @@
 # tupa-launcher 状态
 
-updated: 2026-11-19 · code: `d32f200`（列表模式 + 鼠标切焦点 + 绿条跟随焦点 · ↑↓ 终端化 + 补全默认关 · chip 只留渲染（光标进块时降级） · @hist 隐藏 · 右键菜单 · 删 @pi / @run · @go → @z · clip 同步出 · clean 迁到 HTML）
+updated: 2026-11-20 · code: `2c32644`（启动闪窗修好 · `@set` / `:blog` 的同类裸调用未修 · 列表模式 + 鼠标切焦点 + 绿条跟随焦点 · ↑↓ 终端化 + 补全默认关 · chip 只留渲染（光标进块时降级） · @hist 隐藏 · 右键菜单 · 删 @pi / @run · @go → @z · clip 同步出 · clean 迁到 HTML）
 
 > 判断本文件是否过期：比较 `code` 与 `git log -1 --format=%h -- src Cargo.toml`。
 > 只改文档的提交不算过期。
@@ -12,6 +12,21 @@ updated: 2026-11-19 · code: `d32f200`（列表模式 + 鼠标切焦点 + 绿条
 > **每次会话收尾只需要改这一个文件的两节**（阶段 / 未完成），并更新首行。
 
 ## 阶段
+
+- **启动闪两下 cmd 已修（2026-11-20）**：凶手不是条目、也不是重启方式 —— 是
+  `everything::find_es()` 裸起 `where.exe`（没带 `CREATE_NO_WINDOW`）。`providers::build()`
+  会调它**两次**（`Everything::new` + `Go::new`），而 `tupa-gui.exe` 是 GUI 子系统、
+  没有可继承的控制台 → 每次 `where.exe` 新建一个**可见** conhost 窗口 → 「闪两下」。
+  现在改走 `util::which("es.exe")`（内部 already `hide_window`），探不到仍走
+  `%LOCALAPPDATA%` / Program Files 兜底。
+  实测 A/B（同一启动方式，12ms 采样可见控制台窗口）：旧代码 **4 个**
+  （`WindowsTerminal|Terminal`、`PseudoConsoleWindow` 成对）→ 新代码 **0 个**；
+  conhost 仍在但 `IsWindowVisible` 为假；`@ev` 查询照旧正常。
+  **同类未修**：`actions.rs:320/327`（`@set` 的 powershell/cmd 脚本）、
+  `serve.rs:122/179/200`（`netstat` / `tasklist` / `taskkill`）仍是裸 `Command::new`，
+  动 `@set` / `:blog` 起停时同样会闪，修法一样（补 `hide_window`）。
+  顺带清了 `gui/mod.rs` 三处既有 clippy 警告（`901726c` 带进来的，与本次无关），
+  `cargo clippy --release --features gui` 回到零警告。
 
 - **开屏回车只展开不执行（2026-11-19 晚）**：紧凑态（只有输入行）按 `Enter` → 展开列表并进
   列表模式，**不执行第一项**（空输入时用户还没选，直接回车打开收藏/历史太容易误触）。
@@ -518,11 +533,11 @@ updated: 2026-11-19 · code: `d32f200`（列表模式 + 鼠标切焦点 + 绿条
 
 ## 未完成
 
-- **打开应用时闪两下 cmd 窗口（未定位）**：`exec.rs::spawn_executable` 三路（`.exe` 直接
-  CreateProcess / `.cmd` 走 `cmd.exe /C` / `.lnk` 走 `open::that_detached` → ShellExecuteExW），
-  都带了不建控制台的标志。怀疑落在**条目本身**（scoop shim / 某 `.cmd` 再起 cmd）。
-  定位办法：在 `launch` 里加 `tray::log` 打出「走了哪条路 + 路径」，复现一次看
-  `%TEMP%\tupa-gui.log`。兜底方案是 `.exe` / `.cmd` 也统一改 `ShellExecuteExW`。
+- **`@set` / `:blog` 起停仍会闪 cmd 窗口**：同一 bug 类。`actions.rs:320/327`（powershell /
+  cmd 跑脚本）与 `serve.rs:122/179/200`（`netstat` / `tasklist` / `taskkill`）都是裸
+  `Command::new`，没 `hide_window`。修法：各补 `hide_window(&mut cmd)`（照 `util.rs` 那份）。
+  确认有效：打开 `@set`、`:blog` 起停各一次，用 EnumWindows 采样可见
+  `ConsoleWindowClass` / `CASCADIA_HOSTING_WINDOW_CLASS` 窗口应为 0。
 - **窗口宽度记忆**：面板宽度固定按主屏 62%（高度随内容），拖边改过的宽度还没写回
   `gui.json`（`config.toml` 手写带注释，不能程序回写）。
 - **TUI 侧没跟进的新交互**：紧凑形态、双击执行、chip 配色只在 GUI 有（输入框的
