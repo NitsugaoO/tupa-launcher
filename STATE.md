@@ -1,6 +1,6 @@
 # tupa-launcher 状态
 
-updated: 2026-11-20 · code: `f84bd22`（Steam `.url` 解 IconFile · wt 图标 73/74 · 面板可跨虚拟桌面显示 · 图标提取移到 worker 线程 · 启动闪窗修好 · `@set` / `:blog` 的同类裸调用未修 · 列表模式 + 鼠标切焦点 + 绿条跟随焦点 · ↑↓ 终端化 + 补全默认关 · chip 只留渲染（光标进块时降级） · @hist 隐藏 · 右键菜单 · 删 @pi / @run · @go → @z）
+updated: 2026-11-20 · code: `529874d`（图标提取改 3 线程池 · Steam 失败不再重排 · 托盘加「重启 Tupa」 · Steam `.url` 解 IconFile · wt 图标 73/74 · 面板可跨虚拟桌面显示 · 图标提取移到 worker 线程 · 启动闪窗修好 · `@set` / `:blog` 的同类裸调用未修 · 列表模式 + 鼠标切焦点 + 绿条跟随焦点 · ↑↓ 终端化 + 补全默认关 · chip 只留渲染（光标进块时降级） · @hist 隐藏 · 右键菜单 · 删 @pi / @run · @go → @z）
 
 > 判断本文件是否过期：比较 `code` 与 `git log -1 --format=%h -- src Cargo.toml`。
 > 只改文档的提交不算过期。
@@ -12,6 +12,27 @@ updated: 2026-11-20 · code: `f84bd22`（Steam `.url` 解 IconFile · wt 图标 
 > **每次会话收尾只需要改这一个文件的两节**（阶段 / 未完成），并更新首行。
 
 ## 阶段
+
+- **图标「卡住 / 不加载」= 单 worker 串行，不是卡死（2026-11-20 晚）**：用户截图 `@app`
+  第 13–21 行只有 chip、前后几行有图。实测**复现不出卡死**：`--icons` 74/75，全量预取
+  75 条 72 ok + 3 Steam 封面，压力翻滚 34/34 全部有结果、无悬空 `BEGIN`。真因是**吞吐**：
+  单 worker 串行，首批 13 行实测 **2021ms**（wt 384ms / code 280ms / explorer 220ms…），
+  那 2 秒里新进可视区的行只有 chip —— 用户体感即「卡在某个图标上」。
+  改为 **3 条线程共享 `Mutex<Receiver>`**（锁只包 `recv`），同一批 **439ms**、全量
+  4215→1017ms。诊断工具 `cargo run --release --features gui --example icon_thread_probe
+  [-- --parallel]`（`pub mod appicon` 就是给它的）。
+  顺带修了 **Steam 项失败后会无限重排**：原来「本地没图 + 有 appid」走 CDN 通道时
+  `continue`，既不写 `icons` 也不留在 `icon_pending` → 每帧重新排队、每帧 spawn 一次下载
+  线程（日志里 `How to Fish` 反复 BEGIN/NONE）。现在先落 `None` 再转 CDN，成功时覆盖。
+  观察结论：**以后报「某行没图标」先分清三件事** —— `--icons` 能否解析（解析）→
+  `icon_thread_probe` 能不能拿到（提取）→ 是不是只是还没轮到（吞吐）。
+
+- **托盘菜单加「重启 Tupa」（2026-11-20 晚）**：`src/tray.rs::restart()` —— 先
+  `NIM_DELETE` + `process::exit`，再由 detached PowerShell 延迟 1.2s `Start-Process` 自身。
+  **不能直接 spawn**：`gui::run` 开头的单实例检测会找到旧面板，`show_panel` 后新进程退出。
+  验证走 `PostMessage(hwnd, WM_COMMAND, 3)` 打到 `TupaGuiTray` 这个 message-only 窗口
+  （`FindWindowW` 找不到，要 `FindWindowExW(HWND_MESSAGE=-3, …)` 遍历 + PID 过滤）；
+  实测日志出现「托盘菜单重启：…」且 PID 变了。
 
 - **Steam 游戏的 `.url` 不再白纸（2026-11-20）**：Big Walk / Stardew / Celeste / Ori /
   Overcooked! 2 全部白纸。`--icons` 报「✓ .url」，但 SHELL 对 `.url`（Internet 快捷方式）
