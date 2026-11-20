@@ -256,7 +256,14 @@ struct Panel {
     max_height: f32,
     /// 应用图标缓存：配置里的 `command`（含 `.lnk`）→ 图标。
     /// **提取失败也存 `None`**，否则裸命令（`wt` / `ms-settings:`）每次刷新都重跑 COM。
+    /// 只在 worker 线程把结果送回来时写（见 `Panel::new` 里的 icon worker）。
     icons: HashMap<String, Option<Arc<RenderImage>>>,
+    /// 图标提取任务队列（渲染线程 → 常驻 worker 线程）
+    icon_task_tx: std::sync::mpsc::Sender<(String, Option<PathBuf>, String)>,
+    /// worker 提取完的图标（失败也回，记进 `icons` 防重试）
+    icon_rx: std::sync::mpsc::Receiver<(String, Option<Arc<RenderImage>>)>,
+    /// 已排队的 `command`：同一行只排一次
+    icon_pending: HashSet<String>,
     /// `[gui] web_icons = "favicon"`：网页行抓站点图标
     web_favicon: bool,
     /// 域名 → favicon 位图（拉到的才会进来）
@@ -321,6 +328,24 @@ impl Panel {
         // favicon 在后台线程抓（WinHTTP 是阻塞的），结果从 channel 回主线程
         let (favicon_tx, favicon_rx) = std::sync::mpsc::channel();
         let (steam_tx, steam_rx) = std::sync::mpsc::channel();
+        // 应用图标提取单独一个常驻 worker 线程：SHELL `GetImage` + GDI 是阻塞调用，
+        // 在渲染线程上会把首帧和**每一次按键**顶住（2026-11-20 的「刚打开时输入卡」）。
+        // 行上先用 chip / Nerd 字形当占位，图标回来 notify 一次重绘。
+        // 注意 `ensure_thread_com` 必须在这个线程里调 —— 进程级 `Once` 会被先到者占住。
+        let (icon_task_tx, icon_task_rx) =
+            std::sync::mpsc::channel::<(String, Option<PathBuf>, String)>();
+        let (icon_tx, icon_rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            appicon::ensure_thread_com();
+            while let Ok((command, custom, title)) = icon_task_rx.recv() {
+                let icon = custom
+                    .and_then(|path| appicon::load_image(&path))
+                    .or_else(|| launch_icon(&command, &title));
+                if icon_tx.send((command, icon)).is_err() {
+                    break; // 面板没了
+                }
+            }
+        });
         // 开屏（收藏 + 最近命令）要一次查询，provider 在工作线程里跑
         app.refresh();
 
@@ -430,6 +455,29 @@ impl Panel {
 
                     let was_pending = panel.app.pending;
                     panel.app.drain_events();
+                    // 应用图标：worker 线程提取完送回来（失败也记下来，别每帧重试）。
+                    // 本地没图且是 Steam 游戏 → 交给已有的 CDN 通道再试一次。
+                    let mut got_icon = false;
+                    while let Ok((command, icon)) = panel.icon_rx.try_recv() {
+                        panel.icon_pending.remove(&command);
+                        if icon.is_none()
+                            && steamicon::appid(&command).is_some()
+                            && !panel.steam_pending.contains(&command)
+                        {
+                            panel.steam_pending.insert(command.clone());
+                            let tx = panel.steam_tx.clone();
+                            std::thread::spawn(move || {
+                                let icon = steamicon::fetch(&command);
+                                let _ = tx.send((command, icon));
+                            });
+                            continue;
+                        }
+                        panel.icons.insert(command, icon);
+                        got_icon = true;
+                    }
+                    if got_icon {
+                        cx.notify();
+                    }
                     // favicon：后台线程抓完就从 channel 收回来（拉不回来的不放进来，
                     // 行上继续显示地球）
                     let mut got_favicon = false;
@@ -517,6 +565,9 @@ impl Panel {
             opacity,
             max_height,
             icons: HashMap::new(),
+            icon_task_tx,
+            icon_rx,
+            icon_pending: HashSet::new(),
             web_favicon,
             favicons: HashMap::new(),
             favicon_pending: HashSet::new(),
@@ -1592,28 +1643,14 @@ impl Panel {
 
             match action {
                 Action::Launch { command, .. } => {
-                    if self.icons.contains_key(&command) {
+                    if self.icons.contains_key(&command) || self.icon_pending.contains(&command) {
                         continue;
                     }
-                    let icon = self
-                        .custom_icons
-                        .get(&command)
-                        .and_then(|path| appicon::load_image(path))
-                        .or_else(|| launch_icon(&command, &title));
-                    // 本地封面也没有（未安装的游戏）→ 后台去 CDN 拉，回来再补上
-                    let need_remote = icon.is_none()
-                        && steamicon::appid(&command).is_some()
-                        && !self.steam_pending.contains(&command);
-                    self.icons.insert(command.clone(), icon);
-                    if need_remote {
-                        self.steam_pending.insert(command.clone());
-                        let tx = self.steam_tx.clone();
-                        let key = command.clone();
-                        std::thread::spawn(move || {
-                            let icon = steamicon::fetch(&key);
-                            let _ = tx.send((key, icon));
-                        });
-                    }
+                    // 提取交给 worker 线程（占位先用 chip / 字形）：这是首帧与打字卡顿的主因，
+                    // 不能留在渲染线程上做。Steam 的 CDN 兜底等 worker 回来说「本地没图」再发。
+                    self.icon_pending.insert(command.clone());
+                    let custom = self.custom_icons.get(&command).cloned();
+                    let _ = self.icon_task_tx.send((command, custom, title));
                 }
                 Action::OpenUrl(url) => {
                     if !self.web_favicon {

@@ -23,7 +23,7 @@ use windows::Win32::Graphics::Gdi::{
     BITMAP, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, CreateCompatibleDC, DIB_RGB_COLORS, DeleteDC,
     DeleteObject, GetDIBits, GetObjectW, HBITMAP, SelectObject,
 };
-use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx};
+use windows::Win32::System::Com::{COINIT_MULTITHREADED, CoInitializeEx};
 use windows::Win32::UI::Shell::{
     IShellItemImageFactory, SHCreateItemFromParsingName, SIIGBF_BIGGERSIZEOK, SIIGBF_ICONONLY,
 };
@@ -39,7 +39,8 @@ pub const ICON_PX: i32 = 96;
 /// 给一个**存在的文件**（`.exe` / `.lnk` / `.msc` …）取图标。
 ///
 /// 出错全部静默（返回 `None`）：调用方回退到类型 chip，不能因为一个图标让整行画不出来。
-pub fn load(path: &Path) -> Option<Arc<RenderImage>> {    ensure_com();
+pub fn load(path: &Path) -> Option<Arc<RenderImage>> {
+    ensure_thread_com();
 
     // 安全：下面全是 Win32 调用，句柄在 `read_bgra` 前后各自检查、用完立刻释放。
     unsafe {
@@ -386,13 +387,28 @@ fn collect_shortcuts(dir: &Path, map: &mut HashMap<String, PathBuf>, depth: usiz
     }
 }
 
-/// COM 已经初始化过就别再初始化（`RPC_E_CHANGED_MODE` 说明当前线程是别的 apartment，
-/// 直接用也行 —— SHELL 的解析接口在 MTA 下同样可用）。
-fn ensure_com() {
-    use std::sync::Once;
-    static ONCE: Once = Once::new();
-    ONCE.call_once(|| unsafe {
-        let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+/// 在当前**线程**初始化 COM（幂等）。
+///
+/// 不能改成进程级 `Once`：谁先调谁把 apartment 定死，后到的线程看到 Once 已完成
+/// 就直接跳过，于是那个线程上的 SHELL 调用全静默失败（`GetImage` 返回空 → 图标变 chip）。
+/// 图标提取现在跑在 [`super::Panel`] 的常驻 worker 线程上（2026-11-20），
+/// 所以每个会碰 COM 的线程都得自己初始化一次。
+///
+/// 用 MTA：短命工作线程没有消息泵，STA 的跨 apartment 调用要靠消息循环才返回。
+pub fn ensure_thread_com() {
+    use std::cell::Cell;
+
+    thread_local! {
+        static DONE: Cell<bool> = const { Cell::new(false) };
+    }
+
+    DONE.with(|done| {
+        if done.get() {
+            return;
+        }
+        // 失败（已经初始化过别的模式）不算错：SHELL 接口在 MTA 下同样可用
+        let _ = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
+        done.set(true);
     });
 }
 
