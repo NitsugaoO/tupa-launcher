@@ -1,6 +1,6 @@
 # tupa-launcher 状态
 
-updated: 2026-11-20 · code: `68522d5`（图标提取移到 worker 线程 · 启动闪窗修好 · `@set` / `:blog` 的同类裸调用未修 · 列表模式 + 鼠标切焦点 + 绿条跟随焦点 · ↑↓ 终端化 + 补全默认关 · chip 只留渲染（光标进块时降级） · @hist 隐藏 · 右键菜单 · 删 @pi / @run · @go → @z · clip 同步出 · clean 迁到 HTML）
+updated: 2026-11-20 · code: `2524411`（面板可跨虚拟桌面显示 · 图标提取移到 worker 线程 · 启动闪窗修好 · `@set` / `:blog` 的同类裸调用未修 · 列表模式 + 鼠标切焦点 + 绿条跟随焦点 · ↑↓ 终端化 + 补全默认关 · chip 只留渲染（光标进块时降级） · @hist 隐藏 · 右键菜单 · 删 @pi / @run · @go → @z）
 
 > 判断本文件是否过期：比较 `code` 与 `git log -1 --format=%h -- src Cargo.toml`。
 > 只改文档的提交不算过期。
@@ -12,6 +12,18 @@ updated: 2026-11-20 · code: `68522d5`（图标提取移到 worker 线程 · 启
 > **每次会话收尾只需要改这一个文件的两节**（阶段 / 未完成），并更新首行。
 
 ## 阶段
+
+- **面板“调不出来”= 停在别的虚拟桌面（2026-11-20 已修）**：现象是热键按了没反应，
+  但 `IsWindowVisible=True`、`topmost=True`、全屏截图里没有它。根因看
+  `DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED) = 2`（`DWM_CLOAKED_SHELL`）= 窗口在
+  **另一个 Windows 虚拟桌面**；`ShowWindow` 不会跨桌面搬窗口。
+  （GlazeWM 已排除：`glazewm query windows` 里没有 tupa-gui，`ignore` 规则生效。）
+  修法：`util::show_panel` 先调 `ensure_current_desktop` —— 公开的
+  `IVirtualDesktopManager` 没有“拿当前桌面 id”的方法，所以我用**前台窗口**的
+  desktop id 当目标调 `MoveWindowToDesktop`。失败静默；已在当前桌面时就一次
+  `IsWindowOnCurrentVirtualDesktop` 查询就返回。
+  **待验证**：真正跨桌面的那一支我没法在本机复现（需要两个虚拟桌面 + 切过去），
+  只验证了正常路径不破（cloaked=0、热键 toggle True→False→True）。
 
 - **应用图标提取改成后台线程（2026-11-20）**：`prefetch_icons` 原来在 `render` 里
   **同步**跑 `IShellItemImageFactory::GetImage` + GDI（首屏 ~11 条各几十 ms），一输入

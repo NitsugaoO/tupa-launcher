@@ -87,6 +87,16 @@ cargo clippy --release --features gui    # 零警告；必须带 feature，否�
   开机自启 `Startup\tupa-gui.lnk`。守护进程 + TUI 已停用（旧的 `tupa-launcher-daemon.lnk`
   **已移出启动文件夹、删到回收站**，见下面那条坑），
   TUI 只能手动跑。改 GUI 之前先确认守护进程没在跑，否则它会占着热键让 GUI 注册失败。
+- **`IsWindowVisible` 为真不等于“用户看得见”**（2026-11-20）：面板“调不出来”时先查
+  `DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED)`：`1` = app cloaked、`2` = shell cloaked
+  （典型是**虚拟桌面**）、`4` = 继承自父窗口。值为非 0 时窗口存在/可见但 DWM 不画，
+  全屏 `copyfromscreen` 也抓不到。
+  - 虚拟桌面切换不会带走窗口，`ShowWindow` 也不会把它搬过来。`util::show_panel` 里
+    的 `ensure_current_desktop` 用 `IVirtualDesktopManager::MoveWindowToDesktop` 修；
+    **公开接口没有“当前桌面 id”**，所以拿 `GetForegroundWindow()` 的 desktop id 当目标。
+  - 排查顺序：`EnumWindows`（类名首字符 `Z`、宽度 > 200）→ `IsWindowVisible` →
+    `DWMWA_CLOAKED` → `GetWindowLong(GWL_EXSTYLE) & WS_EX_TOPMOST` → `glazewm query windows`
+    （看是不是被 WM 收进了别的 workspace）。
 - **图标提取只能在 icon worker 线程里做**（2026-11-20）：`prefetch_icons` 在 `render`
   里被调，但它只负责往 `Panel::icon_task_tx` 排队；`appicon::load` / `launch_icon`
   一律跑在 `Panel::new` 起的那个常驻 worker 线程上。在渲染线程里直接取图会把首帧
