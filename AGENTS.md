@@ -258,6 +258,11 @@ cargo clippy --release --features gui    # 零警告；必须带 feature，否�
        先跟随 symlink 到包内真 exe，再拼 `shell:AppsFolder\<PackageFamilyName>!App`；
        `AppData\Local\Microsoft\WindowsApps\pwsh.exe` 那种别名目录已是 FamilyName，
        直接拼 `!App`。UWP 的 `ms-settings:` / `ms-windows-store:` → AUMID 同理
+     - **App Execution Alias 不是 symlink**（2026-11-20）：`WindowsApps\wt.exe` 是
+       AppExecLink reparse point，`std::fs::read_link` 失败（PowerShell 的 `LinkType` 也是空，
+       只有 MSYS 的 `ls` 会画成 `->`）—— 别靠 read_link 推包名，用
+       `alias_family_item`（在 `WindowsApps` 下枚举一层子目录找同名 exe，目录名就是
+       PackageFamilyName）。同理，`--icons` 报「解析不到 exe」时先看是不是这一类。
      - **Scoop shim 的图标是假的**：`<scoop>\shims\x.exe` 是通用代理程序，要回
        `<scoop>\apps\x\current\`（或版本目录）找真 exe，否则 `windhawk` 这类没图标
      - **Steam 游戏只有 `.url` 没有 `.lnk`**：开始菜单索引要收 `.url`

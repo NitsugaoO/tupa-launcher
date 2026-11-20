@@ -1,6 +1,6 @@
 # tupa-launcher 状态
 
-updated: 2026-11-20 · code: `2524411`（面板可跨虚拟桌面显示 · 图标提取移到 worker 线程 · 启动闪窗修好 · `@set` / `:blog` 的同类裸调用未修 · 列表模式 + 鼠标切焦点 + 绿条跟随焦点 · ↑↓ 终端化 + 补全默认关 · chip 只留渲染（光标进块时降级） · @hist 隐藏 · 右键菜单 · 删 @pi / @run · @go → @z）
+updated: 2026-11-20 · code: `f09f85a`（wt 图标 73/74 · 面板可跨虚拟桌面显示 · 图标提取移到 worker 线程 · 启动闪窗修好 · `@set` / `:blog` 的同类裸调用未修 · 列表模式 + 鼠标切焦点 + 绿条跟随焦点 · ↑↓ 终端化 + 补全默认关 · chip 只留渲染（光标进块时降级） · @hist 隐藏 · 右键菜单 · 删 @pi / @run · @go → @z）
 
 > 判断本文件是否过期：比较 `code` 与 `git log -1 --format=%h -- src Cargo.toml`。
 > 只改文档的提交不算过期。
@@ -12,6 +12,18 @@ updated: 2026-11-20 · code: `2524411`（面板可跨虚拟桌面显示 · 图�
 > **每次会话收尾只需要改这一个文件的两节**（阶段 / 未完成），并更新首行。
 
 ## 阶段
+
+- **wt 图标补回来了（2026-11-20）**：`command = "wt"` 一直 `✗ 解析不到 exe`。
+  `%LOCALAPPDATA%\Microsoft\WindowsApps\wt.exe` 是 **App Execution Alias**
+  （AppExecLink reparse point），**不是 symlink**：`std::fs::read_link` 直接失败
+  （PowerShell 的 `LinkType` 也是空的，只有 MSYS 的 `ls` 会画成 `->`），所以
+  `resolve_alias` 拿不到包目录，`msix_shell_item("…\WindowsApps\wt.exe")` 只能拼出
+  `wt.exe!App`（不含 `_` 被拒）→ None → 开始菜单索引也找不到。
+  修法：新增 `alias_family_item` —— alias 的**目录形态**同时存在
+  （`WindowsApps\Microsoft.WindowsTerminal_8wekyb3d8bbwe\wt.exe`），在 `WindowsApps`
+  下枚举一层子目录找同名 exe，目录名就是 PackageFamilyName。这比解 reparse 二进制可靠。
+  效果：`--icons` **73/74**（只剩 How to Fish，Steam CDN 404）；`Ubuntu (WSL)` /
+  `CeleClip`（也用 wt）跟着有图了。
 
 - **面板“调不出来”= 停在别的虚拟桌面（2026-11-20 已修）**：现象是热键按了没反应，
   但 `IsWindowVisible=True`、`topmost=True`、全屏截图里没有它。根因看
